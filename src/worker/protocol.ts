@@ -13,6 +13,8 @@ export const INFO_TEAM_MASK = 3;
 export const INFO_INSIDE = 16;
 export const INFO_REVEALED = 32;
 export const INFO_CARRIED = 64;
+/** The enemy knows where it is: in someone's sight, or a gun located by its own fire. */
+export const INFO_SPOTTED = 128;
 export const NO_AIM = 0xffff;
 
 /** Main thread -> simulation worker. */

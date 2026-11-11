@@ -9,7 +9,9 @@ export const KIND_INFANTRY = 1;
 export const KIND_ATGM = 2;
 /** Infantry fighting vehicle: carries squads fast and mows down infantry with its autocannon. */
 export const KIND_IFV = 3;
-export const KIND_COUNT = 4;
+/** Self-propelled gun: shells what others have spotted, from far behind the line. */
+export const KIND_ARTILLERY = 4;
+export const KIND_COUNT = 5;
 
 export interface UnitKind {
   name: string;
@@ -39,7 +41,17 @@ export interface UnitKind {
   turn: number;
   /** Squads it can carry. */
   carry: number;
+  /**
+   * Indirect fire: lobs shells at targets someone else has spotted, without a line of
+   * sight. `damage` is then the damage at the centre of the burst, `blast` its radius
+   * (a third of that against armour), and nothing closer than `minRange` can be hit.
+   */
+  indirect: boolean;
+  minRange: number;
+  blast: number;
 }
+
+const DIRECT = { indirect: false, minRange: 0, blast: 0 };
 
 export const KINDS: readonly UnitKind[] = [
   {
@@ -49,13 +61,14 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.3),
     range: fx(26),
     reload: 60,
-    damage: [60, 34, 34, 80],
+    damage: [60, 34, 34, 80, 90],
     siege: 60,
     garrison: false,
     wreckTicks: 1800,
     armour: [70, 115, 180],
     turn: 15,
     carry: 0,
+    ...DIRECT,
   },
   {
     // Rifles against soft targets, shoulder-fired rockets against armour.
@@ -65,13 +78,14 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.16),
     range: fx(15),
     reload: 24,
-    damage: [14, 9, 9, 12],
+    damage: [14, 9, 9, 12, 12],
     siege: 0,
     garrison: true,
     wreckTicks: 200,
     armour: null,
     turn: 0,
     carry: 0,
+    ...DIRECT,
   },
   {
     // Three men and a launcher. One missile every seven seconds, from further than a tank
@@ -82,13 +96,14 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.15),
     range: fx(34),
     reload: 140,
-    damage: [150, 0, 0, 150],
+    damage: [150, 0, 0, 150, 150],
     siege: 40,
     garrison: true,
     wreckTicks: 200,
     armour: null,
     turn: 0,
     carry: 0,
+    ...DIRECT,
   },
   {
     name: 'Infantry fighting vehicle',
@@ -97,15 +112,50 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.4),
     range: fx(20),
     reload: 8,
-    damage: [3, 7, 7, 7],
+    damage: [3, 7, 7, 7, 9],
     siege: 4,
     garrison: false,
     wreckTicks: 1800,
     armour: [100, 120, 150],
     turn: 10,
     carry: 2,
+    ...DIRECT,
+  },
+  {
+    // A shell every six seconds onto anything a friendly unit has in sight, up to 110 away.
+    // The shell takes seconds to arrive and scatters, so it is for what stands still:
+    // garrisons, missile teams, other guns. Firing gives the gun's own position away.
+    name: 'Self-propelled gun',
+    cls: CLASS_VEHICLE,
+    hp: 110,
+    speed: fx(0.22),
+    range: fx(110),
+    reload: 120,
+    damage: [50, 70, 70, 60, 80],
+    siege: 120,
+    garrison: false,
+    wreckTicks: 1800,
+    armour: null,
+    turn: 12,
+    carry: 0,
+    indirect: true,
+    minRange: fx(25),
+    blast: fx(5),
   },
 ];
+
+/** How long a unit stays known to the enemy after one of them last had it in sight. */
+export const SPOT_TICKS = 30;
+/** A gun that fires is located by the sound and the radar track of its shell: 12 seconds. */
+export const COUNTER_BATTERY_TICKS = 240;
+/** A shell flies this many ticks plus one per two units of distance. */
+export const SHELL_BASE_TICKS = 30;
+export const SHELL_TICKS_SHIFT = 11;
+/** Shells land within this of the aim point, plus 1/32 of the distance flown. */
+export const SCATTER_MIN = fx(1.5);
+export const SCATTER_SHIFT = 5;
+/** Guns do not fire by themselves at a target with friendly troops this close to it. */
+export const DANGER_CLOSE = fx(9);
 
 /** A hit within 60 degrees of the nose is frontal, within 60 of the tail a rear hit (Q10 cosine). */
 export const FACING_COS = 512;

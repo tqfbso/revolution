@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   CMD_ATTACK_MOVE,
+  CMD_BOMBARD,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
   CMD_LOAD,
@@ -25,7 +26,8 @@ const DOUBLE_MS = 350;
  * Left drag: box select. Left click: select one. Double click (or Ctrl + click): everything
  * of that type on screen. Shift: add. Right click: attack-move (fight on the way). Alt +
  * right click: plain move (do not stop to fight). Right click a building: infantry moves in.
- * Ctrl + right click a building or bridge: shell it. Right click one of your carriers, or L
+ * Ctrl + right click a building or bridge: shell it. Ctrl + right click the ground: guns
+ * shell that spot. Right click one of your carriers, or L
  * with squads and carriers selected: mount up. U: dismount. Ctrl/Alt + 1..9: save the selection as a
  * control group; 1..9: recall it; twice: jump the camera to it.
  */
@@ -256,6 +258,15 @@ export class Input {
             y: fx(ground.z),
           });
         }
+        return;
+      }
+    }
+    if (shell && ground) {
+      // Guns shell the spot, seen or not. Nothing else in the selection takes the order.
+      const guns = ids.filter((id) => KINDS[this.units.kindOf(id)].indirect);
+      if (guns.length > 0) {
+        this.send({ type: CMD_BOMBARD, units: guns, x: fx(ground.x), y: fx(ground.z) });
+        this.mark(ground.x, ground.y + 0.15, ground.z);
         return;
       }
     }

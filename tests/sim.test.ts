@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CMD_ATTACK_MOVE,
   CMD_ATTACK_STRUCTURE,
+  CMD_BOMBARD,
   CMD_GARRISON,
   CMD_LOAD,
   CMD_MOVE,
@@ -30,12 +31,22 @@ import {
   refreshPassability,
 } from '../src/sim/map';
 import { assaultCommands, battleCommands, stressTestCommands } from '../src/sim/scenarios';
-import { KINDS, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
+import {
+  COUNTER_BATTERY_TICKS,
+  KINDS,
+  KIND_ARTILLERY,
+  KIND_ATGM,
+  KIND_IFV,
+  KIND_INFANTRY,
+  KIND_TANK,
+} from '../src/sim/units';
 import { step } from '../src/sim/sim';
 import {
   EV_CAPTURE,
   EV_COLLAPSE,
   EV_DEATH,
+  EV_IMPACT,
+  EV_LAUNCH,
   EV_REPAIR,
   EV_SHOT,
   EV_SIEGE,
@@ -95,11 +106,18 @@ function script(tick: number): Command[] {
       at(KIND_ATGM, 30, 0),
       at(KIND_IFV, 40, 1),
       at(KIND_ATGM, 30, 1),
+      at(KIND_ARTILLERY, 20, 0),
+      at(KIND_ARTILLERY, 20, 1),
     ];
   }
   if (tick === 130 || tick === 330 || tick === 360) {
     const units = Array.from({ length: 800 }, (_, i) => 2800 + i);
-    if (tick === 130) return [{ type: CMD_LOAD, units, carriers: units }];
+    if (tick === 130) {
+      return [
+        { type: CMD_LOAD, units, carriers: units },
+        { type: CMD_BOMBARD, units: units.slice(300, 360), x: fx(520), y: fx(500) },
+      ];
+    }
     if (tick === 330) return [{ type: CMD_ATTACK_MOVE, units, x: fx(600), y: fx(430) }];
     return [{ type: CMD_UNLOAD, units: units.slice(0, 400) }];
   }
@@ -166,7 +184,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 4171841269;
+const GOLDEN = 1543136662;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -741,5 +759,96 @@ describe('combined arms', () => {
     expect(w2.state[ifv2]).toBe(STATE_WRECK);
     expect(w2.carrier[b]).toBe(-1);
     expect(w2.hp[b]).toBeLessThanOrEqual(KINDS[KIND_INFANTRY].hp / 2);
+  });
+
+  const count = (w: World, type: number) => {
+    let n = 0;
+    for (let e = 0; e < w.events.length; e += 3) if (w.events[e] === type) n++;
+    return n;
+  };
+
+  it('a gun shells only what the army has spotted, and the shell takes time to arrive', () => {
+    const w = flat();
+    const gun = lone(w, 0, KIND_ARTILLERY, 400, 500);
+    const target = lone(w, 1, KIND_ATGM, 480, 500);
+    for (let t = 0; t < 200; t++) step(w, []);
+    // Eighty units off and nobody looking: the gun has no idea it is there.
+    expect(count(w, EV_LAUNCH)).toBe(0);
+    lone(w, 0, KIND_INFANTRY, 450, 500);
+    w.events.length = 0;
+    let launched = -1;
+    let landed = -1;
+    for (let t = 0; t < 400 && landed < 0; t++) {
+      step(w, []);
+      if (launched < 0 && count(w, EV_LAUNCH) > 0) launched = t;
+      if (count(w, EV_IMPACT) > 0) landed = t;
+    }
+    expect(launched).toBeGreaterThanOrEqual(0);
+    expect(landed - launched).toBeGreaterThan(40);
+    expect(w.attack[gun]).toBe(target);
+    for (let t = 0; t < 1200 && w.state[target] === STATE_ALIVE; t++) step(w, []);
+    expect(w.state[target]).not.toBe(STATE_ALIVE);
+  });
+
+  it('firing gives the gun away: the enemy battery answers without ever seeing it', () => {
+    const w = flat();
+    const red = lone(w, 0, KIND_ARTILLERY, 400, 500);
+    const blue = lone(w, 1, KIND_ARTILLERY, 500, 500);
+    for (let t = 0; t < 200; t++) step(w, []);
+    expect(count(w, EV_LAUNCH)).toBe(0);
+    w.cooldown[red] = 0;
+    step(w, [{ type: CMD_BOMBARD, units: [red], x: fx(460), y: fx(560) }]);
+    step(w, []);
+    expect(w.spotted[red]).toBeGreaterThan(w.tick + COUNTER_BATTERY_TICKS - 5);
+    for (let t = 0; t < 200; t++) step(w, []);
+    expect(w.attack[blue]).toBe(red);
+    const shots = new Set<number>();
+    for (let e = 0; e < w.events.length; e += 3) {
+      if (w.events[e] === EV_LAUNCH) shots.add(w.events[e + 1]);
+    }
+    expect(shots.has(blue)).toBe(true);
+    // A gun that has moved on is no longer where the enemy thinks it is.
+    step(w, [{ type: CMD_STOP, units: [red] }]);
+    for (let t = 0; t < COUNTER_BATTERY_TICKS + 40; t++) step(w, []);
+    expect(w.attack[blue]).toBe(-1);
+  });
+
+  it('guns hold fire when friends are next to the target, and cannot hit what is too close', () => {
+    const w = flat();
+    lone(w, 0, KIND_ARTILLERY, 400, 500);
+    const enemy = lone(w, 1, KIND_ATGM, 470, 500);
+    const friend = lone(w, 0, KIND_INFANTRY, 465, 500);
+    w.hp[enemy] = 30000;
+    w.hp[friend] = 30000;
+    for (let t = 0; t < 300; t++) step(w, []);
+    expect(count(w, EV_LAUNCH)).toBe(0);
+    const w2 = flat();
+    const gun = lone(w2, 0, KIND_ARTILLERY, 400, 500);
+    lone(w2, 1, KIND_INFANTRY, 415, 500);
+    for (let t = 0; t < 300 && w2.state[gun] === STATE_ALIVE; t++) step(w2, []);
+    expect(count(w2, EV_LAUNCH)).toBe(0);
+    expect(w2.state[gun]).toBe(STATE_WRECK);
+  });
+
+  it('guns ordered onto a building bring it down from out of sight', () => {
+    const m = flatMap();
+    addTown(m, fx(508), fx(500), fx(30), 'Test');
+    const house = addStructure(m, S_BUILDING, 126, 124, 2, 2, 0, 3);
+    refreshPassability(m);
+    const w = createWorld(1, m);
+    const guns: number[] = [];
+    for (let k = 0; k < 6; k++) guns.push(lone(w, 0, KIND_ARTILLERY, 410, 480 + 8 * k));
+    const squad = lone(w, 1, KIND_INFANTRY, 500, 500);
+    step(w, [{ type: CMD_GARRISON, units: [squad], structure: house }]);
+    for (let t = 0; t < 60; t++) step(w, []);
+    expect(w.inside[squad]).toBe(house);
+    step(w, [{ type: CMD_ATTACK_STRUCTURE, units: guns, structure: house }]);
+    for (let t = 0; t < 4000 && w.sHp[house] > 0; t++) step(w, []);
+    expect(w.sHp[house]).toBe(0);
+    expect(w.map.type[cellOfPos(fx(506), fx(498))]).toBe(T_RUBBLE);
+    // The order ends with the house; the guns never moved (it was in range all along).
+    for (const g of guns) expect(w.posX[g]).toBeLessThan(fx(415));
+    for (let t = 0; t < 40; t++) step(w, []);
+    expect(w.flags[guns[0]]).toBe(0);
   });
 });

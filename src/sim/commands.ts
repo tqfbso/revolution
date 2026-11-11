@@ -28,6 +28,19 @@ export interface UnloadCommand {
   units: number[];
 }
 
+export const CMD_BOMBARD = 9;
+
+/**
+ * Guns shell a point on the ground until given another order, seen or not. Guns out of
+ * range drive up until they can reach it. Only units with indirect fire obey.
+ */
+export interface BombardCommand {
+  type: typeof CMD_BOMBARD;
+  units: number[];
+  x: number;
+  y: number;
+}
+
 export interface MoveCommand {
   type: typeof CMD_MOVE;
   units: number[];
@@ -92,4 +105,5 @@ export type Command =
   | GarrisonCommand
   | AttackStructureCommand
   | LoadCommand
-  | UnloadCommand;
+  | UnloadCommand
+  | BombardCommand;

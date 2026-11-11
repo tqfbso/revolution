@@ -20,6 +20,11 @@ export const FLAG_GARRISON = 16;
 export const FLAG_SIEGE = 32;
 /** Ordered to climb aboard the carrier `orderUnit`. */
 export const FLAG_BOARD = 64;
+/** Ordered to shell the point (`aimX`, `aimY`) until told otherwise. */
+export const FLAG_BOMBARD = 128;
+
+/** Shells in the air at once. A gun whose shell finds no room simply misfires. */
+export const MAX_SHELLS = 2048;
 
 /** Owner of a town nobody holds. */
 export const NO_TEAM = 255;
@@ -44,6 +49,19 @@ export const EV_COLLAPSE = 4; // a = structure
 export const EV_CAPTURE = 5; // a = town, b = team
 export const EV_REPAIR = 6; // a = structure
 export const EV_UNLOAD = 7; // a = carrier
+export const EV_LAUNCH = 8; // a = gun, b = where the shell will land (see packPoint)
+export const EV_IMPACT = 9; // a = where (see packPoint), b = 0
+
+/** A map position squeezed into one event integer, to 1/64 of a unit. */
+export function packPoint(x: number, y: number): number {
+  return (x >> 4) | ((y >> 4) << 16) | 0;
+}
+export function unpackX(p: number): number {
+  return (p & 0xffff) / 64;
+}
+export function unpackY(p: number): number {
+  return (p >>> 16) / 64;
+}
 
 /**
  * Structure-of-arrays world state. An entity is an index in [0, count).
@@ -97,6 +115,22 @@ export interface World {
   load: Uint8Array;
   /** Carrier a boarding order refers to (see FLAG_BOARD). */
   orderUnit: Int32Array;
+  /** Point a bombardment order is aimed at (see FLAG_BOMBARD). */
+  aimX: Int32Array;
+  aimY: Int32Array;
+  /**
+   * Tick until which the enemy knows where this unit is: someone has it in sight, or it is
+   * a gun that fired. Indirect fire needs this. One value per unit, so with three armies
+   * what one enemy spots the other knows too.
+   */
+  spotted: Int32Array;
+  /** Shells in flight: where and when each lands, who fired it (unit, type, army). */
+  shellCount: number;
+  shX: Int32Array;
+  shY: Int32Array;
+  shTick: Int32Array;
+  shOwner: Int32Array;
+  shKind: Uint8Array;
   /** Structures: health (0 or less = destroyed), repair work done, occupants and their team. */
   sHp: Int32Array;
   sRepair: Int32Array;
@@ -159,6 +193,15 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     carrier: new Int32Array(MAX_UNITS).fill(-1),
     load: new Uint8Array(MAX_UNITS),
     orderUnit: new Int32Array(MAX_UNITS).fill(-1),
+    aimX: new Int32Array(MAX_UNITS),
+    aimY: new Int32Array(MAX_UNITS),
+    spotted: new Int32Array(MAX_UNITS),
+    shellCount: 0,
+    shX: new Int32Array(MAX_SHELLS),
+    shY: new Int32Array(MAX_SHELLS),
+    shTick: new Int32Array(MAX_SHELLS),
+    shOwner: new Int32Array(MAX_SHELLS),
+    shKind: new Uint8Array(MAX_SHELLS),
     sHp: map.sMaxHp.slice(),
     sRepair: new Int32Array(MAX_STRUCTS),
     sOcc: new Uint8Array(MAX_STRUCTS),
@@ -205,6 +248,13 @@ export function hashWorld(w: World): number {
     mix(w.townOwner[t] | (w.townCapturer[t] << 8) | (w.townProgress[t] << 16));
   }
   for (let t = 0; t < MAX_TEAMS; t++) mix(w.credits[t]);
+  mix(w.shellCount);
+  for (let k = 0; k < w.shellCount; k++) {
+    mix(w.shX[k]);
+    mix(w.shY[k]);
+    mix(w.shTick[k]);
+    mix(w.shOwner[k] ^ (w.shKind[k] << 24));
+  }
   const n = w.count;
   for (let i = 0; i < n; i++) {
     mix(w.inside[i] ^ (w.orderStruct[i] << 12) ^ (w.los[i] << 28));
@@ -220,6 +270,9 @@ export function hashWorld(w: World): number {
     mix(w.flags[i] ^ (w.carrier[i] << 16));
     mix((w.faceX[i] & 0xffff) | (w.faceY[i] << 16));
     mix(w.orderUnit[i]);
+    mix(w.aimX[i]);
+    mix(w.aimY[i]);
+    mix(w.spotted[i]);
     mix(w.state[i] | (w.kind[i] << 8) | ((w.hp[i] & 0xffff) << 16));
     mix(w.cooldown[i]);
     mix(w.attack[i]);
