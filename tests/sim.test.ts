@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { CMD_ATTACK_MOVE, CMD_MOVE, CMD_SPAWN, CMD_STOP, type Command } from '../src/sim/commands';
 import { fx, isqrt } from '../src/sim/fixed';
+import {
+  CLASS_FOOT,
+  CLASS_VEHICLE,
+  MAP_CELLS,
+  T_FORD,
+  T_FOREST,
+  cellOfPos,
+  flatMap,
+  generateMap,
+} from '../src/sim/map';
 import { battleCommands, stressTestCommands } from '../src/sim/scenarios';
 import { KINDS, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
 import { step } from '../src/sim/sim';
@@ -93,11 +103,11 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 3448443821;
+const GOLDEN = 1787654163;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
-    const w = createWorld(7);
+    const w = createWorld(7, flatMap());
     step(w, [
       {
         type: CMD_SPAWN,
@@ -121,7 +131,7 @@ describe('movement', () => {
   });
 
   it('stacked units are pushed apart', () => {
-    const w = createWorld(7);
+    const w = createWorld(7, flatMap());
     step(w, [
       { type: CMD_SPAWN, count: 48, team: 0, x: fx(500), y: fx(500), radius: 1, wander: false },
     ]);
@@ -138,7 +148,7 @@ describe('movement', () => {
   });
 
   it('never exceeds capacity or leaves the map', () => {
-    const w = createWorld(3);
+    const w = createWorld(3, flatMap());
     step(w, [
       {
         type: CMD_SPAWN,
@@ -163,7 +173,7 @@ describe('movement', () => {
 
 describe('combat', () => {
   it('a battle produces shots, deaths and wrecks, and the books balance', () => {
-    const w = createWorld(5);
+    const w = createWorld(5, flatMap());
     step(w, battleCommands(600, 40));
     const total = w.count;
     let shots = 0;
@@ -195,7 +205,7 @@ describe('combat', () => {
   });
 
   it('idle units engage an enemy that comes into view, and one side is wiped out', () => {
-    const w = createWorld(9);
+    const w = createWorld(9, flatMap());
     step(w, [spawnAt(0, KIND_TANK, 12, 500, 500), spawnAt(1, KIND_TANK, 4, 535, 500)]);
     for (let t = 0; t < 1500; t++) step(w, []);
     const c = census(w);
@@ -204,7 +214,7 @@ describe('combat', () => {
   });
 
   it('tanks outrange infantry: the first shot comes from the tank', () => {
-    const w = createWorld(9);
+    const w = createWorld(9, flatMap());
     step(w, [spawnAt(0, KIND_TANK, 1, 500, 500), spawnAt(1, KIND_INFANTRY, 1, 522, 500)]);
     let first = -1;
     for (let t = 0; t < 600 && first < 0; t++) {
@@ -216,7 +226,7 @@ describe('combat', () => {
   });
 
   it('units under a plain move order do not stop to fight; same team never fights', () => {
-    const w = createWorld(9);
+    const w = createWorld(9, flatMap());
     step(w, [spawnAt(0, KIND_TANK, 6, 300, 300), spawnAt(0, KIND_TANK, 6, 320, 300)]);
     step(w, [{ type: CMD_MOVE, units: [0, 1, 2], x: fx(700), y: fx(700) }]);
     for (let t = 0; t < 400; t++) step(w, []);
@@ -225,7 +235,7 @@ describe('combat', () => {
   });
 
   it('wrecks are cleared and their slots reused; dead units ignore orders', () => {
-    const w = createWorld(9);
+    const w = createWorld(9, flatMap());
     step(w, [spawnAt(0, KIND_TANK, 10, 500, 500), spawnAt(1, KIND_INFANTRY, 2, 520, 500)]);
     for (let t = 0; t < 1200; t++) step(w, []);
     expect(w.state[10]).toBe(STATE_FREE);
@@ -239,5 +249,64 @@ describe('combat', () => {
     expect(w.state[10]).toBe(STATE_ALIVE);
     expect(w.team[10]).toBe(2);
     expect(w.hp[10]).toBe(KINDS[KIND_TANK].hp);
+  });
+});
+
+describe('terrain and pathfinding', () => {
+  const map = generateMap(1);
+  const cellAt = (x: number, y: number) => cellOfPos(fx(x), fx(y));
+  /** Count living units standing on ground their class cannot enter. */
+  const trespassers = (w: World) => {
+    let bad = 0;
+    for (let i = 0; i < w.count; i++) {
+      if (w.state[i] !== STATE_ALIVE) continue;
+      if (w.map.cost[KINDS[w.kind[i]].cls][cellOfPos(w.posX[i], w.posY[i])] === 0) bad++;
+    }
+    return bad;
+  };
+
+  it('the same seed gives the same map, and it has fords and forests', () => {
+    expect(generateMap(1).hash).toBe(map.hash);
+    expect(generateMap(2).hash).not.toBe(map.hash);
+    expect(map.type.includes(T_FORD)).toBe(true);
+    expect(map.type.includes(T_FOREST)).toBe(true);
+  });
+
+  it('both banks of the river are passable ground, and vehicles cannot enter forest', () => {
+    for (const cls of [CLASS_VEHICLE, CLASS_FOOT]) {
+      expect(map.cost[cls][cellAt(402, 512)]).toBeGreaterThan(0);
+      expect(map.cost[cls][cellAt(622, 512)]).toBeGreaterThan(0);
+    }
+    for (let c = 0; c < MAP_CELLS * MAP_CELLS; c++) {
+      if (map.type[c] === T_FOREST) expect(map.cost[CLASS_VEHICLE][c]).toBe(0);
+    }
+  });
+
+  it('a mixed group ordered across the river gets there without touching water', () => {
+    const w = createWorld(1, map);
+    step(w, [spawnAt(0, KIND_TANK, 40, 380, 512), spawnAt(0, KIND_INFANTRY, 40, 370, 512)]);
+    const units = Array.from({ length: 80 }, (_, i) => i);
+    step(w, [{ type: CMD_MOVE, units, x: fx(640), y: fx(512) }]);
+    for (let t = 0; t < 4500; t++) {
+      step(w, []);
+      if (t % 50 === 0) expect(trespassers(w)).toBe(0);
+    }
+    for (const i of units) {
+      expect(w.flags[i] & FLAG_MOVING).toBe(0);
+      expect(w.posX[i]).toBeGreaterThan(fx(600));
+    }
+  });
+
+  it('nobody ends up on impassable ground during a battle across the river', () => {
+    const w = createWorld(1, map);
+    step(w, battleCommands(2000));
+    for (let t = 0; t < 1500; t++) {
+      step(w, []);
+      if (t % 100 === 0) expect(trespassers(w)).toBe(0);
+    }
+    w.events.length = 0;
+    const c = census(w);
+    // The armies found each other across the river and fought.
+    expect(c.wrecks + c.free).toBeGreaterThan(100);
   });
 });

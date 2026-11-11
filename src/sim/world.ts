@@ -1,9 +1,7 @@
-import { fx } from './fixed';
+import { CLASS_COUNT, generateMap, type GameMap } from './map';
 import { seedRng } from './rng';
 
-// Map is a square of MAP_SIZE world units. Sim (x, y) maps to render (x, z).
-export const MAP_SIZE = 1024;
-export const MAP_SIZE_FX = fx(MAP_SIZE);
+export { MAP_SIZE, MAP_SIZE_FX } from './map';
 export const MAX_UNITS = 16384;
 export const MAX_TEAMS = 3;
 export const TICK_RATE = 20;
@@ -13,6 +11,13 @@ export const FLAG_MOVING = 1;
 export const FLAG_WANDER = 2;
 /** Attack-move: advance on the move target but stop to fight anything met on the way. */
 export const FLAG_AMOVE = 4;
+/** The straight line to the move target is walkable: no need to consult the flowfield. */
+export const FLAG_DIRECT = 8;
+
+/** Flowfields kept for move orders in progress. */
+export const MAX_FIELDS = 96;
+/** One "way to the nearest enemy" field per team and movement class. */
+export const CHASE_FIELDS = MAX_TEAMS * CLASS_COUNT;
 
 /** Life cycle of an entity slot. Free slots are reused by later spawns. */
 export const STATE_FREE = 0;
@@ -30,6 +35,8 @@ export const EV_DEATH = 2; // a = unit, b = killer
  * Everything that affects the simulation lives here and is covered by hashWorld().
  */
 export interface World {
+  /** The battlefield. Fixed for the life of the world. */
+  map: GameMap;
   tick: number;
   /** High-water mark: every slot in [0, count) is free, alive or a wreck. */
   count: number;
@@ -52,6 +59,22 @@ export interface World {
   cooldown: Int16Array;
   /** Entity being attacked, or NO_TARGET. */
   attack: Int32Array;
+  /** Speed while following a move order: the slowest of the group, so it stays together. */
+  orderSpeed: Int32Array;
+  /** Flowfield (index into the field arrays) the unit follows for its move order, or -1. */
+  path: Int16Array;
+  /** Goal cell of the unit's move order: where its flowfield leads. */
+  goal: Int32Array;
+  /** Flowfields for move orders: goal cell (-1 = unused), movement class, cost-to-goal. */
+  fieldGoal: Int32Array;
+  fieldClass: Uint8Array;
+  fieldDist: (Uint16Array | null)[];
+  /** Tick on which every field slot was found in use (no more are tried that tick). */
+  fieldsFullTick: number;
+  /** Per team and class: cost to the nearest enemy, the tick it was built and last needed. */
+  chaseDist: (Uint16Array | null)[];
+  chaseBuilt: Int32Array;
+  chaseWanted: Int32Array;
   /**
    * Events of the ticks since the consumer last emptied this (see EV_*). Output only:
    * never read by the sim and not part of the hashed state.
@@ -59,8 +82,9 @@ export interface World {
   events: number[];
 }
 
-export function createWorld(seed: number): World {
+export function createWorld(seed: number, map: GameMap = generateMap(seed)): World {
   const world: World = {
+    map,
     tick: 0,
     count: 0,
     groupCount: 0,
@@ -80,6 +104,16 @@ export function createWorld(seed: number): World {
     hp: new Int16Array(MAX_UNITS),
     cooldown: new Int16Array(MAX_UNITS),
     attack: new Int32Array(MAX_UNITS),
+    orderSpeed: new Int32Array(MAX_UNITS),
+    path: new Int16Array(MAX_UNITS).fill(-1),
+    goal: new Int32Array(MAX_UNITS),
+    fieldGoal: new Int32Array(MAX_FIELDS).fill(-1),
+    fieldClass: new Uint8Array(MAX_FIELDS),
+    fieldDist: new Array<Uint16Array | null>(MAX_FIELDS).fill(null),
+    fieldsFullTick: -1,
+    chaseDist: new Array<Uint16Array | null>(CHASE_FIELDS).fill(null),
+    chaseBuilt: new Int32Array(CHASE_FIELDS).fill(-1),
+    chaseWanted: new Int32Array(CHASE_FIELDS).fill(-1000),
     events: [],
   };
   seedRng(world.rng, seed);
@@ -99,6 +133,10 @@ export function hashWorld(w: World): number {
   mix(w.count);
   mix(w.groupCount);
   mix(w.rng[0]);
+  mix(w.map.hash);
+  mix(w.fieldsFullTick);
+  for (let f = 0; f < MAX_FIELDS; f++) mix(w.fieldGoal[f] ^ (w.fieldClass[f] << 24));
+  for (let f = 0; f < CHASE_FIELDS; f++) mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
   const n = w.count;
   for (let i = 0; i < n; i++) {
     mix(w.posX[i]);
@@ -112,6 +150,8 @@ export function hashWorld(w: World): number {
     mix(w.state[i] | (w.kind[i] << 8) | ((w.hp[i] & 0xffff) << 16));
     mix(w.cooldown[i]);
     mix(w.attack[i]);
+    mix(w.orderSpeed[i] ^ (w.path[i] << 20));
+    mix(w.goal[i]);
   }
   return h >>> 0;
 }

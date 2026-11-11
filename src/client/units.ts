@@ -34,6 +34,7 @@ const TURRET_TURN = 3.2;
 const SOLDIER_TURN = 9;
 const CULL_RADIUS = 4;
 const WRECK_SMOKE_SECONDS = 50;
+const LOD_HIDDEN = 3;
 
 export interface LodStats {
   /** Units drawn at each level of detail this frame, and units culled as off-screen. */
@@ -73,6 +74,8 @@ export class UnitView {
   private readonly shotAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private readonly diedAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private snapshotTime = 0;
+  /** Level of detail each unit was last drawn at; LOD_HIDDEN when off-screen. */
+  private readonly lodOf = new Uint8Array(MAX_UNITS).fill(LOD_HIDDEN);
 
   private readonly hull: Batch[];
   private readonly turretBatch: Batch[];
@@ -180,11 +183,16 @@ export class UnitView {
       const a = ev[e + 1];
       const b = ev[e + 2];
       const isTank = (this.info[a] >> INFO_KIND_SHIFT) & 3 ? false : true;
+      // Effects nobody can see are the main cost of a big battle: skip them when both ends
+      // are off-screen and thin them when both are far away.
+      const near = Math.min(this.lodOf[a], ev[e] === EV_SHOT ? this.lodOf[b] : LOD_HIDDEN);
+      fx.thin = near >= 2 ? 1 : 0;
       const ax = pos[3 * a];
       const ay = pos[3 * a + 1];
       const az = pos[3 * a + 2];
       if (ev[e] === EV_SHOT) {
         this.shotAt[a] = seconds;
+        if (near === LOD_HIDDEN) continue;
         const bx = pos[3 * b];
         const bz = pos[3 * b + 2];
         const targetTank = ((this.info[b] >> INFO_KIND_SHIFT) & 3) === KIND_TANK;
@@ -212,6 +220,7 @@ export class UnitView {
         else fx.squadHit(ax, ay, az);
       }
     }
+    fx.thin = 0;
   }
 
   isAlive(id: number): boolean {
@@ -307,6 +316,7 @@ export class UnitView {
       }
       if (!visible) {
         culled++;
+        this.lodOf[i] = LOD_HIDDEN;
         continue;
       }
       const dx = x - cam.x;
@@ -315,6 +325,7 @@ export class UnitView {
       const d2 = dx * dx + dy * dy + dz * dz;
       const lod = d2 < near2 ? 0 : d2 < far2 ? 1 : 2;
       lodCount[lod]++;
+      this.lodOf[i] = lod;
 
       const team = TEAM_RGB[info[i] >> INFO_TEAM_SHIFT] ?? TEAM_RGB[0];
       const h = this.heading[i];

@@ -26,6 +26,12 @@ export class Effects {
   readonly group = new THREE.Group();
   /** Live particle count, for the overlay. */
   count = 0;
+  /**
+   * How much of the next effects to draw: 0 = everything, 1 = thinned (far away, where
+   * sparks are sub-pixel and smoke only adds overdraw). Set by the caller per event.
+   */
+  thin = 0;
+  private seq = 0;
   private readonly p = [
     new Float32Array(MAX_PARTICLES * FIELDS),
     new Float32Array(MAX_PARTICLES * FIELDS),
@@ -81,6 +87,11 @@ export class Effects {
     alpha: number,
   ): void {
     if (this.n[kind] >= MAX_PARTICLES) return;
+    if (this.thin !== 0 || this.n[kind] > MAX_PARTICLES * 0.6) {
+      // Far away or under heavy load: no sparks, and one smoke puff in three.
+      if (size0 < 0.3) return;
+      if (kind === SMOKE && this.seq++ % 3 !== 0) return;
+    }
     const p = this.p[kind];
     const o = this.n[kind]++ * FIELDS;
     p[o] = x;

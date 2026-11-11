@@ -1,6 +1,7 @@
 // Unit type table. All values are integers (distances fixed-point, times in ticks).
 // One entity is one vehicle or one infantry squad.
 import { fx } from './fixed';
+import { CLASS_FOOT, CLASS_VEHICLE } from './map';
 
 export const KIND_TANK = 0;
 export const KIND_INFANTRY = 1;
@@ -8,6 +9,8 @@ export const KIND_COUNT = 2;
 
 export interface UnitKind {
   name: string;
+  /** Movement class: decides which terrain it can cross (see src/sim/map.ts). */
+  cls: number;
   hp: number;
   /** World units per tick. */
   speed: number;
@@ -24,6 +27,7 @@ export interface UnitKind {
 export const KINDS: readonly UnitKind[] = [
   {
     name: 'Main battle tank',
+    cls: CLASS_VEHICLE,
     hp: 240,
     speed: fx(0.3),
     range: fx(26),
@@ -34,6 +38,7 @@ export const KINDS: readonly UnitKind[] = [
   {
     // Rifles against soft targets, shoulder-fired rockets against armour.
     name: 'Infantry squad',
+    cls: CLASS_FOOT,
     hp: 100,
     speed: fx(0.16),
     range: fx(15),
