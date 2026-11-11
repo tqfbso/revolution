@@ -543,3 +543,12 @@ only once one of your units has seen any part of it; after that you keep seeing 
 happens to it, as with town houses. The sim is unchanged and so is the AI, which was
 already bound to what its units see (decision 045). Scouting now has a purpose for the
 player too. `?control=all` and `?demo=1` show everything.
+
+## 052 A recruit level, and easy is the default
+
+Fabio's first game against the AI (2026-11-12): it works, and it is hard to beat. A new
+lowest level, recruit, runs a third of normal's economy, never keeps more than 70 units,
+leaves you alone for 22 minutes and attacks only with three times what it expects to
+meet. Against a player who does nothing it takes the towns but not the base. Easy was softened a little
+(fewer trucks and factories, at most 140 units, first attack at 17 minutes) and is now what the game opens
+on; normal is one click away. The levels still differ only in tempo and judgement.

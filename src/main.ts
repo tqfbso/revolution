@@ -137,9 +137,13 @@ async function start(): Promise<void> {
     lookAt,
   );
   const input = new Input(canvas, rts.camera, terrain, units, send, lookAt, structures, card);
-  // `?ai=easy|normal|hard|off` picks the opponent of the skirmish.
+  // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
+  // default: the first playtest found normal hard to beat.
   const level = params.get('ai');
-  const ai = level === 'easy' || level === 'hard' || level === 'off' ? level : 'normal';
+  const ai =
+    level === 'recruit' || level === 'normal' || level === 'hard' || level === 'off'
+      ? level
+      : 'easy';
   const demo = params.get('demo') === '1';
   const speed = Number(params.get('speed') ?? 1) || 1;
   post({ type: 'init', seed, units: unitCount, scenario, ai, demo, speed });

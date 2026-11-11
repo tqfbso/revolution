@@ -112,7 +112,8 @@ decision 040); hotkeys for production and a build menu (M10).
   held bridge town rather than through it), looks at the far bank before it crosses,
   shells the houses you hold before it goes in, feeds new units into a fight, breaks off
   when beaten and comes back with more
-- Three difficulty levels, chosen on screen (or `?ai=easy|normal|hard|off`), that differ
+- Four difficulty levels, chosen on screen (or `?ai=recruit|easy|normal|hard|off`, easy
+  is the default), that differ
   in tempo and judgement, not in free resources. `?demo=1` shows the AI playing itself
 - The skirmish starts even: nobody holds a town, blue builds its own fortress
 - Units shell an enemy base building in range without being told to

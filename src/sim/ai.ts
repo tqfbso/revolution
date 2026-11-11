@@ -97,7 +97,7 @@ import {
   type World,
 } from './world';
 
-export type AiLevel = 'easy' | 'normal' | 'hard';
+export type AiLevel = 'recruit' | 'easy' | 'normal' | 'hard';
 
 /** What separates the difficulty levels. No level gets free resources or sees through fog. */
 interface Tuning {
@@ -106,6 +106,8 @@ interface Tuning {
   /** Most trucks it runs, and most production buildings it puts up. */
   trucks: number;
   factories: number;
+  /** The largest force it keeps, in units of the unit limit, however many depots it has. */
+  size: number;
   /** Entries it keeps on a production queue. */
   queue: number;
   /** Trucks it puts on one building site. */
@@ -134,16 +136,36 @@ interface Tuning {
 const MINUTE = 60 * TICK_RATE;
 
 export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
+  // A sparring partner for learning the game: a small economy, a long quiet opening,
+  // and an attack only with overwhelming numbers.
+  recruit: {
+    period: 60,
+    trucks: 9,
+    factories: 2,
+    size: 70,
+    queue: 1,
+    builders: 1,
+    garrison: 2,
+    ratio: 300,
+    firstAttack: 22 * MINUTE,
+    minArmy: 300,
+    breakOff: 55,
+    odds: 24,
+    raids: 0,
+    counter: false,
+    smoke: false,
+  },
   easy: {
     period: 40,
-    trucks: 14,
-    factories: 4,
+    trucks: 12,
+    factories: 3,
+    size: 140,
     queue: 1,
     builders: 2,
     garrison: 3,
-    ratio: 220,
-    firstAttack: 14 * MINUTE,
-    minArmy: 260,
+    ratio: 230,
+    firstAttack: 17 * MINUTE,
+    minArmy: 280,
     breakOff: 45,
     odds: 20,
     raids: 0,
@@ -154,6 +176,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     period: 20,
     trucks: 26,
     factories: 10,
+    size: 600,
     queue: 2,
     builders: 2,
     garrison: 4,
@@ -170,6 +193,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     period: 20,
     trucks: 36,
     factories: 14,
+    size: 600,
     queue: 2,
     builders: 3,
     garrison: 5,
@@ -998,7 +1022,10 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   // Short of fuel with supplies to spare: the next well is worth a depot.
   const dry = count[B_WORKS] > 0 && w.fuel[team] < 150 && w.supplies[team] > 400;
   if (count[B_BARRACKS] === 0) type = B_BARRACKS;
-  else if (w.popCap[team] < POP_MAX && w.pop[team] + 25 >= w.popCap[team] + 40 * risingDepots) {
+  else if (
+    w.popCap[team] < Math.min(POP_MAX, ai.tune.size) &&
+    w.pop[team] + 25 >= w.popCap[team] + 40 * risingDepots
+  ) {
     type = B_DEPOT;
     if (expand >= 0) atSite(expand);
     else px = hx - ai.fwd * 8;
@@ -1144,7 +1171,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
   let s0 = calm ? ai.resS : 0;
   let f0 = calm ? ai.resF : 0;
   let c0 = calm ? ai.resC : 0;
-  let room = w.popCap[team] - w.pop[team] - queued;
+  let room = Math.min(w.popCap[team], ai.tune.size) - w.pop[team] - queued;
   for (const s of lines) {
     if (room <= 0) break;
     if (w.sQueueLen[s] >= ai.tune.queue) continue;
@@ -1602,7 +1629,7 @@ function chooseObjective(ai: Ai, w: World, x: number, y: number, power: number):
   );
   let value = 60;
   if (foeTowns === 0) value += 150;
-  if (w.pop[ai.team] * 10 >= w.popCap[ai.team] * 9) value += 100;
+  if (w.pop[ai.team] * 10 >= Math.min(w.popCap[ai.team], ai.tune.size) * 9) value += 100;
   if (power > 700) value += 100;
   consider({ kind: OBJ_BASE, id: -1, x: ai.foeX, y: ai.foeY }, value, need);
   if (best !== null) return best;

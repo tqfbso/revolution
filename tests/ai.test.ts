@@ -150,6 +150,7 @@ describe('the AI opponent', () => {
       return count(w, 1);
     };
     expect(pop('hard')).toBeGreaterThan(pop('easy') + 20);
+    expect(pop('easy')).toBeGreaterThan(pop('recruit'));
   });
 
   it('does nothing without a base, and stops when its headquarters falls', () => {
