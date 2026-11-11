@@ -12,6 +12,10 @@ export interface PerfStats {
   selected: number;
   /** Living units per team. */
   alive: number[];
+  /** Units drawn per level of detail, units off-screen, live effect particles. */
+  lod: number[];
+  culled: number;
+  particles: number;
   backend: string;
   drawCalls: number;
   triangles: number;
@@ -29,6 +33,9 @@ export class Hud {
     units: 0,
     selected: 0,
     alive: [],
+    lod: [0, 0, 0],
+    culled: 0,
+    particles: 0,
     backend: '',
     drawCalls: 0,
     triangles: 0,
@@ -68,6 +75,7 @@ export class Hud {
       `Sim tick   ${s.simMs.toFixed(2)} ms (worst ${s.simMsMax.toFixed(2)}) @ ${TICK_RATE} Hz\n` +
       `Units      ${s.alive.reduce((a, b) => a + b, 0)} alive   selected ${s.selected}\n` +
       `Armies     red ${s.alive[0] ?? 0}   blue ${s.alive[1] ?? 0}   gold ${s.alive[2] ?? 0}\n` +
+      `Detail     near ${s.lod[0]}  mid ${s.lod[1]}  far ${s.lod[2]}  off-screen ${s.culled}  fx ${s.particles}\n` +
       `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris\n` +
       `State hash ${s.hash}   build ${__BUILD__}`;
   }

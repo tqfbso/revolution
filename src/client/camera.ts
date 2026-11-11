@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import { MAP_SIZE } from '../sim/world';
 import type { Terrain } from './terrain';
 
-const MIN_DIST = 25;
+const MIN_DIST = 14;
 const MAX_DIST = 900;
 const PITCH = THREE.MathUtils.degToRad(52);
 const EDGE_PX = 6;
@@ -10,7 +10,7 @@ const EDGE_PX = 6;
 /** Classic RTS camera: looks at a point on the ground, pans, zooms and rotates around it. */
 export class RtsCamera {
   readonly camera = new THREE.PerspectiveCamera(40, 1, 1, 4000);
-  private goal = { x: MAP_SIZE / 2, z: MAP_SIZE / 2 + 60, dist: 300, yaw: 0 };
+  private goal = { x: MAP_SIZE / 2, z: MAP_SIZE / 2 + 8, dist: 260, yaw: 0 };
   private cur = { ...this.goal };
   private keys = new Set<string>();
   private mouse = { x: 0, y: 0, inside: false };
@@ -58,6 +58,18 @@ export class RtsCamera {
       },
       { passive: false },
     );
+  }
+
+  /** Jump straight to a view (used by tests and, later, the minimap). */
+  look(x: number, z: number, dist: number, yaw = 0): void {
+    this.goal = { x, z, dist: THREE.MathUtils.clamp(dist, MIN_DIST, MAX_DIST), yaw };
+    this.cur = { ...this.goal };
+  }
+
+  /** The ground point the camera looks at, and how far it is from it. */
+  readonly focus = new THREE.Vector3();
+  get distance(): number {
+    return this.cur.dist;
   }
 
   resize(width: number, height: number): void {
@@ -108,6 +120,7 @@ export class RtsCamera {
       groundY + Math.sin(PITCH) * c.dist,
       c.z + Math.cos(c.yaw) * horizontal,
     );
+    this.focus.set(c.x, groundY, c.z);
     this.camera.lookAt(c.x, groundY, c.z);
     this.camera.updateMatrixWorld();
   }

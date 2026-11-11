@@ -44,30 +44,57 @@ never drops a frame and a slow frame never slows the game.
 ## Data layout
 
 `World` (`src/sim/world.ts`) is structure-of-arrays: one typed array per component
-(`posX`, `posY`, `velX`, `targetX`, `speed`, `team`, `flags`, ...), an entity is an index.
-Systems are plain loops over those arrays (`src/sim/sim.ts`): apply commands, squad roaming,
-steering, separation (uniform grid, counting sort), integration. No per-tick allocation in
-the hot loops.
+(`posX`, `velX`, `targetX`, `speed`, `team`, `kind`, `hp`, `cooldown`, `attack`, `state`,
+...), an entity is an index. A slot is free, alive or a wreck; freed slots are reused by
+later spawns, lowest index first. No per-tick allocation in the hot loops.
+
+## One tick (`src/sim/sim.ts`)
+
+1. Apply commands (move, attack-move, stop, spawn).
+2. Sort living units into two uniform grids by counting sort: 4-unit cells for collisions,
+   16-unit cells for targeting.
+3. Acquire targets: nearest living enemy within 44 units. Units without a target look every
+   4 ticks, everyone re-evaluates every 16, staggered by id.
+4. Steer: units free to fight close to weapon range and hold; plain move orders keep moving.
+5. Separate (soft collisions), fire (hitscan, damage accumulated), integrate, then resolve
+   damage, deaths, and wreck expiry.
+
+Unit types live in `src/sim/units.ts` as a table of integers (health, speed, range, reload,
+damage per target type).
 
 ## Commands
 
-`src/sim/commands.ts` defines the only inputs to the sim: move, stop, spawn. A command holds
-integers only; float-to-fixed conversion happens once on the client before sending. In single
-player a command applies on the next tick. In lockstep multiplayer the same commands get
-scheduled a few ticks ahead and broadcast; the sim does not change.
+`src/sim/commands.ts` defines the only inputs to the sim: move, attack-move, stop, spawn. A
+command holds integers only; float-to-fixed conversion happens once on the client before
+sending. In single player a command applies on the next tick. In lockstep multiplayer the
+same commands get scheduled a few ticks ahead and broadcast; the sim does not change.
 
 ## Rendering
 
-Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwise. All units
-are one `InstancedMesh` (one draw call); each frame the client interpolates between the two
-latest 20 Hz snapshots and writes instance matrices straight into the GPU buffer. Terrain is
-a single vertex-coloured mesh.
+Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwise.
 
-Snapshots are transferred (not copied) from the worker as `Float32Array`s.
+- **Models** (`src/client/models.ts`) are generated at start-up from boxes and cylinders, in
+  three levels of detail. Vertex attributes carry albedo and a team-marking mask.
+- **Batches** (`src/client/batch.ts`): one instanced draw call per model part per level of
+  detail (tank hull, tank turret, soldier, far tank, far squad). Per instance: a matrix and
+  a 4-float tint (team colour and burn).
+- **Per frame** (`src/client/units.ts`): interpolate each unit between the last two 20 Hz
+  snapshots, cull against the frustum, choose the level of detail by distance, write the
+  instance. Turrets track the attack target; infantry squads are five soldier instances that
+  thin out as the squad loses health.
+- **Effects** (`src/client/effects.ts`): pooled camera-facing sprites (additive fire, blended
+  smoke) and stretched tracer quads, three draw calls in all, fed by sim events.
+- **Light**: hemisphere sky light plus one sun with a shadow map that follows the camera
+  focus. ACES tone mapping.
+
+Snapshots are transferred (not copied) from the worker as typed arrays: positions, a
+state/kind/team byte, health, attack target, and the tick's combat events.
 
 ## Current limits, on purpose
 
 - Terrain height is visual only; the sim is flat. Heightmap moves into the sim (as integers)
   when terrain starts to affect gameplay.
 - Movement is straight-line with soft separation. Flowfield pathfinding comes with obstacles.
-- Entities are never removed yet. A free-list arrives with combat.
+- A command naming a slot that died and was reused reaches the new occupant. Harmless in
+  single player; multiplayer will add a generation counter per slot.
+- Models are untextured procedural geometry (see decision 011).

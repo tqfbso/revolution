@@ -1,63 +1,115 @@
 import * as THREE from 'three/webgpu';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { MAX_UNITS, TICK_MS } from '../sim/world';
+import { attribute, mix, vec3 } from 'three/tsl';
+import { KIND_TANK } from '../sim/units';
+import { EV_DEATH, EV_SHOT, MAX_UNITS, STATE_ALIVE, STATE_FREE, TICK_MS } from '../sim/world';
 import {
   INFO_KIND_SHIFT,
   INFO_STATE_MASK,
   INFO_TEAM_SHIFT,
+  NO_AIM,
   type Snapshot,
 } from '../worker/protocol';
-import { STATE_ALIVE, STATE_FREE } from '../sim/world';
+import { Batch } from './batch';
+import type { Effects } from './effects';
+import {
+  MUZZLE_Y,
+  MUZZLE_Z,
+  SQUAD_OFFSETS,
+  SQUAD_SIZE,
+  TURRET_Y,
+  TURRET_Z,
+  buildInfantry,
+  buildTank,
+} from './models';
 import type { Terrain } from './terrain';
 
-const TEAM_COLORS = [
-  new THREE.Color(0xc23b2e),
-  new THREE.Color(0x2f6fd6),
-  new THREE.Color(0xd9a520),
+// Marking colours (linear RGB): red, blue, gold. Hulls stay in service paint.
+const TEAM_RGB = [
+  [0.52, 0.045, 0.03],
+  [0.03, 0.15, 0.62],
+  [0.62, 0.36, 0.02],
 ];
-const SELECTED_TINT = new THREE.Color(0xffffff);
-const TURN_RATE = 7; // rad/s, visual only
+const HULL_TURN = 2.6; // rad/s, visual only
+const TURRET_TURN = 3.2;
+const SOLDIER_TURN = 9;
+const CULL_RADIUS = 4;
+const WRECK_SMOKE_SECONDS = 50;
 
-/** Placeholder vehicle: hull, turret and barrel merged into one mesh. Forward is +Z. */
-function unitGeometry(): THREE.BufferGeometry {
-  const hull = new THREE.BoxGeometry(1.3, 0.5, 2.1).translate(0, 0.35, 0);
-  const turret = new THREE.BoxGeometry(0.8, 0.35, 0.95).translate(0, 0.77, -0.15);
-  const barrel = new THREE.BoxGeometry(0.14, 0.14, 1.2).translate(0, 0.8, 0.9);
-  return mergeGeometries([hull, turret, barrel]);
+export interface LodStats {
+  /** Units drawn at each level of detail this frame, and units culled as off-screen. */
+  lod: [number, number, number];
+  culled: number;
 }
 
 /**
- * Draws every unit with one instanced draw call. The sim ticks at 20 Hz; each frame we
- * interpolate between the last two snapshots so motion is smooth at any refresh rate.
+ * Draws every unit with a handful of instanced draw calls. Each frame, per unit: interpolate
+ * between the last two 20 Hz snapshots, cull against the view frustum, pick a level of
+ * detail by distance, and write the instance into that level's batch.
  */
 export class UnitView {
-  readonly mesh: THREE.InstancedMesh;
+  readonly group = new THREE.Group();
   readonly rings: THREE.InstancedMesh;
   count = 0;
   /** Interpolated render positions (x, y, z per unit), reused by selection picking. */
   readonly renderPos = new Float32Array(MAX_UNITS * 3);
   readonly selected = new Uint8Array(MAX_UNITS);
   selectedCount = 0;
+  /** Latest per-unit state/kind/team bits from the sim (see INFO_* in the protocol). */
+  readonly info = new Uint8Array(MAX_UNITS);
+  readonly stats: LodStats = { lod: [0, 0, 0], culled: 0 };
+  /** Distances (world units) at which units drop to LOD 1 and LOD 2. */
+  lodNear = 120;
+  lodFar = 340;
 
   private prev = new Float32Array(MAX_UNITS * 2);
   private curr = new Float32Array(MAX_UNITS * 2);
-  private heading = new Float32Array(MAX_UNITS);
-  private headingGoal = new Float32Array(MAX_UNITS);
-  /** Latest per-unit state/kind/team bits from the sim (see INFO_* in the protocol). */
-  readonly info = new Uint8Array(MAX_UNITS);
+  private readonly hp = new Uint8Array(MAX_UNITS);
+  private readonly aim = new Uint16Array(MAX_UNITS).fill(NO_AIM);
+  private readonly heading = new Float32Array(MAX_UNITS);
+  private readonly headingGoal = new Float32Array(MAX_UNITS);
+  private readonly turret = new Float32Array(MAX_UNITS);
+  private readonly moving = new Uint8Array(MAX_UNITS);
+  /** Seconds (client clock) of the last shot and of death, for recoil and wreck smoke. */
+  private readonly shotAt = new Float32Array(MAX_UNITS).fill(-1e9);
+  private readonly diedAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private snapshotTime = 0;
-  private colorsDirty = false;
-  private readonly color = new THREE.Color();
 
-  constructor(private readonly terrain: Terrain) {
-    const material = new THREE.MeshLambertNodeMaterial();
-    this.mesh = new THREE.InstancedMesh(unitGeometry(), material, MAX_UNITS);
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.frustumCulled = false;
-    this.mesh.count = 0;
-    this.mesh.setColorAt(0, TEAM_COLORS[0]); // allocates the instance colour buffer
+  private readonly hull: Batch[];
+  private readonly turretBatch: Batch[];
+  private readonly tankFar: Batch;
+  private readonly soldier: Batch[];
+  private readonly squadFar: Batch;
+  private readonly frustum = new THREE.Frustum();
+  private readonly projScreen = new THREE.Matrix4();
 
-    const ringGeometry = new THREE.RingGeometry(1.35, 1.6, 20).rotateX(-Math.PI / 2);
+  constructor(
+    private readonly terrain: Terrain,
+    private readonly effects: Effects,
+    shadows: boolean,
+  ) {
+    const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.82, metalness: 0.08 });
+    const tint = attribute('aTint', 'vec4');
+    const painted = mix(attribute('color', 'vec3'), tint.xyz, attribute('teamMask', 'float'));
+    // tint.w is "burn": 1 turns the model into a scorched wreck.
+    material.colorNode = mix(painted, vec3(0.022, 0.02, 0.019), tint.w);
+
+    const tank = buildTank();
+    const infantry = buildInfantry();
+    const batch = (g: THREE.BufferGeometry, cap: number, lod: number) => {
+      const b = new Batch(g, material, cap);
+      // Far LOD is a few pixels: no shadow work for it.
+      b.mesh.castShadow = shadows && lod < 2;
+      b.mesh.receiveShadow = shadows && lod === 0;
+      this.group.add(b.mesh);
+      return b;
+    };
+    this.hull = tank.hull.map((g, lod) => batch(g, MAX_UNITS, lod));
+    this.turretBatch = tank.turret.map((g, lod) => batch(g, MAX_UNITS, lod));
+    this.tankFar = batch(tank.far, MAX_UNITS, 2);
+    this.soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * SQUAD_SIZE, lod));
+    this.squadFar = batch(infantry.far, MAX_UNITS, 2);
+
+    const ringGeometry = new THREE.RingGeometry(1.5, 1.72, 24).rotateX(-Math.PI / 2);
     const ringMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
     ringMaterial.opacity = 0.9;
     ringMaterial.depthWrite = false;
@@ -65,44 +117,105 @@ export class UnitView {
     this.rings.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.rings.frustumCulled = false;
     this.rings.count = 0;
+    this.group.add(this.rings);
   }
 
   applySnapshot(s: Snapshot, now: number): void {
     const n = s.count;
-    const fresh = this.count; // units at index >= fresh are new this snapshot
+    const before = this.count;
     const swap = this.prev;
     this.prev = this.curr;
     this.curr = swap;
     this.curr.set(s.positions);
-    if (n < fresh) {
+    if (n < before) {
       // World was reset.
       this.selected.fill(0);
       this.selectedCount = 0;
-      this.prev.set(s.positions);
+      this.info.fill(0);
+      this.diedAt.fill(-1e9);
     }
+    const curr = this.curr;
+    const prev = this.prev;
     for (let i = 0; i < n; i++) {
       const alive = (s.info[i] & INFO_STATE_MASK) === STATE_ALIVE;
-      const wasAlive = i < fresh && (this.info[i] & INFO_STATE_MASK) === STATE_ALIVE;
-      if (alive && !wasAlive) {
-        // New unit (or a reused slot): do not interpolate from wherever the slot was before.
-        this.prev[2 * i] = this.curr[2 * i];
-        this.prev[2 * i + 1] = this.curr[2 * i + 1];
-        this.heading[i] = this.headingGoal[i] = (i * 2.399963) % (Math.PI * 2);
-      } else if (!alive && this.selected[i]) {
-        this.selected[i] = 0;
-        this.selectedCount--;
+      const wasAlive = (this.info[i] & INFO_STATE_MASK) === STATE_ALIVE;
+      if (!alive) {
+        if (this.selected[i]) {
+          this.selected[i] = 0;
+          this.selectedCount--;
+        }
+        prev[2 * i] = curr[2 * i];
+        prev[2 * i + 1] = curr[2 * i + 1];
+        this.moving[i] = 0;
+        continue;
       }
-    }
-    for (let i = 0; i < n; i++) {
-      const dx = this.curr[2 * i] - this.prev[2 * i];
-      const dz = this.curr[2 * i + 1] - this.prev[2 * i + 1];
+      if (!wasAlive) {
+        // New unit (or a reused slot): do not interpolate from wherever the slot was before.
+        prev[2 * i] = curr[2 * i];
+        prev[2 * i + 1] = curr[2 * i + 1];
+        // Face the enemy side of the map until it moves.
+        const h = s.info[i] >> INFO_TEAM_SHIFT === 0 ? Math.PI / 2 : -Math.PI / 2;
+        this.heading[i] = this.headingGoal[i] = this.turret[i] = h + ((i * 0.618) % 0.3) - 0.15;
+        this.shotAt[i] = -1e9;
+      }
+      const dx = curr[2 * i] - prev[2 * i];
+      const dz = curr[2 * i + 1] - prev[2 * i + 1];
+      const d2 = dx * dx + dz * dz;
       // Only turn when really moving, so separation nudges do not make idle units twitch.
-      if (dx * dx + dz * dz > 0.01) this.headingGoal[i] = Math.atan2(dx, dz);
+      this.moving[i] = d2 > 0.012 ? 1 : 0;
+      if (this.moving[i]) this.headingGoal[i] = Math.atan2(dx, dz);
     }
     this.info.set(s.info);
-    this.colorsDirty = true;
+    this.hp.set(s.hp);
+    this.aim.set(s.aim);
     this.count = n;
     this.snapshotTime = now;
+    this.playEvents(s.events, now / 1000);
+  }
+
+  private playEvents(ev: Int32Array, seconds: number): void {
+    const pos = this.renderPos;
+    const fx = this.effects;
+    for (let e = 0; e < ev.length; e += 3) {
+      const a = ev[e + 1];
+      const b = ev[e + 2];
+      const isTank = (this.info[a] >> INFO_KIND_SHIFT) & 3 ? false : true;
+      const ax = pos[3 * a];
+      const ay = pos[3 * a + 1];
+      const az = pos[3 * a + 2];
+      if (ev[e] === EV_SHOT) {
+        this.shotAt[a] = seconds;
+        const bx = pos[3 * b];
+        const bz = pos[3 * b + 2];
+        const targetTank = ((this.info[b] >> INFO_KIND_SHIFT) & 3) === KIND_TANK;
+        const by = pos[3 * b + 1] + (targetTank ? 0.7 : 0.35);
+        if (isTank) {
+          // The shot leaves along the turret, which is already laid on the target.
+          const d = Math.hypot(bx - ax, bz - az) || 1;
+          const ux = (bx - ax) / d;
+          const uz = (bz - az) / d;
+          this.turret[a] = Math.atan2(ux, uz);
+          fx.cannonShot(
+            ax + ux * MUZZLE_Z,
+            ay + TURRET_Y + MUZZLE_Y,
+            az + uz * MUZZLE_Z,
+            bx,
+            by,
+            bz,
+          );
+        } else {
+          fx.rifleBurst(ax, ay + 0.42, az, bx, by, bz);
+        }
+      } else if (ev[e] === EV_DEATH) {
+        this.diedAt[a] = seconds;
+        if (isTank) fx.explosion(ax, ay, az);
+        else fx.squadHit(ax, ay, az);
+      }
+    }
+  }
+
+  isAlive(id: number): boolean {
+    return id < this.count && (this.info[id] & INFO_STATE_MASK) === STATE_ALIVE;
   }
 
   setSelected(ids: Iterable<number>, additive: boolean): void {
@@ -111,11 +224,6 @@ export class UnitView {
     let c = 0;
     for (let i = 0; i < this.count; i++) c += this.selected[i];
     this.selectedCount = c;
-    this.colorsDirty = true;
-  }
-
-  isAlive(id: number): boolean {
-    return id < this.count && (this.info[id] & INFO_STATE_MASK) === STATE_ALIVE;
   }
 
   selectedIds(): number[] {
@@ -124,94 +232,186 @@ export class UnitView {
     return out;
   }
 
-  update(now: number, dt: number): void {
+  update(now: number, dt: number, camera: THREE.PerspectiveCamera): void {
     const n = this.count;
+    const seconds = now / 1000;
     const alpha = Math.min(Math.max((now - this.snapshotTime) / TICK_MS, 0), 1);
-    const m = this.mesh.instanceMatrix.array as Float32Array;
-    const r = this.rings.instanceMatrix.array as Float32Array;
     const pos = this.renderPos;
-    const maxTurn = TURN_RATE * dt;
+    const prev = this.prev;
+    const curr = this.curr;
+    const info = this.info;
+    const fx = this.effects;
+
+    this.projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.projScreen);
+    const planes = this.frustum.planes;
+    const cam = camera.position;
+    const near2 = this.lodNear * this.lodNear;
+    const far2 = this.lodFar * this.lodFar;
+
+    const batches = [
+      ...this.hull,
+      ...this.turretBatch,
+      this.tankFar,
+      ...this.soldier,
+      this.squadFar,
+    ];
+    for (const b of batches) b.n = 0;
+    const lodCount = this.stats.lod;
+    lodCount[0] = lodCount[1] = lodCount[2] = 0;
+    let culled = 0;
     let ringCount = 0;
+    const r = this.rings.instanceMatrix.array as Float32Array;
+
     for (let i = 0; i < n; i++) {
-      const x = this.prev[2 * i] + (this.curr[2 * i] - this.prev[2 * i]) * alpha;
-      const z = this.prev[2 * i + 1] + (this.curr[2 * i + 1] - this.prev[2 * i + 1]) * alpha;
+      const state = info[i] & INFO_STATE_MASK;
+      if (state === STATE_FREE) continue;
+      const isTank = ((info[i] >> INFO_KIND_SHIFT) & 3) === KIND_TANK;
+      const alive = state === STATE_ALIVE;
+      if (!alive && !isTank) continue; // fallen squads leave no wreck
+
+      const x = prev[2 * i] + (curr[2 * i] - prev[2 * i]) * alpha;
+      const z = prev[2 * i + 1] + (curr[2 * i + 1] - prev[2 * i + 1]) * alpha;
       const y = this.terrain.heightAt(x, z);
       pos[3 * i] = x;
       pos[3 * i + 1] = y;
       pos[3 * i + 2] = z;
 
-      // Turn toward the travel direction along the shortest arc.
-      let d = this.headingGoal[i] - this.heading[i];
-      if (d > Math.PI) d -= Math.PI * 2;
-      else if (d < -Math.PI) d += Math.PI * 2;
-      const h = this.heading[i] + (d > maxTurn ? maxTurn : d < -maxTurn ? -maxTurn : d);
-      this.heading[i] = h > Math.PI ? h - Math.PI * 2 : h < -Math.PI ? h + Math.PI * 2 : h;
-      // Placeholder until the real models land: infantry squads are small, free slots hidden.
-      const state = this.info[i] & INFO_STATE_MASK;
-      const scale = state === STATE_FREE ? 0 : (this.info[i] >> INFO_KIND_SHIFT) & 3 ? 0.55 : 1;
-      const sin = Math.sin(h) * scale;
-      const cos = Math.cos(h) * scale;
+      const target = this.aim[i];
+      let aimAngle = NaN;
+      if (alive) {
+        this.heading[i] = turn(
+          this.heading[i],
+          this.headingGoal[i],
+          (isTank ? HULL_TURN : SOLDIER_TURN) * dt,
+        );
+        if (target !== NO_AIM && target < n) {
+          aimAngle = Math.atan2(pos[3 * target] - x, pos[3 * target + 2] - z);
+        }
+        if (isTank) {
+          this.turret[i] = turn(
+            this.turret[i],
+            Number.isNaN(aimAngle) ? this.heading[i] : aimAngle,
+            TURRET_TURN * dt,
+          );
+        }
+      }
 
-      const o = i * 16;
-      m[o] = cos;
-      m[o + 1] = 0;
-      m[o + 2] = -sin;
-      m[o + 3] = 0;
-      m[o + 4] = 0;
-      m[o + 5] = scale;
-      m[o + 6] = 0;
-      m[o + 7] = 0;
-      m[o + 8] = sin;
-      m[o + 9] = 0;
-      m[o + 10] = cos;
-      m[o + 11] = 0;
-      m[o + 12] = x;
-      m[o + 13] = y;
-      m[o + 14] = z;
-      m[o + 15] = 1;
+      let visible = true;
+      for (let p = 0; p < 6; p++) {
+        const pl = planes[p];
+        if (pl.normal.x * x + pl.normal.y * y + pl.normal.z * z + pl.constant < -CULL_RADIUS) {
+          visible = false;
+          break;
+        }
+      }
+      if (!visible) {
+        culled++;
+        continue;
+      }
+      const dx = x - cam.x;
+      const dy = y - cam.y;
+      const dz = z - cam.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const lod = d2 < near2 ? 0 : d2 < far2 ? 1 : 2;
+      lodCount[lod]++;
+
+      const team = TEAM_RGB[info[i] >> INFO_TEAM_SHIFT] ?? TEAM_RGB[0];
+      const h = this.heading[i];
+      const sin = Math.sin(h);
+      const cos = Math.cos(h);
+
+      if (isTank) {
+        const burn = alive ? 0 : 1;
+        if (lod === 2) {
+          this.tankFar.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
+        } else {
+          this.hull[lod].put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
+          // Wrecks keep the turret where it died, knocked slightly askew.
+          const th = this.turret[i] + (alive ? 0 : 0.5);
+          const ts = Math.sin(th);
+          const tc = Math.cos(th);
+          // Recoil: the turret kicks back along the gun and recovers.
+          const since = seconds - this.shotAt[i];
+          const kick = since < 0.35 ? 0.16 * (1 - since / 0.35) ** 2 : 0;
+          const px = x + sin * TURRET_Z - ts * kick;
+          const pz = z + cos * TURRET_Z - tc * kick;
+          this.turretBatch[lod].put(
+            px,
+            y + TURRET_Y,
+            pz,
+            ts,
+            tc,
+            1,
+            team[0],
+            team[1],
+            team[2],
+            burn,
+          );
+        }
+        if (!alive && lod < 2) {
+          const age = seconds - this.diedAt[i];
+          if (age < WRECK_SMOKE_SECONDS && Math.random() < dt * 3) {
+            fx.wreckSmoke(x, y, z, Math.max(0, 1 - age / 12));
+          }
+        }
+      } else if (lod === 2) {
+        this.squadFar.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], 0);
+      } else {
+        // Soldiers drop out of the squad as it loses health.
+        const men = Math.ceil((this.hp[i] * SQUAD_SIZE) / 255);
+        const face = Number.isNaN(aimAngle) ? h : aimAngle;
+        const fs = Math.sin(face);
+        const fc = Math.cos(face);
+        const batch = this.soldier[lod];
+        const walking = this.moving[i] === 1;
+        for (let k = 0; k < men; k++) {
+          const ox = SQUAD_OFFSETS[k][0];
+          const oz = SQUAD_OFFSETS[k][1];
+          const sx = x + ox * cos + oz * sin;
+          const sz = z - ox * sin + oz * cos;
+          const bob = walking ? Math.abs(Math.sin(seconds * 9 + i + k * 1.7)) * 0.035 : 0;
+          batch.put(
+            sx,
+            this.terrain.heightAt(sx, sz) + bob,
+            sz,
+            fs,
+            fc,
+            1,
+            team[0],
+            team[1],
+            team[2],
+            0,
+          );
+        }
+      }
 
       if (this.selected[i]) {
         const q = ringCount++ * 16;
-        r[q] = 1;
-        r[q + 1] = 0;
-        r[q + 2] = 0;
-        r[q + 3] = 0;
-        r[q + 4] = 0;
-        r[q + 5] = 1;
-        r[q + 6] = 0;
-        r[q + 7] = 0;
-        r[q + 8] = 0;
-        r[q + 9] = 0;
-        r[q + 10] = 1;
-        r[q + 11] = 0;
+        r.fill(0, q, q + 16);
+        r[q] = r[q + 5] = r[q + 10] = r[q + 15] = 1;
         r[q + 12] = x;
         r[q + 13] = y + 0.12;
         r[q + 14] = z;
-        r[q + 15] = 1;
       }
     }
-    this.mesh.count = n;
-    uploadRange(this.mesh.instanceMatrix, n * 16);
+    this.stats.culled = culled;
+    for (const b of batches) b.flush();
     this.rings.count = ringCount;
-    uploadRange(this.rings.instanceMatrix, ringCount * 16);
-
-    if (this.colorsDirty && this.mesh.instanceColor) {
-      for (let i = 0; i < n; i++) {
-        this.color.copy(TEAM_COLORS[this.info[i] >> INFO_TEAM_SHIFT] ?? TEAM_COLORS[0]);
-        if ((this.info[i] & INFO_STATE_MASK) !== STATE_ALIVE) this.color.multiplyScalar(0.12);
-        else if (this.selected[i]) this.color.lerp(SELECTED_TINT, 0.3);
-        this.mesh.setColorAt(i, this.color);
-      }
-      uploadRange(this.mesh.instanceColor, n * 3);
-      this.colorsDirty = false;
+    if (ringCount > 0) {
+      const attr = this.rings.instanceMatrix;
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(0, ringCount * 16);
+      attr.needsUpdate = true;
     }
   }
 }
 
-/** Upload only the live part of a big preallocated instance buffer. */
-function uploadRange(attribute: THREE.InstancedBufferAttribute, length: number): void {
-  if (length === 0) return;
-  attribute.clearUpdateRanges();
-  attribute.addUpdateRange(0, length);
-  attribute.needsUpdate = true;
+/** Rotate `from` toward `to` along the shortest arc by at most `max` radians. */
+function turn(from: number, to: number, max: number): number {
+  let d = to - from;
+  if (d > Math.PI) d -= Math.PI * 2;
+  else if (d < -Math.PI) d += Math.PI * 2;
+  const h = from + (d > max ? max : d < -max ? -max : d);
+  return h > Math.PI ? h - Math.PI * 2 : h < -Math.PI ? h + Math.PI * 2 : h;
 }
