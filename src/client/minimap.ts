@@ -96,7 +96,10 @@ export class Minimap {
       if (s >= 0) {
         const standing = this.structures.hp[s] > 0;
         if (map.sKind[s] === S_BRIDGE) rgb = standing ? [196, 192, 180] : rgb;
-        else rgb = standing ? [168, 162, 150] : [74, 70, 66];
+        else if (standing && this.structures.baseTeam[s] >= 0) {
+          const paint = TEAM_RGB[this.structures.baseTeam[s]];
+          if (paint) rgb = [paint[0], paint[1], paint[2]];
+        } else rgb = standing ? [168, 162, 150] : [74, 70, 66];
       }
       // Lighter on high ground, so mesas read on the minimap too.
       const lift = Math.min(1.25, Math.max(0.85, 0.95 + map.heights[c + ((c / N) | 0)] / 40000));
@@ -138,8 +141,18 @@ export class Minimap {
     }
     this.ctx.putImageData(this.image, 0, 0);
 
-    // Towns: a ring in the colour of whoever holds them.
     const ctx = this.ctx;
+    // Resource sites you have found: tan for supplies, amber for fuel.
+    for (let k = 0; k < this.map.siteCount; k++) {
+      const x = this.map.siteX[k] / 4096;
+      const y = this.map.siteY[k] / 4096;
+      const fuel = this.map.siteKind[k] === 1;
+      if (!explored[(y | 0) * N + (x | 0)] || (!fuel && this.structures.siteStock[k] <= 0))
+        continue;
+      ctx.fillStyle = fuel ? 'rgb(245,170,30)' : 'rgb(225,195,135)';
+      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+    }
+    // Towns: a ring in the colour of whoever holds them.
     ctx.lineWidth = 1.5;
     for (let t = 0; t < this.map.townCount; t++) {
       const owner = TEAM_RGB[this.structures.townOwner[t]];

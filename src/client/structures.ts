@@ -2,9 +2,20 @@ import * as THREE from 'three/webgpu';
 import { attribute } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fromFx } from '../sim/fixed';
-import { FLOOR_HEIGHT, MAP_CELLS, MAX_STRUCTS, S_BRIDGE, type GameMap } from '../sim/map';
+import { BUILDINGS, B_BARRACKS, B_DEPOT, B_DRONES, B_HQ, B_WORKS } from '../sim/economy';
+import {
+  FLOOR_HEIGHT,
+  MAP_CELLS,
+  MAX_SITES,
+  MAX_STRUCTS,
+  SITE_SUPPLIES,
+  S_BASE,
+  S_BRIDGE,
+  addStructure,
+  type GameMap,
+} from '../sim/map';
 import { GARRISON_MAX } from '../sim/units';
-import type { Snapshot } from '../worker/protocol';
+import { BASE_STRIDE, type Snapshot } from '../worker/protocol';
 import { Batch } from './batch';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
@@ -165,6 +176,200 @@ function buildingParts(
 }
 
 /** What is left: a scorched heap of slabs with stumps of wall still standing. */
+// Base buildings: prefabricated, drab, low and wide. The only colour is a band of the
+// owner's paint along the roof line.
+const DRAB = 0x5d6149;
+const DRAB_DARK = 0x3f4434;
+const PANEL = 0x8b8c84;
+const TEAM_PAINT = [0x8a2b22, 0x27467a, 0x9a7a1e];
+const CRATES = [0x5d6149, 0x6b4a36, 0x4b5560, 0x7a7466, 0x55503f];
+
+/**
+ * A base building on the plot (x0, z0, w, d). `stage` 0 = finished, 1 = shot up,
+ * 3 = going up: a slab, posts and the first course of wall.
+ */
+function baseParts(
+  id: number,
+  type: number,
+  team: number,
+  x0: number,
+  z0: number,
+  w: number,
+  d: number,
+  base: number,
+  stage: number,
+): Part[] {
+  const parts: Part[] = [];
+  const cx = x0 + w / 2;
+  const cz = z0 + d / 2;
+  const wear = stage === 1 ? 0.6 : 1;
+  const paint = TEAM_PAINT[team] ?? 0x777777;
+  parts.push({ size: [w + 0.6, 2.2, d + 0.6], at: [cx, base - 1.0, cz], color: 0x6a6861 });
+  if (stage === 3) {
+    for (const [px, pz] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+      [0.5, 0],
+      [0.5, 1],
+    ]) {
+      parts.push({
+        size: [0.16, 1.6, 0.16],
+        at: [x0 + 0.3 + px * (w - 0.6), base + 0.9, z0 + 0.3 + pz * (d - 0.6)],
+        color: 0x9a968c,
+      });
+    }
+    parts.push({ size: [w - 0.4, 0.5, 0.2], at: [cx, base + 0.35, z0 + 0.3], color: PANEL });
+    parts.push({ size: [0.2, 0.5, d - 0.4], at: [x0 + 0.3, base + 0.35, cz], color: PANEL });
+    parts.push({ size: [1.6, 0.5, 1.1], at: [cx + 1, base + 0.35, cz + 0.6], color: CRATES[1] });
+    parts.push({ size: [w - 0.4, 0.1, 0.1], at: [cx, base + 1.7, z0 + 0.3], color: 0x9a968c });
+    parts.push({ size: [w - 0.4, 0.1, 0.1], at: [cx, base + 1.7, z0 + d - 0.3], color: 0x9a968c });
+    return parts;
+  }
+  // A long shed with a low pitched roof and a band of team paint under the eaves.
+  const shed = (sx: number, sz: number, sw: number, sd: number, h: number, color: number) => {
+    parts.push({ size: [sw, h, sd], at: [sx, base + h / 2, sz], color, shade: wear });
+    parts.push({ size: [sw + 0.2, 0.14, sd + 0.2], at: [sx, base + h + 0.07, sz], color: ROOF });
+    parts.push({ size: [sw * 0.55, 0.14, sd + 0.2], at: [sx, base + h + 0.2, sz], color: ROOF });
+    parts.push({ size: [sw + 0.06, 0.16, sd + 0.06], at: [sx, base + h - 0.2, sz], color: paint });
+  };
+  const mast = (mx: number, mz: number, h: number) => {
+    parts.push({ size: [0.08, h, 0.08], at: [mx, base + h / 2, mz], color: 0x9a9a96 });
+    parts.push({ size: [0.7, 0.05, 0.05], at: [mx, base + h * 0.8, mz], color: 0x9a9a96 });
+    parts.push({ size: [0.05, 0.05, 0.5], at: [mx, base + h * 0.92, mz], color: 0x9a9a96 });
+  };
+  if (type === B_HQ) {
+    shed(cx, cz - d * 0.12, w * 0.8, d * 0.5, 2.3, PANEL);
+    shed(cx - w * 0.18, cz + d * 0.3, w * 0.44, d * 0.3, 1.4, DRAB);
+    mast(cx + w * 0.3, cz + d * 0.3, 6.5);
+    mast(cx + w * 0.22, cz + d * 0.36, 4.2);
+    // The flag of whoever commands from here.
+    parts.push({
+      size: [0.07, 4.6, 0.07],
+      at: [cx - w * 0.42, base + 2.3, cz + d * 0.42],
+      color: 0x9a9a96,
+    });
+    parts.push({
+      size: [1.5, 0.9, 0.05],
+      at: [cx - w * 0.42 + 0.78, base + 4.1, cz + d * 0.42],
+      color: paint,
+    });
+  } else if (type === B_DEPOT) {
+    // An open yard of containers and crates under a lean-to.
+    shed(cx - w * 0.22, cz - d * 0.2, w * 0.45, d * 0.5, 1.5, DRAB);
+    for (let k = 0; k < 7; k++) {
+      const col = k % 3;
+      const row = Math.floor(k / 3);
+      const tall = rand(id, 20 + k) > 0.55 ? 2 : 1;
+      parts.push({
+        size: [1.9, 0.75 * tall, 0.85],
+        at: [
+          x0 + w * 0.6 + (col - 0.5) * 1.0 * (k % 2 ? 1 : 0.2),
+          base + 0.375 * tall,
+          z0 + 1.0 + row * 1.35 + col * 0.3,
+        ],
+        color: CRATES[Math.floor(rand(id, 40 + k) * CRATES.length)],
+        shade: wear,
+      });
+    }
+    parts.push({ size: [w * 0.9, 0.14, 0.14], at: [cx, base + 0.5, z0 + d - 0.2], color: paint });
+  } else if (type === B_BARRACKS) {
+    shed(cx, cz - d * 0.24, w * 0.9, d * 0.36, 1.25, DRAB);
+    shed(cx, cz + d * 0.24, w * 0.9, d * 0.36, 1.25, DRAB);
+    for (let k = 0; k < 5; k++) {
+      parts.push({
+        size: [0.5, 0.4, 0.04],
+        at: [x0 + (w * (k + 1)) / 6, base + 0.75, cz - d * 0.06],
+        color: GLASS,
+      });
+    }
+  } else if (type === B_WORKS) {
+    // A vehicle hall with two dark doors on the south side and a workshop annexe.
+    shed(cx, cz - d * 0.1, w * 0.86, d * 0.62, 2.1, PANEL);
+    for (const side of [-1, 1]) {
+      parts.push({
+        size: [w * 0.3, 1.5, 0.06],
+        at: [cx + side * w * 0.2, base + 0.75, cz - d * 0.1 + d * 0.31],
+        color: DRAB_DARK,
+      });
+    }
+    shed(cx + w * 0.25, cz + d * 0.36, w * 0.3, d * 0.18, 1.1, DRAB);
+    parts.push({
+      size: [0.5, 2.9, 0.5],
+      at: [cx - w * 0.36, base + 1.45, cz + d * 0.36],
+      color: 0x55524c,
+    });
+  } else if (type === B_DRONES) {
+    shed(cx - w * 0.14, cz - d * 0.1, w * 0.55, d * 0.6, 1.3, DRAB);
+    parts.push({
+      size: [2.0, 0.8, 0.9],
+      at: [cx + w * 0.26, base + 0.4, cz + d * 0.2],
+      color: CRATES[2],
+    });
+    mast(cx + w * 0.3, cz - d * 0.3, 4.8);
+    // A launch rail pointing at the sky.
+    parts.push({
+      size: [0.12, 0.08, 2.2],
+      at: [cx - w * 0.1, base + 0.65, cz + d * 0.34],
+      color: 0x9a9a96,
+      rot: [-0.35, 0.6, 0],
+    });
+    parts.push({
+      size: [1.0, 0.06, 1.0],
+      at: [cx + w * 0.26, base + 1.5, cz - d * 0.05],
+      color: 0x8f918c,
+      rot: [0.5, 0, 0.2],
+    });
+  }
+  if (stage === 1) {
+    parts.push({
+      size: [w * 0.4, 0.5, d * 0.3],
+      at: [cx + 0.6, base + 0.25, cz + 0.4],
+      color: SOOT,
+    });
+  }
+  return parts;
+}
+
+/** A resource site: a stockpile of crates under tarpaulins, or a pumpjack and its tank. */
+function siteParts(k: number, kind: number, x: number, y: number, z: number): Part[] {
+  const parts: Part[] = [];
+  if (kind === SITE_SUPPLIES) {
+    for (let i = 0; i < 9; i++) {
+      const a = rand(k, i) * 6.283;
+      const r = 0.6 + rand(k, 30 + i) * 2.1;
+      const tall = i < 3 ? 2 : 1;
+      parts.push({
+        size: [1.7, 0.7 * tall, 0.8],
+        at: [x + Math.cos(a) * r, y + 0.35 * tall, z + Math.sin(a) * r],
+        color: CRATES[i % CRATES.length],
+        rot: [0, rand(k, 60 + i) * 3.1, 0],
+      });
+    }
+    parts.push({ size: [2.4, 1.0, 1.8], at: [x, y + 0.5, z], color: 0x4a4f3a, rot: [0, 0.4, 0] });
+  } else {
+    parts.push({ size: [4.2, 0.12, 3.2], at: [x, y + 0.06, z], color: 0x4b4a46 });
+    parts.push({ size: [1.5, 1.5, 1.5], at: [x - 1.2, y + 0.75, z + 0.6], color: 0x2c2d2e });
+    parts.push({ size: [1.56, 0.12, 1.56], at: [x - 1.2, y + 1.2, z + 0.6], color: 0xb58a1c });
+    parts.push({ size: [0.16, 1.7, 0.16], at: [x + 0.8, y + 0.85, z - 0.5], color: 0x2c2d2e });
+    parts.push({
+      size: [2.5, 0.16, 0.16],
+      at: [x + 0.9, y + 1.75, z - 0.5],
+      color: 0xb58a1c,
+      rot: [0, 0, 0.22],
+    });
+    parts.push({ size: [0.3, 0.6, 0.3], at: [x + 2.05, y + 1.75, z - 0.5], color: 0x2c2d2e });
+    parts.push({ size: [0.6, 0.5, 0.7], at: [x - 0.2, y + 0.25, z - 0.5], color: 0x3f4434 });
+  }
+  return parts;
+}
+/** Colours of the marker over a site: supplies tan, fuel amber. */
+const SITE_UI = [
+  [0.86, 0.74, 0.5],
+  [0.95, 0.66, 0.1],
+];
+
 function rubbleParts(
   id: number,
   x0: number,
@@ -286,6 +491,14 @@ export class StructureView {
   townCapturer: Uint8Array = new Uint8Array(0);
   townProgress: Uint8Array = new Uint8Array(0);
   credits: number[] = [];
+  /** Base buildings: owner (-1 = not one), type and construction 0..100; the raw records. */
+  readonly baseTeam = new Int8Array(MAX_STRUCTS).fill(-1);
+  readonly baseType = new Uint8Array(MAX_STRUCTS);
+  readonly basePct = new Uint8Array(MAX_STRUCTS);
+  bases: Int32Array = new Int32Array(0);
+  /** What is left at each resource site. */
+  readonly siteStock = new Int32Array(MAX_SITES).fill(1);
+  private readonly siteMeshes: THREE.Mesh[] = [];
   /** Bumped whenever a structure changes state, so the minimap knows to redraw its base. */
   version = 0;
 
@@ -310,7 +523,7 @@ export class StructureView {
     this.material.colorNode = attribute('color', 'vec3').mul(fog.shade());
     const ui = new THREE.MeshBasicNodeMaterial();
     ui.colorNode = attribute('aTint', 'vec4').xyz;
-    this.pips = new Batch(new THREE.BoxGeometry(0.62, 0.14, 0.62), ui, MAX_STRUCTS * 10);
+    this.pips = new Batch(new THREE.BoxGeometry(0.62, 0.14, 0.62), ui, MAX_STRUCTS * 10 + 64);
     const flag = new THREE.BoxGeometry(2.6, 1.5, 0.08).translate(1.3, 0, 0);
     this.flags = new Batch(flag, ui, 16);
     this.group.add(this.pips.mesh, this.flags.mesh);
@@ -332,6 +545,30 @@ export class StructureView {
     }
     if (poles.length > 0) this.group.add(this.mesh(build(poles)));
     for (let s = 0; s < map.structCount; s++) this.show(s, 0);
+    for (let k = 0; k < map.siteCount; k++) {
+      const x = fromFx(map.siteX[k]);
+      const z = fromFx(map.siteY[k]);
+      const mesh = this.mesh(build(siteParts(k, map.siteKind[k], x, terrain.heightAt(x, z), z)));
+      this.siteMeshes.push(mesh);
+      this.group.add(mesh);
+    }
+  }
+
+  /** The resource site at a ground point (within a few units of it), or -1. */
+  siteAt(x: number, z: number): number {
+    const m = this.map;
+    let best = -1;
+    let bestD = 5.5 * 5.5;
+    for (let k = 0; k < m.siteCount; k++) {
+      if (m.siteKind[k] === SITE_SUPPLIES && this.siteStock[k] <= 0) continue;
+      const dx = fromFx(m.siteX[k]) - x;
+      const dz = fromFx(m.siteY[k]) - z;
+      if (dx * dx + dz * dz < bestD) {
+        best = k;
+        bestD = dx * dx + dz * dz;
+      }
+    }
+    return best;
   }
 
   townPos(t: number): { x: number; z: number } {
@@ -374,9 +611,11 @@ export class StructureView {
     const bridge = m.sKind[s] === S_BRIDGE;
     const parts = bridge
       ? bridgeParts(x0, z0, w, d, base, fromFx(m.sEast[s]), state === 2)
-      : state === 2
-        ? rubbleParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s])
-        : buildingParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s], state === 1);
+      : m.sKind[s] === S_BASE && state !== 2
+        ? baseParts(s, this.baseType[s], this.baseTeam[s], x0, z0, w, d, base, state)
+        : state === 2
+          ? rubbleParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s])
+          : buildingParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s], state === 1);
     const mesh = this.mesh(build(parts));
     this.meshes[s] = mesh;
     this.group.add(mesh);
@@ -394,12 +633,45 @@ export class StructureView {
   }
 
   applySnapshot(s: Snapshot, seconds: number): void {
-    const n = Math.min(s.structHp.length, this.map.structCount);
+    // Base buildings appear during the game: add each to this copy of the map, in the
+    // order the sim did, so structure ids agree.
+    const map = this.map;
+    this.bases = s.bases;
+    for (let o = 0; o < s.bases.length; o += BASE_STRIDE) {
+      const id = s.bases[o];
+      const type = s.bases[o + 1];
+      if (id === map.structCount) {
+        const b = BUILDINGS[type];
+        addStructure(map, S_BASE, s.bases[o + 3], s.bases[o + 4], b.w, b.h, -1, b.floors);
+        this.hp[id] = 255;
+      }
+      this.baseTeam[id] = s.bases[o + 2];
+      this.baseType[id] = type;
+      this.basePct[id] = s.bases[o + 5];
+    }
+    const n = Math.min(s.structHp.length, map.structCount);
     for (let k = 0; k < n; k++) {
       const hp = s.structHp[k];
       if (hp === 0 && this.hp[k] !== 0) this.fellAt[k] = seconds;
       this.hp[k] = hp;
-      this.show(k, hp === 0 ? 2 : hp < DAMAGED_BELOW ? 1 : 0);
+      const rising = this.baseTeam[k] >= 0 && this.basePct[k] < 100;
+      this.show(
+        k,
+        hp === 0
+          ? 2
+          : rising
+            ? 3
+            : hp < DAMAGED_BELOW && this.baseTeam[k] < 0
+              ? 1
+              : hp < 110
+                ? 1
+                : 0,
+      );
+    }
+    for (let k = 0; k < s.siteStock.length; k++) {
+      this.siteStock[k] = s.siteStock[k];
+      const gone = map.siteKind[k] === SITE_SUPPLIES && s.siteStock[k] <= 0;
+      if (this.siteMeshes[k]) this.siteMeshes[k].visible = !gone;
     }
     this.townOwner = s.townOwner;
     this.townCapturer = s.townCapturer;
@@ -467,6 +739,28 @@ export class StructureView {
         const p = this.hit(s);
         if (this.fog.sees(p.x, p.z)) this.effects.wreckSmoke(p.x, this.topOf(s), p.z, 0.15);
       }
+      if (this.baseTeam[s] >= 0 && this.basePct[s] < 100) {
+        // Going up: ten pips over the plot, filled as the work gets done.
+        const { x, z } = this.centreOf(s);
+        const c = TEAM_UI[this.baseTeam[s]] ?? NEUTRAL_UI;
+        const done = Math.floor(this.basePct[s] / 10);
+        for (let k = 0; k < 10; k++) {
+          const lit = k < done ? 1 : 0.25;
+          pips.put(
+            x + (k - 4.5) * 0.82,
+            fromFx(m.sBase[s]) + 3,
+            z,
+            0,
+            1,
+            1,
+            c[0] * lit,
+            c[1] * lit,
+            c[2] * lit,
+            1,
+          );
+        }
+        continue;
+      }
       const n = Math.min(this.occ[s], GARRISON_MAX);
       if (n === 0) continue;
       // One pip per squad inside, in a row above the roof.
@@ -476,6 +770,16 @@ export class StructureView {
       for (let k = 0; k < n; k++) {
         pips.put(x + (k - (n - 1) / 2) * 0.82, y, z, 0, 1, 1, c[0], c[1], c[2], 1);
       }
+    }
+    // A marker over every site still worth a trip, once you have seen the place.
+    for (let k = 0; k < m.siteCount; k++) {
+      if (m.siteKind[k] === SITE_SUPPLIES && this.siteStock[k] <= 0) continue;
+      const x = fromFx(m.siteX[k]);
+      const z = fromFx(m.siteY[k]);
+      if (!this.fog.hasExplored(x, z)) continue;
+      const c = SITE_UI[m.siteKind[k]] ?? NEUTRAL_UI;
+      const y = this.terrain.heightAt(x, z) + 3.4 + Math.sin(seconds * 2 + k) * 0.12;
+      pips.put(x, y, z, 0.9, 0.9, 1.3, c[0], c[1], c[2], 1);
     }
     const flags = this.flags;
     flags.n = 0;

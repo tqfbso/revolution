@@ -1,7 +1,14 @@
 import type { Command } from '../sim/commands';
 
 /** assault: storm a held town. clash: two armies meet head on. roam: stress test. */
-export type Scenario = 'assault' | 'clash' | 'roam';
+/** skirmish: build a base and take the east bank. */
+export type Scenario = 'skirmish' | 'assault' | 'clash' | 'roam';
+
+/** Integers per base building in Snapshot.bases. */
+export const BASE_STRIDE = 18;
+/** Bits of Snapshot.task: the truck's job (JOB_*), then the stance. */
+export const TASK_JOB_MASK = 7;
+export const TASK_HOLD_FIRE = 8;
 
 /**
  * Bits of Snapshot.info: life state (2 bits), team (2 bits), inside a building, (for a
@@ -51,8 +58,23 @@ export interface Snapshot {
   townOwner: Uint8Array;
   townCapturer: Uint8Array;
   townProgress: Uint8Array;
-  /** Income collected per team. */
+  /** Per team: credits, supplies, fuel, technology tier, units and the limit on them. */
   credits: number[];
+  supplies: number[];
+  fuel: number[];
+  tier: number[];
+  pop: number[];
+  popCap: number[];
+  /** Per unit: job | stance (see TASK_*). */
+  task: Uint8Array;
+  /** Per resource site: what is left. */
+  siteStock: Int32Array;
+  /**
+   * Base buildings, BASE_STRIDE integers each: structure id, type, team, cell x, cell y,
+   * construction 0..100, entries queued, progress of the first 0..100, the eight queue
+   * entries, rally x and y in world units.
+   */
+  bases: Int32Array;
   /** Wall-clock cost of the last sim tick, in milliseconds. */
   simMs: number;
   /** State hash, sent once per second. Two clients in sync show the same value. */

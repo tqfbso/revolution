@@ -13,6 +13,7 @@ import {
 } from '../sim/commands';
 import { S_BUILDING } from '../sim/map';
 import { KINDS } from '../sim/units';
+import type { CommandCard } from './card';
 import type { StructureView } from './structures';
 import { fx } from '../sim/fixed';
 import type { Terrain } from './terrain';
@@ -54,6 +55,7 @@ export class Input {
     private readonly send: (command: Command) => void,
     private readonly lookAt: (x: number, z: number) => void,
     private readonly structures: StructureView,
+    private readonly card: CommandCard,
   ) {
     const markerMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
     markerMaterial.depthWrite = false;
@@ -65,7 +67,11 @@ export class Input {
 
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('pointerdown', (e) => {
-      if (e.button === 0) {
+      if (card.placing >= 0) {
+        // Placing a building: left click puts it down, anything else calls it off.
+        if (e.button === 0) card.confirm(e.shiftKey);
+        else card.cancelPlacing();
+      } else if (e.button === 0) {
         this.dragStart = { x: e.clientX, y: e.clientY };
         dom.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
@@ -75,6 +81,10 @@ export class Input {
     dom.addEventListener('pointermove', (e) => {
       this.pointerX = e.clientX;
       this.pointerY = e.clientY;
+      if (card.placing >= 0) {
+        const { ground } = this.structureAt(e.clientX, e.clientY);
+        if (ground) card.hover(ground.x, ground.z);
+      }
       if (!this.dragStart) return;
       const s = this.dragStart;
       const w = Math.abs(e.clientX - s.x);
@@ -98,7 +108,13 @@ export class Input {
       if (digit) {
         e.preventDefault();
         this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
-      } else if (e.code === 'Escape') units.setSelected([], false);
+      } else if (e.code === 'Escape') {
+        if (card.placing >= 0) card.cancelPlacing();
+        else {
+          units.setSelected([], false);
+          card.select(-1);
+        }
+      } else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         units.setSelected(
@@ -220,14 +236,22 @@ export class Input {
         }
       } else picked.push(best);
     } else if (isClick) {
-      // Clicking a house selects the squads you have inside it.
+      // Clicking a house selects the squads you have inside it; one of your base
+      // buildings, the building itself.
       const s = this.structureAt(x1, y1).structure;
+      const owner = s >= 0 ? this.structures.baseTeam[s] : -1;
+      if (owner >= 0 && (this.controlAll || owner === this.units.playerTeam)) {
+        this.units.setSelected([], false);
+        this.card.select(s);
+        return;
+      }
       if (s >= 0) {
         for (let i = 0; i < this.units.count; i++) {
           if (this.mayCommand(i) && this.units.insideOf(i) === s) picked.push(i);
         }
       }
     }
+    this.card.select(-1);
     this.units.setSelected(picked, additive);
   }
 
@@ -249,8 +273,13 @@ export class Input {
   }
 
   private orderMove(clientX: number, clientY: number, attack: boolean, shell: boolean): void {
-    if (this.units.selectedCount === 0) return;
     const { ground, structure } = this.structureAt(clientX, clientY);
+    // The card first: a rally point for a building, or trucks sent to haul or to build.
+    if (ground && !shell && this.card.order(ground.x, ground.z, structure)) {
+      this.mark(ground.x, ground.y + 0.15, ground.z);
+      return;
+    }
+    if (this.units.selectedCount === 0) return;
     const ids = this.units.selectedIds();
     if (structure >= 0 && shell) {
       this.send({ type: CMD_ATTACK_STRUCTURE, units: ids, structure });

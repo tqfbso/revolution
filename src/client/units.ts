@@ -14,6 +14,7 @@ import {
   KIND_RECON,
   KIND_STRIKE,
   KIND_TANK,
+  KIND_TRUCK,
   SMOKE_CELLS,
 } from '../sim/units';
 import { CLASS_AIR } from '../sim/map';
@@ -54,6 +55,7 @@ import {
   buildArtillery,
   buildIfv,
   buildJammer,
+  buildTruck,
   buildReconDrone,
   buildStrikeDrone,
   buildInfantry,
@@ -152,6 +154,8 @@ export class UnitView {
   /** Latest per-unit type, hull heading and passengers from the sim. */
   readonly kind = new Uint8Array(MAX_UNITS);
   readonly load = new Uint8Array(MAX_UNITS);
+  /** Per unit: job | stance, see TASK_* in the protocol. */
+  readonly task = new Uint8Array(MAX_UNITS);
   private readonly vehicles: (VehicleDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
@@ -193,6 +197,7 @@ export class UnitView {
     this.vehicles[KIND_ARTILLERY] = vehicle(buildArtillery(), MAX_UNITS >> 2);
     this.vehicles[KIND_AD] = vehicle(buildAirDefence(), MAX_UNITS >> 3);
     this.vehicles[KIND_EW] = vehicle(buildJammer(), MAX_UNITS >> 3);
+    this.vehicles[KIND_TRUCK] = vehicle(buildTruck(), MAX_UNITS >> 4);
     this.vehicles[KIND_DRONE] = vehicle(buildReconDrone(), MAX_UNITS >> 2);
     this.vehicles[KIND_STRIKE] = vehicle(buildStrikeDrone(), MAX_UNITS >> 1);
     const infantry = buildInfantry();
@@ -309,6 +314,7 @@ export class UnitView {
     this.info.set(s.info);
     this.kind.set(s.kind);
     this.load.set(s.load);
+    this.task.set(s.task);
     this.hp.set(s.hp);
     this.aim.set(s.aim);
     this.count = n;
