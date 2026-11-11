@@ -15,6 +15,7 @@ import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
 import {
   CELL_FX,
   CELL_SHIFT,
+  CLASS_AIR,
   CLASS_COUNT,
   CLASS_FOOT,
   FLOOR_HEIGHT,
@@ -39,11 +40,13 @@ import { DIR_X, DIR_Y, UNREACHABLE, buildField, clearLine, flowDirection, newFie
 import { nextInt } from './rng';
 import {
   ACQUIRE_RANGE,
+  AIR_HEIGHT,
   BOARD_DIST,
   CAPTURE_POINTS,
   CONCEAL_RANGE,
   COUNTER_BATTERY_TICKS,
   DANGER_CLOSE,
+  DETECT_RANGE,
   EYE_HEIGHT,
   FACING_COS,
   GARRISON_MAX,
@@ -51,6 +54,8 @@ import {
   HEIGHT_RANGE_MAX,
   HEIGHT_RANGE_MIN,
   HEIGHT_RANGE_SHIFT,
+  JAM_DRAIN_TICKS,
+  JAM_REVEAL_TICKS,
   KINDS,
   KIND_COUNT,
   KIND_TANK,
@@ -148,6 +153,25 @@ const projSide = new Int32Array(MAX_UNITS);
 const fieldRefs = new Int32Array(MAX_FIELDS);
 const goalScratch = new Int32Array(MAX_UNITS);
 const KIND_CLASS = KINDS.map((k) => k.cls);
+const IS_AIR = KINDS.map((k) => k.cls === CLASS_AIR);
+const ARMED = KINDS.map((k) => k.damage.some((d) => d > 0));
+const SIGHT_SQ = KINDS.map((k) => k.sight * k.sight);
+/**
+ * Target priority, added to the squared distance of a candidate: a unit shoots at drones
+ * only when it has nothing on the ground to shoot at (unless drones are all it can hit),
+ * and a strike drone picks vehicles and guns before men.
+ */
+const LOW_PRIORITY = ACQUIRE_RANGE * ACQUIRE_RANGE;
+const PRIORITY = KINDS.flatMap((a) =>
+  KINDS.map((b) => {
+    const air = b.cls === CLASS_AIR && a.damage.some((d, k) => d > 0 && KINDS[k].cls !== CLASS_AIR);
+    const soft = a.kamikaze && b.cls === CLASS_FOOT;
+    return air || soft ? LOW_PRIORITY : 0;
+  }),
+);
+const DETECT_RANGE_SQ = DETECT_RANGE * DETECT_RANGE;
+/** Jammers alive this tick. */
+const jammers = new Int32Array(MAX_UNITS);
 const structDamage = new Int32Array(MAX_STRUCTS);
 const townCount = new Int32Array(MAX_TOWNS * MAX_TEAMS);
 const repairCrew = new Int32Array(MAX_STRUCTS * MAX_TEAMS);
@@ -185,6 +209,8 @@ export function step(w: World, commands: readonly Command[]): void {
   updateStructureOrders(w);
   updateTransport(w);
   updateEyes(w);
+  updateJamming(w);
+  updateSpotters(w);
   acquireTargets(w);
   steer(w);
   separate(w);
@@ -475,6 +501,7 @@ function eyeHeight(w: World, i: number): number {
   if (s >= 0) return map.sBase[s] + map.sFloors[s] * FLOOR_HEIGHT;
   const x = w.posX[i];
   const y = w.posY[i];
+  if (IS_AIR[w.kind[i]]) return heightAt(map, x, y) + AIR_HEIGHT;
   const c = cellOfPos(x, y);
   if (map.type[c] === T_BRIDGE) return deckHeight(map, map.structAt[c], x) + EYE_HEIGHT;
   return heightAt(map, x, y) + EYE_HEIGHT;
@@ -482,6 +509,8 @@ function eyeHeight(w: World, i: number): number {
 
 /** Weapon range of `i` against `t`: longer from upper floors and from higher ground. */
 function rangeTo(w: World, i: number, t: number): number {
+  // Height above the ground is not height of ground: no bonus to or from drones.
+  if (IS_AIR[w.kind[i]] || IS_AIR[w.kind[t]]) return KINDS[w.kind[i]].range;
   let bonus = (eyeZ[i] - eyeZ[t]) >> HEIGHT_RANGE_SHIFT;
   bonus = clampInt(bonus, HEIGHT_RANGE_MIN, HEIGHT_RANGE_MAX);
   if (w.inside[i] >= 0 && bonus < GARRISON_RANGE_BONUS) bonus = GARRISON_RANGE_BONUS;
@@ -859,17 +888,29 @@ function acquireTargets(w: World): void {
   const map = w.map;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
+    const ki = w.kind[i];
+    if (KINDS[ki].indirect) {
+      acquireIndirect(w, i);
+      continue;
+    }
+    // Nothing to shoot with, or a drone that has lost its link.
+    if (!ARMED[ki]) continue;
+    if (w.jammed[i] !== 0) {
+      w.attack[i] = NO_TARGET;
+      w.los[i] = 0;
+      continue;
+    }
     const x = w.posX[i];
     const y = w.posY[i];
     const t = w.attack[i];
     const phase = tick + i;
-    const dmgTable = KINDS[w.kind[i]].damage;
-    if (KINDS[w.kind[i]].indirect) {
-      acquireIndirect(w, i);
-      continue;
-    }
+    const dmgTable = KINDS[ki].damage;
+    const sight2 = SIGHT_SQ[ki];
+    const air = IS_AIR[ki];
+    const z = eyeZ[i];
+    const own = w.inside[i];
     let valid = false;
-    let targetD = 0;
+    let targetKey = 0;
     if (
       t !== NO_TARGET &&
       w.state[t] === STATE_ALIVE &&
@@ -879,23 +920,19 @@ function acquireTargets(w: World): void {
       const dx = w.posX[t] - x;
       const dy = w.posY[t] - y;
       const d2 = dx * dx + dy * dy;
-      targetD = d2;
-      valid = d2 <= ACQUIRE_RANGE_SQ && (d2 <= CONCEAL_RANGE_SQ || !concealed(w, t));
+      targetKey = d2 + PRIORITY[ki * KIND_COUNT + w.kind[t]];
+      // Seen with its own eyes, or known because someone else has it in sight.
+      const mine = d2 <= sight2 && (d2 <= CONCEAL_RANGE_SQ || !concealed(w, t));
+      valid = d2 <= ACQUIRE_RANGE_SQ && (mine || w.spotted[t] > tick);
       if (valid && (phase & SIGHT_RECHECK_MASK) === 0) {
-        w.los[i] = lineOfSight(
-          map,
-          x,
-          y,
-          eyeZ[i],
-          w.posX[t],
-          w.posY[t],
-          eyeZ[t],
-          w.inside[i],
-          w.inside[t],
-        )
-          ? 1
-          : 0;
-        if (w.los[i] === 1) w.spotted[t] = tick + SPOT_TICKS;
+        const tz = eyeZ[t];
+        w.los[i] =
+          air ||
+          IS_AIR[w.kind[t]] ||
+          lineOfSight(map, x, y, z, w.posX[t], w.posY[t], tz, own, w.inside[t])
+            ? 1
+            : 0;
+        if (mine && w.los[i] === 1) w.spotted[t] = tick + SPOT_TICKS;
       }
     }
     // A unit whose last look found enemies near but none in sight looks again at the slow
@@ -912,16 +949,15 @@ function acquireTargets(w: World): void {
     const y1 = cy < COARSE_DIM - 1 - ACQUIRE_CELLS ? cy + ACQUIRE_CELLS : COARSE_DIM - 1;
     const x0 = cx > ACQUIRE_CELLS ? cx - ACQUIRE_CELLS : 0;
     const x1 = cx < COARSE_DIM - 1 - ACQUIRE_CELLS ? cx + ACQUIRE_CELLS : COARSE_DIM - 1;
-    // A target still in sight stays unless something closer shows up, which saves most of
-    // the sight tests in a standing fight.
+    // A target still in sight stays unless something closer (or more worth shooting) shows
+    // up, which saves most of the sight tests in a standing fight.
     const keep = valid && w.los[i] !== 0;
     let best = keep ? t : NO_TARGET;
-    let bestD = keep ? targetD : ACQUIRE_RANGE_SQ + 1;
+    let bestKey = keep ? targetKey : ACQUIRE_RANGE_SQ + LOW_PRIORITY + 1;
+    let bestMine = false;
     let budget = MAX_TARGET_TESTS;
     let sightTests = MAX_SIGHT_TESTS;
     let blocked = false;
-    const z = eyeZ[i];
-    const own = w.inside[i];
     for (let gy = y0; gy <= y1 && budget > 0; gy++) {
       const from = coarseStart[gy * COARSE_DIM + x0];
       let to = coarseStart[gy * COARSE_DIM + x1 + 1];
@@ -929,33 +965,133 @@ function acquireTargets(w: World): void {
       budget -= to - from;
       for (let s = from; s < to; s++) {
         const j = coarseSorted[s];
-        // Not an enemy, or nothing this unit carries can hurt it.
-        if (w.team[j] === team || dmgTable[w.kind[j]] === 0) continue;
+        if (w.team[j] === team) continue;
         const dx = w.posX[j] - x;
         const dy = w.posY[j] - y;
         const d2 = dx * dx + dy * dy;
-        if (d2 >= bestD && (d2 > bestD || j >= best)) continue;
-        // Units in forest, rubble or a building are concealed: spotted only from close by.
-        if (d2 > CONCEAL_RANGE_SQ && concealed(w, j)) continue;
-        // Seeing is the expensive test, so it comes last and only for a closer candidate.
-        if (sightTests-- <= 0) continue;
-        if (!lineOfSight(map, x, y, z, w.posX[j], w.posY[j], eyeZ[j], own, w.inside[j])) {
+        // Most candidates are simply further away than the best so far: reject them first.
+        if (d2 > bestKey || d2 > ACQUIRE_RANGE_SQ) continue;
+        const kj = w.kind[j];
+        // Nothing this unit carries can hurt it.
+        if (dmgTable[kj] === 0) continue;
+        const key = d2 + PRIORITY[ki * KIND_COUNT + kj];
+        if (key >= bestKey && (key > bestKey || j >= best)) continue;
+        // Beyond its own sight, or concealed (forest, rubble, a building, a recon team) and
+        // not close: only if the army already knows about it.
+        const mine = d2 <= sight2 && (d2 <= CONCEAL_RANGE_SQ || !concealed(w, j));
+        if (!mine && w.spotted[j] <= tick) {
+          // Enemies about, none of them visible: look again at the slow rate.
           blocked = true;
           continue;
         }
-        bestD = d2;
+        // Seeing is the expensive test, so it comes last and only for a better candidate.
+        // Nothing stands between the ground and a drone.
+        if (!air && !IS_AIR[kj]) {
+          if (sightTests-- <= 0) continue;
+          if (!lineOfSight(map, x, y, z, w.posX[j], w.posY[j], eyeZ[j], own, w.inside[j])) {
+            blocked = true;
+            continue;
+          }
+        }
+        bestKey = key;
         best = j;
+        bestMine = mine;
       }
     }
     // Nothing visible: keep the current target only while it is itself still in sight.
     if (best !== NO_TARGET) {
       w.attack[i] = best;
       w.los[i] = 1;
-      // What one unit sees, the guns behind it can shell.
-      w.spotted[best] = tick + SPOT_TICKS;
+      // What one unit sees, the whole army can shoot at.
+      if (bestMine) w.spotted[best] = tick + SPOT_TICKS;
     } else if (!keep) {
       w.attack[i] = NO_TARGET;
       w.los[i] = blocked ? SIGHT_NONE : 0;
+    }
+  }
+}
+
+/**
+ * Which drones are inside an enemy jammer's bubble. A jammed strike drone loses its target
+ * and then its life; a jammed recon drone sees nothing. Jamming gives the jammer away.
+ */
+function updateJamming(w: World): void {
+  const n = w.count;
+  const tick = w.tick;
+  let count = 0;
+  for (let i = 0; i < n; i++) {
+    if (w.state[i] === STATE_ALIVE && KINDS[w.kind[i]].jam > 0) jammers[count++] = i;
+  }
+  for (let i = 0; i < n; i++) {
+    if (!IS_AIR[w.kind[i]] || w.state[i] !== STATE_ALIVE) continue;
+    let hit = 0;
+    for (let k = 0; k < count; k++) {
+      const e = jammers[k];
+      if (w.team[e] === w.team[i]) continue;
+      const dx = w.posX[e] - w.posX[i];
+      const dy = w.posY[e] - w.posY[i];
+      const r = KINDS[w.kind[e]].jam;
+      if (dx * dx + dy * dy > r * r) continue;
+      hit = 1;
+      w.spotted[e] = tick + JAM_REVEAL_TICKS;
+    }
+    w.jammed[i] = hit;
+    if (hit !== 0 && KINDS[w.kind[i]].kamikaze && (tick + i) % JAM_DRAIN_TICKS === 0) {
+      damage[i]++;
+      killer[i] = i;
+    }
+  }
+}
+
+// Sensors sweep twice a second, staggered by id.
+const SPOTTER_MASK = 7;
+const MAX_SPOTTER_SIGHT_TESTS = 24;
+
+/**
+ * Recon teams and recon drones report every enemy within their sight, not only a target:
+ * that is what lets guns reach deep and tanks engage what is hidden. They find concealed
+ * troops from DETECT_RANGE. A drone needs no line of sight; a team on the ground does.
+ */
+function updateSpotters(w: World): void {
+  const n = w.count;
+  const tick = w.tick;
+  const map = w.map;
+  for (let i = (SPOTTER_MASK + 1 - (tick & SPOTTER_MASK)) & SPOTTER_MASK; i < n; i += 8) {
+    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
+    const kind = KINDS[w.kind[i]];
+    if (!kind.spotter || w.jammed[i] !== 0) continue;
+    const x = w.posX[i];
+    const y = w.posY[i];
+    const team = w.team[i];
+    const air = IS_AIR[w.kind[i]];
+    const sight2 = kind.sight * kind.sight;
+    const reach = (kind.sight >> COARSE_SHIFT) + 1;
+    const cx = x >> COARSE_SHIFT;
+    const cy = y >> COARSE_SHIFT;
+    const y0 = cy > reach ? cy - reach : 0;
+    const y1 = cy + reach < COARSE_DIM ? cy + reach : COARSE_DIM - 1;
+    const x0 = cx > reach ? cx - reach : 0;
+    const x1 = cx + reach < COARSE_DIM ? cx + reach : COARSE_DIM - 1;
+    let tests = MAX_SPOTTER_SIGHT_TESTS;
+    const until = tick + SPOT_TICKS;
+    for (let gy = y0; gy <= y1; gy++) {
+      const to = coarseStart[gy * COARSE_DIM + x1 + 1];
+      for (let s = coarseStart[gy * COARSE_DIM + x0]; s < to; s++) {
+        const j = coarseSorted[s];
+        // Already known for longer than this sweep would make it: nothing to add.
+        if (w.team[j] === team || w.spotted[j] >= until - SPOTTER_MASK) continue;
+        const dx = w.posX[j] - x;
+        const dy = w.posY[j] - y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > sight2 || (d2 > DETECT_RANGE_SQ && concealed(w, j))) continue;
+        if (!air && !IS_AIR[w.kind[j]]) {
+          if (tests-- <= 0) continue;
+          const jz = eyeZ[j];
+          if (!lineOfSight(map, x, y, eyeZ[i], w.posX[j], w.posY[j], jz, w.inside[i], w.inside[j]))
+            continue;
+        }
+        w.spotted[j] = until;
+      }
     }
   }
 }
@@ -1038,7 +1174,7 @@ function dangerClose(w: World, x: number, y: number, team: number): boolean {
     const to = cellStart[gy * GRID_DIM + x1 + 1];
     for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
       const j = sorted[s];
-      if (w.team[j] !== team) continue;
+      if (w.team[j] !== team || IS_AIR[w.kind[j]]) continue;
       const dx = w.posX[j] - x;
       const dy = w.posY[j] - y;
       if (dx * dx + dy * dy < DANGER_CLOSE * DANGER_CLOSE) return true;
@@ -1106,6 +1242,7 @@ function resolveShells(w: World): void {
       const to = cellStart[gy * GRID_DIM + x1 + 1];
       for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
         const j = sorted[s];
+        if (IS_AIR[w.kind[j]]) continue;
         const dx = w.posX[j] - x;
         const dy = w.posY[j] - y;
         const d2 = dx * dx + dy * dy;
@@ -1132,6 +1269,8 @@ function resolveShells(w: World): void {
  */
 function concealed(w: World, j: number): boolean {
   if (w.inside[j] >= 0) return w.reveal[j] <= w.tick;
+  if (IS_AIR[w.kind[j]]) return false;
+  if (KINDS[w.kind[j]].stealth) return true;
   const t = w.map.type[cellOfPos(w.posX[j], w.posY[j])];
   return t === T_FOREST || (t === T_RUBBLE && KIND_CLASS[w.kind[j]] === CLASS_FOOT);
 }
@@ -1193,7 +1332,7 @@ function fire(w: World): void {
     let dmg = kind.damage[w.kind[t]];
     const cover = w.inside[t];
     const armour = KINDS[w.kind[t]].armour;
-    if (armour !== null && d2 > 0) {
+    if (armour !== null && d2 > 0 && !kind.kamikaze) {
       // Which plate the shot meets: the angle between the target's nose and the shooter.
       const cos = Math.trunc((-dx * w.faceX[t] - dy * w.faceY[t]) / isqrt(d2));
       dmg =
@@ -1214,6 +1353,11 @@ function fire(w: World): void {
     w.cooldown[i] = kind.reload;
     if (w.inside[i] >= 0) w.reveal[i] = w.tick + REVEAL_TICKS;
     w.events.push(EV_SHOT, i, t);
+    if (kind.kamikaze) {
+      // The drone is the warhead.
+      damage[i] += 30000;
+      killer[i] = i;
+    }
   }
 }
 
@@ -1286,7 +1430,9 @@ function resolveStructures(w: World): void {
         if (bridge) {
           // Whoever is on the span goes down with it.
           const c = cellOfPos(w.posX[i], w.posY[i]);
-          if (map.structAt[c] === s && map.type[c] === T_BRIDGE) kill(w, i, i);
+          if (map.structAt[c] === s && map.type[c] === T_BRIDGE && !IS_AIR[w.kind[i]]) {
+            kill(w, i, i);
+          }
         } else if (w.inside[i] === s) {
           // The house falls on its garrison: half of what is left of each squad walks out.
           w.inside[i] = -1;
@@ -1316,7 +1462,7 @@ function updateTowns(w: World): void {
     if (map.sKind[s] === S_BRIDGE && w.sHp[s] <= 0) cut++;
   }
   for (let i = 0; i < w.count; i++) {
-    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
+    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0 || IS_AIR[w.kind[i]]) continue;
     const x = w.posX[i];
     const y = w.posY[i];
     const team = w.team[i];
@@ -1555,6 +1701,7 @@ function separate(w: World): void {
     const x1 = cx < GRID_DIM - 1 ? cx + 1 : cx;
     let px = 0;
     let py = 0;
+    const air = IS_AIR[w.kind[i]];
     let budget = MAX_NEIGHBOUR_TESTS;
     for (let gy = y0; gy <= y1 && budget > 0; gy++) {
       // Cells x0..x1 of a row are contiguous in the sorted array.
@@ -1564,7 +1711,7 @@ function separate(w: World): void {
       budget -= to - from;
       for (let s = from; s < to; s++) {
         const j = sorted[s];
-        if (j === i) continue;
+        if (j === i || IS_AIR[w.kind[j]] !== air) continue;
         const dx = x - w.posX[j];
         const dy = y - w.posY[j];
         if (dx >= SEP_RADIUS || dx <= -SEP_RADIUS || dy >= SEP_RADIUS || dy <= -SEP_RADIUS) {

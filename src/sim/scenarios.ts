@@ -1,7 +1,18 @@
 import { CMD_SPAWN, type Command } from './commands';
 import { fx } from './fixed';
 import type { GameMap } from './map';
-import { KIND_ARTILLERY, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from './units';
+import {
+  KIND_AD,
+  KIND_ARTILLERY,
+  KIND_ATGM,
+  KIND_DRONE,
+  KIND_EW,
+  KIND_IFV,
+  KIND_INFANTRY,
+  KIND_RECON,
+  KIND_STRIKE,
+  KIND_TANK,
+} from './units';
 import { MAP_SIZE, MAX_TEAMS } from './world';
 
 /** Opening commands for the roaming test: `total` wandering units split across three teams. */
@@ -82,7 +93,12 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
   const ifvs = Math.floor((perSide * 15) / 100);
   const atgms = Math.floor(perSide / 10);
   const guns = Math.floor(perSide / 25);
-  const infantry = perSide - tanks - ifvs - atgms - guns;
+  // The sensor fight: 2% recon teams, 2% recon drones, 4% strike drones, 2% air defence,
+  // 1% jammers.
+  const recon = Math.floor(perSide / 50);
+  const strike = Math.floor(perSide / 25);
+  const jammers = Math.max(1, Math.floor(perSide / 100));
+  const infantry = perSide - tanks - ifvs - atgms - guns - 3 * recon - strike - jammers;
   const cmds: Command[] = [];
   const add = (team: number, kind: number, count: number, x: number, y: number, r: number) => {
     if (count > 0)
@@ -95,6 +111,11 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
   add(0, KIND_INFANTRY, infantry, map.townX[0] - fx(120), map.townY[0], 40);
   add(0, KIND_ATGM, atgms, map.townX[0] - fx(135), map.townY[0], 40);
   add(0, KIND_ARTILLERY, guns, map.townX[0] - fx(170), map.townY[0], 25);
+  add(0, KIND_RECON, recon, map.townX[0] - fx(60), map.townY[0], 30);
+  add(0, KIND_AD, recon, map.townX[0] - fx(95), map.townY[0], 35);
+  add(0, KIND_EW, jammers, map.townX[0] - fx(105), map.townY[0], 15);
+  add(0, KIND_DRONE, recon, map.townX[0] - fx(125), map.townY[0], 20);
+  add(0, KIND_STRIKE, strike, map.townX[0] - fx(150), map.townY[0], 20);
   // Blue: half the force at the central town, a quarter at each village. Missile teams
   // get the first pick of the houses, riflemen the rest; armour waits behind.
   const share = [2, 1, 1];
@@ -103,6 +124,7 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
     const x = map.townX[town];
     const y = map.townY[town];
     for (const [kind, count] of [
+      [KIND_RECON, recon],
       [KIND_ATGM, atgms],
       [KIND_INFANTRY, infantry],
     ]) {
@@ -121,6 +143,11 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
     add(1, KIND_TANK, Math.floor((tanks * share[k]) / 4), x + fx(70), y, 30);
     add(1, KIND_IFV, Math.floor((ifvs * share[k]) / 4), x + fx(85), y, 30);
     add(1, KIND_ARTILLERY, Math.floor((guns * share[k]) / 4), x + fx(120), y, 20);
+    // The town sits under a jammer and air defence; blue's own drones wait behind it.
+    add(1, KIND_EW, Math.max(1, Math.floor((jammers * share[k]) / 4)), x + fx(25), y, 8);
+    add(1, KIND_AD, Math.floor((recon * share[k]) / 4), x + fx(40), y, 25);
+    add(1, KIND_DRONE, Math.floor((recon * share[k]) / 4), x + fx(10), y, 20);
+    add(1, KIND_STRIKE, Math.floor((strike * share[k]) / 4), x + fx(60), y, 20);
   }
   return cmds;
 }

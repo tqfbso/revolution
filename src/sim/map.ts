@@ -37,7 +37,9 @@ export const FLOOR_HEIGHT = fx(0.85);
 /** Movement classes: each has its own passability and therefore its own flowfields. */
 export const CLASS_VEHICLE = 0;
 export const CLASS_FOOT = 1;
-export const CLASS_COUNT = 2;
+/** Flies: goes anywhere, in a straight line. */
+export const CLASS_AIR = 2;
+export const CLASS_COUNT = 3;
 
 /** Height of the water surface, for drawing. */
 export const WATER_LEVEL = fx(-0.4);
@@ -275,7 +277,7 @@ export function refreshPassability(map: GameMap): void {
       if (t === T_OPEN || t === T_BRIDGE) v = 1;
       else if (t === T_FORD) v = 2;
       else if ((t === T_FOREST || t === T_RUBBLE) && cls === CLASS_FOOT) v = 2;
-      c[i] = v;
+      c[i] = cls === CLASS_AIR ? 1 : v;
     }
     keepMainArea(c);
     map.snap[cls] = nearestPassable(c);

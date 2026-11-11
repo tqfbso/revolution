@@ -201,6 +201,10 @@ export interface VehicleSpec {
   turret: { w: number; h: number; d: number; z: number };
   /** Gun barrels on the turret: sideways offset, length, radius, elevation in radians. */
   barrels: { x: number; len: number; r: number; pitch: number }[];
+  /** A radar panel on the turret roof. */
+  radar?: boolean;
+  /** An antenna mast of this height on the turret, with cross-pieces. */
+  mast?: number;
 }
 
 /**
@@ -275,6 +279,32 @@ export function buildVehicle(v: VehicleSpec): VehicleModel {
     muzzleY = tu.h * 0.55 + Math.sin(b.pitch) * b.len;
     muzzleZ = tu.d * 0.4 + Math.cos(b.pitch) * b.len;
   }
+  if (v.radar) {
+    const o = {
+      at: [0, tu.h + 0.28, -tu.d * 0.3] as Vec3,
+      rot: [-0.3, 0, 0] as Vec3,
+      color: PAINT_DARK,
+    };
+    t.push(box(tu.w * 0.8, 0.42, 0.05, o));
+    t1.push(box(tu.w * 0.8, 0.42, 0.05, o));
+    t.push(box(0.08, 0.3, 0.08, { at: [0, tu.h + 0.1, -tu.d * 0.3], color: STEEL }));
+  }
+  if (v.mast) {
+    const m = v.mast;
+    t.push(box(0.05, m, 0.05, { at: [0, tu.h + m / 2, -tu.d * 0.25], color: STEEL }));
+    t1.push(box(0.07, m, 0.07, { at: [0, tu.h + m / 2, -tu.d * 0.25], color: STEEL }));
+    for (let k = 0; k < 3; k++) {
+      const y = tu.h + m * (0.55 + k * 0.2);
+      const o = { at: [0, y, -tu.d * 0.25] as Vec3, rot: [0, k * 1.05, 0] as Vec3, color: RUBBER };
+      t.push(box(0.9 - k * 0.2, 0.025, 0.025, o));
+      t1.push(box(0.9 - k * 0.2, 0.04, 0.04, o));
+    }
+    for (const sx of [-1, 1]) {
+      t.push(
+        cyl(0.012, 1.3, 'y', { at: [sx * tu.w * 0.4, tu.h + 0.65, tu.d * 0.35], color: RUBBER }, 5),
+      );
+    }
+  }
   const hull1 = merge([
     box(v.wid, v.height, v.len, { at: [0, gear + v.height / 2, 0], top: [0.86, 0.84], ...tint }),
     box(v.wid * 0.96, gear, v.len * 0.9, { at: [0, gear / 2, 0], color: RUBBER }),
@@ -282,6 +312,12 @@ export function buildVehicle(v: VehicleSpec): VehicleModel {
   ]);
   const longest = v.barrels.reduce((m, b) => Math.max(m, b.len * Math.cos(b.pitch)), 0);
   const far = merge([
+    ...(v.mast
+      ? [box(0.12, v.mast, 0.12, { at: [0, top + tu.h + v.mast / 2, tu.z], color: STEEL })]
+      : []),
+    ...(v.radar
+      ? [box(tu.w, 0.4, 0.1, { at: [0, top + tu.h + 0.3, tu.z - tu.d * 0.3], color: PAINT_DARK })]
+      : []),
     box(v.wid, top, v.len, { at: [0, top / 2, 0], team: 0.45 }),
     box(tu.w, tu.h + 0.1, tu.d, { at: [0, top + tu.h / 2, tu.z], team: 0.8 }),
     box(0.1, 0.1, longest || 0.1, {
@@ -310,6 +346,83 @@ export function buildArtillery(): VehicleModel {
     turret: { w: 1.05, h: 0.6, d: 1.3, z: -0.45 },
     barrels: [{ x: 0, len: 2.6, r: 0.06, pitch: 0.45 }],
   });
+}
+
+/** Tracked, twin cannon pointing at the sky, a radar panel above them. */
+export function buildAirDefence(): VehicleModel {
+  return buildVehicle({
+    len: 2.4,
+    wid: 1.25,
+    height: 0.45,
+    wheels: 0,
+    turret: { w: 0.95, h: 0.4, d: 0.95, z: 0 },
+    barrels: [
+      { x: -0.3, len: 1.25, r: 0.03, pitch: 0.55 },
+      { x: 0.3, len: 1.25, r: 0.03, pitch: 0.55 },
+    ],
+    radar: true,
+  });
+}
+
+/** A six-wheeled truck with a box body and a mast full of antennas. */
+export function buildJammer(): VehicleModel {
+  return buildVehicle({
+    len: 2.5,
+    wid: 1.1,
+    height: 0.4,
+    wheels: 3,
+    turret: { w: 1.0, h: 0.62, d: 1.5, z: -0.35 },
+    barrels: [],
+    mast: 2.3,
+  });
+}
+
+const DRONE_GREY = 0x8b908d;
+
+/** A small fixed-wing reconnaissance drone: long straight wing, twin tail, pusher propeller. */
+export function buildReconDrone(): VehicleModel {
+  const g = merge([
+    box(0.22, 0.2, 1.3, { at: [0, 0, 0.05], top: [0.7, 0.9], color: DRONE_GREY }),
+    box(2.6, 0.035, 0.34, { at: [0, 0.1, 0.1], color: DRONE_GREY }),
+    box(0.5, 0.036, 0.3, { at: [-0.95, 0.102, 0.1], team: 1 }),
+    box(0.5, 0.036, 0.3, { at: [0.95, 0.102, 0.1], team: 1 }),
+    box(0.03, 0.3, 0.22, { at: [-0.25, 0.14, -0.75], rot: [0, 0, 0.5], color: DRONE_GREY }),
+    box(0.03, 0.3, 0.22, { at: [0.25, 0.14, -0.75], rot: [0, 0, -0.5], color: DRONE_GREY }),
+    box(0.035, 0.035, 0.7, { at: [0, 0.02, -0.45], color: STEEL }),
+    cyl(0.1, 0.1, 'y', { at: [0, -0.13, 0.4], color: RUBBER }, 8), // sensor ball
+  ]);
+  const far = merge([
+    box(0.3, 0.2, 1.3, { at: [0, 0, 0], color: DRONE_GREY, team: 0.4 }),
+    box(2.6, 0.08, 0.4, { at: [0, 0.1, 0.1], color: DRONE_GREY, team: 0.6 }),
+  ]);
+  return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
+}
+
+/** A one-way attack quadcopter: four arms, four rotors, a warhead slung underneath. */
+export function buildStrikeDrone(): VehicleModel {
+  const parts = [
+    box(0.2, 0.1, 0.34, { at: [0, 0, 0], color: RUBBER }),
+    cyl(0.07, 0.5, 'z', { at: [0, -0.1, 0.12], color: 0x4a4f3c }, 8), // warhead
+    box(0.08, 0.02, 0.1, { at: [0, 0.06, -0.08], team: 1 }),
+  ];
+  for (const [x, z] of [
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+  ]) {
+    parts.push(
+      box(0.04, 0.03, 0.62, {
+        at: [x * 0.2, 0.02, z * 0.2],
+        rot: [0, x * z * 0.785, 0],
+        color: RUBBER,
+      }),
+    );
+    parts.push(cyl(0.2, 0.012, 'y', { at: [x * 0.4, 0.07, z * 0.4], color: 0x6f7472 }, 10));
+  }
+  const g = merge(parts);
+  const far = box(0.9, 0.14, 0.9, { at: [0, 0, 0], color: RUBBER, team: 0.5 });
+  return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
 }
 
 /** Eight wheels, a boat-shaped hull, a small turret with a long thin autocannon. */

@@ -1,15 +1,21 @@
 import * as THREE from 'three/webgpu';
 import { attribute, mix, vec3 } from 'three/tsl';
 import {
+  AIR_HEIGHT,
   KINDS,
+  KIND_AD,
   KIND_ARTILLERY,
   KIND_ATGM,
   KIND_COUNT,
+  KIND_DRONE,
+  KIND_EW,
   KIND_IFV,
   KIND_INFANTRY,
+  KIND_RECON,
+  KIND_STRIKE,
   KIND_TANK,
 } from '../sim/units';
-import { CLASS_VEHICLE } from '../sim/map';
+import { CLASS_AIR } from '../sim/map';
 import {
   EV_COLLAPSE,
   EV_DEATH,
@@ -42,8 +48,12 @@ import type { Fog } from './fog';
 import {
   SQUAD_OFFSETS,
   TEAM_OFFSETS,
+  buildAirDefence,
   buildArtillery,
   buildIfv,
+  buildJammer,
+  buildReconDrone,
+  buildStrikeDrone,
   buildInfantry,
   buildLauncher,
   buildTank,
@@ -78,7 +88,18 @@ interface SquadDraw {
   figures: { batch: Batch[]; x: number; z: number }[];
   far: Batch;
 }
-const IS_VEHICLE = KINDS.map((k) => k.cls === CLASS_VEHICLE);
+/** Kinds with a hull whose direction comes from the sim. */
+const IS_VEHICLE = KINDS.map((k) => k.turn > 0);
+const IS_AIR = KINDS.map((k) => k.cls === CLASS_AIR);
+const ALTITUDE = AIR_HEIGHT / 1024;
+/**
+ * How far each type lifts the fog, in cells: its sight in the sim plus a little, negative
+ * for drones, which look straight down past houses and hills.
+ */
+const FOG_SIGHT = KINDS.map(
+  (k) => (Math.ceil(k.sight / 4096) + 1) * (k.cls === CLASS_AIR ? -1 : 1),
+);
+const JAM_RADIUS = KINDS.map((k) => k.jam / 1024);
 
 export interface LodStats {
   /** Units drawn at each level of detail this frame, and units culled as off-screen. */
@@ -132,6 +153,7 @@ export class UnitView {
   private readonly vehicles: (VehicleDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
+  private readonly jamRings: Batch;
   private readonly frustum = new THREE.Frustum();
   private readonly projScreen = new THREE.Matrix4();
 
@@ -167,6 +189,10 @@ export class UnitView {
     this.vehicles[KIND_TANK] = vehicle(buildTank(), MAX_UNITS);
     this.vehicles[KIND_IFV] = vehicle(buildIfv(), MAX_UNITS >> 1);
     this.vehicles[KIND_ARTILLERY] = vehicle(buildArtillery(), MAX_UNITS >> 2);
+    this.vehicles[KIND_AD] = vehicle(buildAirDefence(), MAX_UNITS >> 3);
+    this.vehicles[KIND_EW] = vehicle(buildJammer(), MAX_UNITS >> 3);
+    this.vehicles[KIND_DRONE] = vehicle(buildReconDrone(), MAX_UNITS >> 2);
+    this.vehicles[KIND_STRIKE] = vehicle(buildStrikeDrone(), MAX_UNITS >> 1);
     const infantry = buildInfantry();
     const soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * 5, lod));
     this.squads[KIND_INFANTRY] = {
@@ -182,6 +208,35 @@ export class UnitView {
       ],
       far: batch(team.far, MAX_UNITS >> 2, 2),
     };
+    // A recon team is two men: fewer, and that is how you tell it from a rifle squad.
+    const pair: [number, number][] = [
+      [-0.3, 0.1],
+      [0.35, -0.2],
+    ];
+    this.squads[KIND_RECON] = {
+      figures: pair.map(([x, z]) => ({ batch: soldier, x, z })),
+      far: batch(
+        new THREE.BoxGeometry(0.9, 0.5, 0.5).translate(0, 0.25, 0).deleteAttribute('uv'),
+        MAX_UNITS >> 3,
+        2,
+      ),
+    };
+
+    // The jammer's bubble, drawn on the ground: yours in amber, the enemy's in red.
+    const jamMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true });
+    const jamTint = attribute('aTint', 'vec4');
+    jamMaterial.colorNode = jamTint.xyz;
+    jamMaterial.opacityNode = jamTint.w;
+    jamMaterial.depthWrite = false;
+    jamMaterial.depthTest = false;
+    jamMaterial.fog = false;
+    this.jamRings = new Batch(
+      new THREE.RingGeometry(0.985, 1, 128).rotateX(-Math.PI / 2),
+      jamMaterial,
+      512,
+    );
+    this.jamRings.mesh.renderOrder = 3;
+    this.group.add(this.jamRings.mesh);
 
     const ringGeometry = new THREE.RingGeometry(1.5, 1.72, 24).rotateX(-Math.PI / 2);
     const ringMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
@@ -256,7 +311,15 @@ export class UnitView {
     this.count = n;
     this.snapshotTime = now;
     // Sight is refreshed every other tick (10 Hz): plenty for units that move this slowly.
-    if (this.fogAge++ % 2 === 0) this.fog.update(this.curr, n, (id) => this.isMine(id));
+    if (this.fogAge++ % 2 === 0) {
+      this.fog.update(
+        this.curr,
+        n,
+        (id) => this.isMine(id),
+        // A jammed drone sends nothing back.
+        (id) => (IS_AIR[this.kind[id]] && this.load[id] > 0 ? 0 : FOG_SIGHT[this.kind[id]]),
+      );
+    }
     this.playEvents(s.events, now / 1000);
   }
 
@@ -324,9 +387,10 @@ export class UnitView {
         this.shoot(a, ax, ay, az, pos[3 * b], by, pos[3 * b + 2]);
       } else if (ev[e] === EV_DEATH) {
         this.diedAt[a] = seconds;
-        if (veh) this.scars.add(ax, az, 2.3, true);
+        const air = IS_AIR[this.kind[a]];
+        if (veh && !air) this.scars.add(ax, az, 2.3, true);
         if (near === LOD_HIDDEN) continue;
-        if (veh) fx.explosion(ax, ay, az);
+        if (veh && !air) fx.explosion(ax, ay, az);
         else fx.squadHit(ax, ay, az);
       }
     }
@@ -346,6 +410,11 @@ export class UnitView {
     const fx = this.effects;
     const kind = this.kind[a];
     const veh = this.vehicles[kind];
+    if (kind === KIND_STRIKE) {
+      // The drone dives into its target.
+      fx.missile(ax, ay, az, bx, by, bz);
+      return;
+    }
     if (!veh) {
       if (kind === KIND_ATGM) fx.missile(ax, ay + 0.45, az, bx, by, bz);
       else fx.rifleBurst(ax, ay + 0.42, az, bx, by, bz);
@@ -360,7 +429,7 @@ export class UnitView {
     const mx = ax + ux * m.muzzleZ;
     const my = ay + m.turretY + m.muzzleY;
     const mz = az + uz * m.muzzleZ;
-    if (kind === KIND_IFV) fx.autocannon(mx, my, mz, bx, by, bz);
+    if (kind === KIND_IFV || kind === KIND_AD) fx.autocannon(mx, my, mz, bx, by, bz);
     else fx.cannonShot(mx, my, mz, bx, by, bz);
   }
 
@@ -438,6 +507,7 @@ export class UnitView {
 
     const batches = this.batches;
     for (const b of batches) b.n = 0;
+    this.jamRings.n = 0;
     const lodCount = this.stats.lod;
     lodCount[0] = lodCount[1] = lodCount[2] = 0;
     let culled = 0;
@@ -450,7 +520,8 @@ export class UnitView {
       const veh = this.vehicles[this.kind[i]];
       const isTank = veh !== null;
       const alive = state === STATE_ALIVE;
-      if (!alive && !isTank) continue; // fallen squads leave no wreck
+      // Fallen squads and shot-down drones leave no wreck.
+      if (!alive && (!isTank || IS_AIR[this.kind[i]])) continue;
       if ((info[i] & INFO_CARRIED) !== 0) {
         this.lodOf[i] = LOD_HIDDEN;
         continue;
@@ -458,7 +529,9 @@ export class UnitView {
 
       const x = prev[2 * i] + (curr[2 * i] - prev[2 * i]) * alpha;
       const z = prev[2 * i + 1] + (curr[2 * i + 1] - prev[2 * i + 1]) * alpha;
-      const y = this.terrain.heightAt(x, z);
+      const flying = IS_AIR[this.kind[i]];
+      const y =
+        this.terrain.heightAt(x, z) + (flying ? ALTITUDE + Math.sin(seconds * 1.3 + i) * 0.3 : 0);
       pos[3 * i] = x;
       pos[3 * i + 1] = y;
       pos[3 * i + 2] = z;
@@ -536,8 +609,16 @@ export class UnitView {
       const sin = Math.sin(h);
       const cos = Math.cos(h);
 
+      const jam = JAM_RADIUS[this.kind[i]];
+      if (jam > 0 && alive) {
+        const mine = teamId === this.playerTeam;
+        const a = 0.35 + 0.15 * Math.sin(seconds * 3 + i);
+        this.jamRings.put(x, y + 0.4, z, 0, jam, 1, 1, mine ? 0.72 : 0.22, mine ? 0.15 : 0.18, a);
+      }
       if (veh) {
-        const burn = alive ? 0 : 1;
+        // A jammed drone flickers: its link is gone.
+        const jammedNow = flying && alive && this.load[i] > 0;
+        const burn = alive ? (jammedNow ? 0.45 + 0.4 * Math.sin(seconds * 24 + i) : 0) : 1;
         if (lod === 2) {
           veh.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
         } else {
@@ -552,7 +633,9 @@ export class UnitView {
           const m = veh.model;
           const px = x + sin * m.turretZ - ts * kick;
           const pz = z + cos * m.turretZ - tc * kick;
-          veh.turret[lod].put(px, y + m.turretY, pz, ts, tc, 1, team[0], team[1], team[2], burn);
+          if (veh.turret.length > 0) {
+            veh.turret[lod].put(px, y + m.turretY, pz, ts, tc, 1, team[0], team[1], team[2], burn);
+          }
         }
         if (!alive && lod < 2) {
           const age = seconds - this.diedAt[i];
@@ -604,6 +687,7 @@ export class UnitView {
     }
     this.stats.culled = culled;
     for (const b of batches) b.flush();
+    this.jamRings.flush();
     this.rings.count = ringCount;
     if (ringCount > 0) {
       const attr = this.rings.instanceMatrix;

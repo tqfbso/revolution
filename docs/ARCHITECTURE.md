@@ -94,6 +94,16 @@ Garrisoned units stay in the unit arrays (they keep targeting and firing through
 path) with `inside` set to their building; they do not move or collide. Range is the
 weapon's plus a bonus for height difference (and for firing from a building).
 
+Sight and spotting: step 4 above now reads "within its own sight (per type) or spotted by
+the army, within 44 units". Before it, `updateJamming` marks drones inside an enemy
+jammer's bubble and `updateSpotters` lets sensors (recon teams, recon drones) mark every
+enemy in view as spotted. `spotted` is read and written in the same pass in index order:
+deterministic, though a unit can benefit from a mark set earlier in the same tick.
+
+Air is a third movement class whose cost table is 1 everywhere, so drones need no special
+case in movement: the straight line is always clear. They are skipped where ground rules
+apply (line of sight, shell blast, town capture, collisions with ground units).
+
 Indirect fire: guns skip the normal target search and pick among enemies whose `spotted`
 tick is in the future (set by any enemy unit that has them as a target in sight, and by
 their own firing). `launch` puts a shell into a small pool in the world (where and when it
@@ -152,8 +162,8 @@ structure health, town owners, and the tick's combat events.
 ## Player view
 
 The player commands team 0. `src/client/fog.ts` computes what that army sees (10 Hz: 120
-rays from one viewpoint per occupied 2x2 cells, each stopped by buildings, hills and deep
-forest) into a 256x256 texture that every world material multiplies its
+rays from one viewpoint per occupied 2x2 cells, as far as that unit type sees, each stopped
+by buildings, hills and deep forest; a drone lights a plain circle) into a 256x256 texture that every world material multiplies its
 colour by; enemy units outside vision are not drawn and their effects not played.
 `src/client/minimap.ts` draws terrain, fog, units and the camera outline into a 256-pixel
 canvas ten times a second. Selection, control groups and the minimap are client state.

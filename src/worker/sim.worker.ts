@@ -99,6 +99,7 @@ function postSnapshot(w: World, simMs: number): void {
       (w.reveal[i] > w.tick ? INFO_REVEALED : 0);
     hp[i] = Math.ceil((w.hp[i] * 255) / KINDS[kind].hp);
     aim[i] = w.attack[i] === NO_TARGET ? NO_AIM : w.attack[i];
+    if (w.jammed[i] !== 0) load[i] = 1;
     if (KINDS[kind].turn > 0) {
       heading[i] = Math.round((Math.atan2(w.faceX[i], w.faceY[i]) * 128) / Math.PI) & 255;
     }

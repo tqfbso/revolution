@@ -131,6 +131,11 @@ export interface World {
   shTick: Int32Array;
   shOwner: Int32Array;
   shKind: Uint8Array;
+  /**
+   * 1 for a drone inside an enemy jammer's bubble. Recomputed from positions at the start
+   * of every tick before anything reads it, so it is not part of the hash.
+   */
+  jammed: Uint8Array;
   /** Structures: health (0 or less = destroyed), repair work done, occupants and their team. */
   sHp: Int32Array;
   sRepair: Int32Array;
@@ -202,6 +207,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     shTick: new Int32Array(MAX_SHELLS),
     shOwner: new Int32Array(MAX_SHELLS),
     shKind: new Uint8Array(MAX_SHELLS),
+    jammed: new Uint8Array(MAX_UNITS),
     sHp: map.sMaxHp.slice(),
     sRepair: new Int32Array(MAX_STRUCTS),
     sOcc: new Uint8Array(MAX_STRUCTS),
