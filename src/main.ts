@@ -7,7 +7,8 @@ import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
 import { UnitView } from './client/units';
-import type { Snapshot, ToWorker } from './worker/protocol';
+import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
+import { KIND_INFANTRY, KIND_TANK } from './sim/units';
 
 const SKY = 0x9db4c4;
 
@@ -37,6 +38,7 @@ async function start(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const unitCount = Math.min(Math.max(Number(params.get('units') ?? 3000) | 0, 0), MAX_UNITS);
   const seed = Number(params.get('seed') ?? 1) | 0;
+  const scenario: Scenario = params.get('scenario') === 'roam' ? 'roam' : 'battle';
 
   const { renderer, canvas, backend } = await createRenderer(params.get('renderer') === 'webgl');
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -63,28 +65,36 @@ async function start(): Promise<void> {
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
     units.applySnapshot(e.data, performance.now());
     hud.simTick(e.data.simMs);
+    hud.stats.alive = e.data.alive;
     if (e.data.hash !== undefined) hud.stats.hash = e.data.hash.toString(16).padStart(8, '0');
   };
-  post({ type: 'init', seed, units: unitCount });
+  post({ type: 'init', seed, units: unitCount, scenario });
 
   const input = new Input(canvas, rts.camera, terrain, units, send);
   scene.add(terrain.mesh, units.mesh, units.rings, input.marker);
 
+  // Reinforcements: 250 tanks and 250 infantry squads per side, attacking toward the centre.
   document.getElementById('add-units')?.addEventListener('click', () => {
-    for (let team = 0; team < 3; team++) {
-      send({
-        type: CMD_SPAWN,
-        count: team === 0 ? 334 : 333,
-        team,
-        x: fx(MAP_SIZE / 2),
-        y: fx(MAP_SIZE / 2),
-        radius: fx(120),
-        wander: true,
-      });
+    for (let team = 0; team < 2; team++) {
+      const dir = team === 0 ? -1 : 1;
+      for (const kind of [KIND_TANK, KIND_INFANTRY]) {
+        send({
+          type: CMD_SPAWN,
+          count: 250,
+          team,
+          kind,
+          x: fx(MAP_SIZE / 2 + dir * (kind === KIND_TANK ? 150 : 175)),
+          y: fx(MAP_SIZE / 2),
+          radius: fx(70),
+          wander: scenario === 'roam',
+          advanceX: scenario === 'roam' ? undefined : fx(-dir * 150),
+          advanceY: scenario === 'roam' ? undefined : 0,
+        });
+      }
     }
   });
   document.getElementById('reset')?.addEventListener('click', () => {
-    post({ type: 'init', seed, units: unitCount });
+    post({ type: 'init', seed, units: unitCount, scenario });
   });
 
   const resize = () => {

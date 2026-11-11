@@ -1,7 +1,13 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MAX_UNITS, TICK_MS } from '../sim/world';
-import type { Snapshot } from '../worker/protocol';
+import {
+  INFO_KIND_SHIFT,
+  INFO_STATE_MASK,
+  INFO_TEAM_SHIFT,
+  type Snapshot,
+} from '../worker/protocol';
+import { STATE_ALIVE, STATE_FREE } from '../sim/world';
 import type { Terrain } from './terrain';
 
 const TEAM_COLORS = [
@@ -37,7 +43,8 @@ export class UnitView {
   private curr = new Float32Array(MAX_UNITS * 2);
   private heading = new Float32Array(MAX_UNITS);
   private headingGoal = new Float32Array(MAX_UNITS);
-  private teams = new Uint8Array(MAX_UNITS);
+  /** Latest per-unit state/kind/team bits from the sim (see INFO_* in the protocol). */
+  readonly info = new Uint8Array(MAX_UNITS);
   private snapshotTime = 0;
   private colorsDirty = false;
   private readonly color = new THREE.Color();
@@ -73,10 +80,18 @@ export class UnitView {
       this.selectedCount = 0;
       this.prev.set(s.positions);
     }
-    for (let i = n < fresh ? 0 : fresh; i < n; i++) {
-      this.prev[2 * i] = this.curr[2 * i];
-      this.prev[2 * i + 1] = this.curr[2 * i + 1];
-      this.heading[i] = this.headingGoal[i] = (i * 2.399963) % (Math.PI * 2);
+    for (let i = 0; i < n; i++) {
+      const alive = (s.info[i] & INFO_STATE_MASK) === STATE_ALIVE;
+      const wasAlive = i < fresh && (this.info[i] & INFO_STATE_MASK) === STATE_ALIVE;
+      if (alive && !wasAlive) {
+        // New unit (or a reused slot): do not interpolate from wherever the slot was before.
+        this.prev[2 * i] = this.curr[2 * i];
+        this.prev[2 * i + 1] = this.curr[2 * i + 1];
+        this.heading[i] = this.headingGoal[i] = (i * 2.399963) % (Math.PI * 2);
+      } else if (!alive && this.selected[i]) {
+        this.selected[i] = 0;
+        this.selectedCount--;
+      }
     }
     for (let i = 0; i < n; i++) {
       const dx = this.curr[2 * i] - this.prev[2 * i];
@@ -84,21 +99,23 @@ export class UnitView {
       // Only turn when really moving, so separation nudges do not make idle units twitch.
       if (dx * dx + dz * dz > 0.01) this.headingGoal[i] = Math.atan2(dx, dz);
     }
-    if (s.teams) {
-      this.teams.set(s.teams);
-      this.colorsDirty = true;
-    }
+    this.info.set(s.info);
+    this.colorsDirty = true;
     this.count = n;
     this.snapshotTime = now;
   }
 
   setSelected(ids: Iterable<number>, additive: boolean): void {
     if (!additive) this.selected.fill(0);
-    for (const id of ids) this.selected[id] = 1;
+    for (const id of ids) if (this.isAlive(id)) this.selected[id] = 1;
     let c = 0;
     for (let i = 0; i < this.count; i++) c += this.selected[i];
     this.selectedCount = c;
     this.colorsDirty = true;
+  }
+
+  isAlive(id: number): boolean {
+    return id < this.count && (this.info[id] & INFO_STATE_MASK) === STATE_ALIVE;
   }
 
   selectedIds(): number[] {
@@ -129,8 +146,11 @@ export class UnitView {
       else if (d < -Math.PI) d += Math.PI * 2;
       const h = this.heading[i] + (d > maxTurn ? maxTurn : d < -maxTurn ? -maxTurn : d);
       this.heading[i] = h > Math.PI ? h - Math.PI * 2 : h < -Math.PI ? h + Math.PI * 2 : h;
-      const sin = Math.sin(h);
-      const cos = Math.cos(h);
+      // Placeholder until the real models land: infantry squads are small, free slots hidden.
+      const state = this.info[i] & INFO_STATE_MASK;
+      const scale = state === STATE_FREE ? 0 : (this.info[i] >> INFO_KIND_SHIFT) & 3 ? 0.55 : 1;
+      const sin = Math.sin(h) * scale;
+      const cos = Math.cos(h) * scale;
 
       const o = i * 16;
       m[o] = cos;
@@ -138,7 +158,7 @@ export class UnitView {
       m[o + 2] = -sin;
       m[o + 3] = 0;
       m[o + 4] = 0;
-      m[o + 5] = 1;
+      m[o + 5] = scale;
       m[o + 6] = 0;
       m[o + 7] = 0;
       m[o + 8] = sin;
@@ -177,8 +197,9 @@ export class UnitView {
 
     if (this.colorsDirty && this.mesh.instanceColor) {
       for (let i = 0; i < n; i++) {
-        this.color.copy(TEAM_COLORS[this.teams[i]] ?? TEAM_COLORS[0]);
-        if (this.selected[i]) this.color.lerp(SELECTED_TINT, 0.3);
+        this.color.copy(TEAM_COLORS[this.info[i] >> INFO_TEAM_SHIFT] ?? TEAM_COLORS[0]);
+        if ((this.info[i] & INFO_STATE_MASK) !== STATE_ALIVE) this.color.multiplyScalar(0.12);
+        else if (this.selected[i]) this.color.lerp(SELECTED_TINT, 0.3);
         this.mesh.setColorAt(i, this.color);
       }
       uploadRange(this.mesh.instanceColor, n * 3);
