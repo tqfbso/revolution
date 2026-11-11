@@ -160,3 +160,68 @@ in M4); vision is a resource (fog and concealment in M3, spotting and recon in M
 is good at everything (missile infantry beats tanks from cover, artillery beats static
 positions and is hunted by counter-battery, drones give cheap eyes and are countered by air
 defence and jamming). The roadmap for M4 to M6 is written around these dynamics.
+
+## 021 Towns sit on the crossings, and the world may change its map
+
+Three of the five fords get a bridge and a settlement on each bank: a town in the centre,
+villages north and south. The outer two fords stay bare, so there is always a way around
+that costs time instead of blood. Fords are now half speed, which is what makes a bridge
+worth holding and worth cutting. Buildings and bridges are part of the terrain grid, so
+pathfinding and collisions needed no new code; the price is that the map is no longer
+constant. When a building falls or a bridge is cut the passability tables are rebuilt and
+all flowfields dropped. That takes a few milliseconds and happens a handful of times per
+game. Rejected: structures as big units (they would need their own collision and sight
+code and would not block paths).
+
+## 022 A garrison is hard to see and hard to hurt, and the answer is to bring the house down
+
+Close Combat was the reference. Infantry in a building takes a quarter of the damage,
+shoots 3 units further, and cannot be targeted from beyond 13 units until it fires (then
+it is exposed for 5 seconds). So tanks, which outrange infantry in the open, have to come
+close to find a garrison, and infantry attacking a held house loses about four squads for
+one. The counter is the tank gun used on the building: on order (Ctrl + right click, which
+also works as reconnaissance by fire on a house you only suspect), or automatically when
+shooting at a garrison that has shown itself. A building has 220 health per cell of floor
+plan; a tank shell does 60. At 60% it shows damage, at zero it collapses: each squad
+inside loses half its remaining strength and finds itself in the rubble. Rubble is
+permanent, infantry only, half damage and concealed like forest, so a ruined town is
+still a position, just a worse one. Capacity is one squad per cell, at most 8.
+Artillery will be the second counter in M5.
+
+## 023 Line of sight is real, for the fight and for the fog
+
+A unit can only target what it can see: a line from eye to eye that is not broken by a
+standing building, by more than 12 units of forest, or by ground. Height matters twice.
+Sight: from a plateau you look down on the plain, but only from its edge, and nobody on
+the plain sees onto it. Range: plus half the height difference, capped at +5 and -2, so a
+tank on a 9-unit mesa outranges one below by a quarter. The fog of war on the client
+follows the same rules with rays cast from the player's units, so what you are shown
+matches what your units can shoot. Units keep a target they lose sight of for at most a
+second and then look for another. Cost: the sim tick went from 2.5 ms to 3.6 ms at 3000
+units in battle and from 12.4 ms to 15.4 ms at 10000, against a budget of 50.
+
+## 024 A town belongs to the army alone in it
+
+Each bank of a crossing is its own district with a capture circle. An army that is the
+only one inside gains a point per unit per second, at most ten, and takes the district at
+60: six seconds in force, a minute for a lone squad. Two armies inside freeze it, and a
+garrison counts, so a town is not taken until its houses are cleared. A held district
+pays 10 credits a second. There is nothing to buy yet; the number is on screen so holding
+ground already has a score, and M6 gives it a use.
+
+## 025 Bridges are cut by tanks and rebuilt by idle infantry
+
+There are no engineers or construction yet (M6), so repair is the simplest rule that
+makes cutting a bridge a decision instead of a one-way door: infantry standing idle
+within 14 units of a cut bridge rebuilds it, 12 seconds with five squads, a minute with
+one, and not while an enemy squad stands there too. Units on a bridge when it falls are
+lost. The two outer fords and the three fords under the towns remain, so the map never
+splits in two.
+
+## 026 The default scenario is an assault, and blue stands still
+
+The opening used to be two armies running into each other. It is now the situation the
+game is about: blue holds the east bank with infantry in the houses and tanks behind,
+red starts west of the central town with no orders. Blue has no brain until M7; it
+shoots what it sees and chases what comes close. `?scenario=clash` keeps the old
+head-on battle for performance comparisons.

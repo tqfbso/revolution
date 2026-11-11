@@ -10,6 +10,7 @@ import { Terrain } from './client/terrain';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
+import { StructureView } from './client/structures';
 import { UnitView } from './client/units';
 import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
 import { KIND_INFANTRY, KIND_TANK } from './sim/units';
@@ -42,7 +43,8 @@ async function start(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const unitCount = Math.min(Math.max(Number(params.get('units') ?? 3000) | 0, 0), MAX_UNITS);
   const seed = Number(params.get('seed') ?? 1) | 0;
-  const scenario: Scenario = params.get('scenario') === 'roam' ? 'roam' : 'battle';
+  const wanted = params.get('scenario');
+  const scenario: Scenario = wanted === 'roam' || wanted === 'clash' ? wanted : 'assault';
 
   const { renderer, canvas, backend } = await createRenderer(params.get('renderer') === 'webgl');
   // Render scale adapts to load: if frames run slow for a couple of seconds the resolution
@@ -80,9 +82,12 @@ async function start(): Promise<void> {
   // You command the red army (team 0) and see what it sees. `?fog=0` lifts the fog,
   // `?control=all` lets you select and order every army.
   const fog = new Fog(params.get('fog') !== '0');
-  const terrain = new Terrain(generateMap(seed), fog, shadows);
+  const map = generateMap(seed);
+  fog.setMap(map);
+  const terrain = new Terrain(map, fog, shadows);
   const effects = new Effects();
-  const units = new UnitView(terrain, effects, fog, shadows);
+  const structures = new StructureView(map, terrain, fog, effects, shadows);
+  const units = new UnitView(terrain, effects, fog, shadows, structures);
   units.lodNear *= lodScale;
   units.lodFar *= lodScale;
   const rts = new RtsCamera(canvas, terrain);
@@ -95,6 +100,7 @@ async function start(): Promise<void> {
   const post = (msg: ToWorker) => worker.postMessage(msg);
   const send = (command: Command) => post({ type: 'command', command });
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
+    structures.applySnapshot(e.data, performance.now() / 1000);
     units.applySnapshot(e.data, performance.now());
     hud.simTick(e.data.simMs);
     hud.stats.alive = e.data.alive;
@@ -103,7 +109,7 @@ async function start(): Promise<void> {
   post({ type: 'init', seed, units: unitCount, scenario });
 
   const lookAt = (x: number, z: number) => rts.moveTo(x, z);
-  const input = new Input(canvas, rts.camera, terrain, units, send, lookAt);
+  const input = new Input(canvas, rts.camera, terrain, units, send, lookAt, structures);
   input.controlAll = params.get('control') === 'all';
   const minimap = new Minimap(
     document.getElementById('minimap') as HTMLCanvasElement,
@@ -113,8 +119,36 @@ async function start(): Promise<void> {
     rts.camera,
     lookAt,
     (x, z, attack) => input.orderTo(x, z, attack),
+    structures,
+    map,
   );
-  scene.add(terrain.mesh, terrain.water, terrain.trees, units.group, effects.group, input.marker);
+  scene.add(
+    terrain.mesh,
+    terrain.water,
+    terrain.trees,
+    structures.group,
+    units.group,
+    effects.group,
+    input.marker,
+  );
+  // Towns: who holds what, and what the held ones have paid so far.
+  const townsEl = document.getElementById('towns');
+  const TEAM_NAME = ['red', 'blue', 'gold'];
+  const TEAM_CSS = ['#eb4637', '#468cff', '#f0be3c'];
+  setInterval(() => {
+    if (!townsEl) return;
+    let html = `<b>Credits ${structures.credits[0] ?? 0}</b> (blue ${structures.credits[1] ?? 0})`;
+    for (let t = 0; t < map.townCount; t++) {
+      const owner = structures.townOwner[t];
+      const taking = structures.townCapturer[t];
+      const colour = TEAM_CSS[owner] ?? '#b9c4cf';
+      html += `<br /><span style="color:${colour}">■</span> ${map.townName[t]}`;
+      if (TEAM_NAME[taking] !== undefined) {
+        html += ` <span style="color:${TEAM_CSS[taking]}">${TEAM_NAME[taking]} taking ${structures.townProgress[t]}%</span>`;
+      }
+    }
+    townsEl.innerHTML = html;
+  }, 500);
 
   // Reinforcements: 250 tanks and 250 infantry squads per side, attacking toward the centre.
   document.getElementById('add-units')?.addEventListener('click', () => {
@@ -155,6 +189,7 @@ async function start(): Promise<void> {
     const dt = Math.min(dtMs / 1000, 0.1);
     rts.update(dt);
     units.update(now, dt, rts.camera);
+    structures.update(now / 1000, dt);
     effects.update(dt, rts.camera);
     input.update(dt);
     minimap.update(now);
@@ -204,6 +239,9 @@ async function start(): Promise<void> {
   (window as unknown as { __revolution: unknown }).__revolution = {
     stats: hud.stats,
     units,
+    structures,
+    map,
+    send,
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),
   };
   document.getElementById('loading')?.remove();

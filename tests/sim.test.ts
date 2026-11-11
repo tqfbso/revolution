@@ -1,22 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { CMD_ATTACK_MOVE, CMD_MOVE, CMD_SPAWN, CMD_STOP, type Command } from '../src/sim/commands';
+import {
+  CMD_ATTACK_MOVE,
+  CMD_ATTACK_STRUCTURE,
+  CMD_GARRISON,
+  CMD_MOVE,
+  CMD_SPAWN,
+  CMD_STOP,
+  type Command,
+} from '../src/sim/commands';
 import { fx, isqrt } from '../src/sim/fixed';
 import {
   CLASS_FOOT,
   CLASS_VEHICLE,
   MAP_CELLS,
+  S_BRIDGE,
+  S_BUILDING,
+  T_BRIDGE,
+  T_BUILDING,
   T_FORD,
   T_FOREST,
+  T_RUBBLE,
+  addStructure,
+  addTown,
   cellOfPos,
   flatMap,
   generateMap,
+  refreshPassability,
 } from '../src/sim/map';
-import { battleCommands, stressTestCommands } from '../src/sim/scenarios';
+import { assaultCommands, battleCommands, stressTestCommands } from '../src/sim/scenarios';
 import { KINDS, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
 import { step } from '../src/sim/sim';
 import {
+  EV_CAPTURE,
+  EV_COLLAPSE,
   EV_DEATH,
+  EV_REPAIR,
   EV_SHOT,
+  EV_SIEGE,
   FLAG_MOVING,
   MAP_SIZE_FX,
   MAX_UNITS,
@@ -40,6 +60,21 @@ function script(tick: number): Command[] {
     return [{ type: CMD_MOVE, units, x: fx(200), y: fx(800) }];
   }
   if (tick === 90) return [{ type: CMD_STOP, units: [0, 3, 6, 9, 99999, -1] }];
+  if (tick === 60) {
+    const units = Array.from({ length: 400 }, (_, i) => 1500 + i * 3);
+    return [
+      { type: CMD_GARRISON, units, structure: 2 },
+      { type: CMD_GARRISON, units: units.slice(200), structure: 14 },
+      { type: CMD_GARRISON, units: [1, 2, -5], structure: 9999 },
+    ];
+  }
+  if (tick === 150) {
+    const units = Array.from({ length: 300 }, (_, i) => 1501 + i * 4);
+    return [
+      { type: CMD_ATTACK_STRUCTURE, units, structure: 2 },
+      { type: CMD_ATTACK_STRUCTURE, units: units.slice(0, 80), structure: 16 },
+    ];
+  }
   if (tick === 120) {
     return [
       {
@@ -103,7 +138,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 1787654163;
+const GOLDEN = 2184234842;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -259,7 +294,7 @@ describe('terrain and pathfinding', () => {
   const trespassers = (w: World) => {
     let bad = 0;
     for (let i = 0; i < w.count; i++) {
-      if (w.state[i] !== STATE_ALIVE) continue;
+      if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0) continue;
       if (w.map.cost[KINDS[w.kind[i]].cls][cellOfPos(w.posX[i], w.posY[i])] === 0) bad++;
     }
     return bad;
@@ -274,8 +309,8 @@ describe('terrain and pathfinding', () => {
 
   it('both banks of the river are passable ground, and vehicles cannot enter forest', () => {
     for (const cls of [CLASS_VEHICLE, CLASS_FOOT]) {
-      expect(map.cost[cls][cellAt(402, 512)]).toBeGreaterThan(0);
-      expect(map.cost[cls][cellAt(622, 512)]).toBeGreaterThan(0);
+      expect(map.cost[cls][cellAt(340, 512)]).toBeGreaterThan(0);
+      expect(map.cost[cls][cellAt(690, 512)]).toBeGreaterThan(0);
     }
     for (let c = 0; c < MAP_CELLS * MAP_CELLS; c++) {
       if (map.type[c] === T_FOREST) expect(map.cost[CLASS_VEHICLE][c]).toBe(0);
@@ -283,7 +318,7 @@ describe('terrain and pathfinding', () => {
   });
 
   it('a mixed group ordered across the river gets there without touching water', () => {
-    const w = createWorld(1, map);
+    const w = createWorld(1);
     step(w, [spawnAt(0, KIND_TANK, 40, 380, 512), spawnAt(0, KIND_INFANTRY, 40, 370, 512)]);
     const units = Array.from({ length: 80 }, (_, i) => i);
     step(w, [{ type: CMD_MOVE, units, x: fx(640), y: fx(512) }]);
@@ -324,7 +359,7 @@ describe('terrain and pathfinding', () => {
   });
 
   it('nobody ends up on impassable ground during a battle across the river', () => {
-    const w = createWorld(1, map);
+    const w = createWorld(1);
     step(w, battleCommands(2000));
     for (let t = 0; t < 1500; t++) {
       step(w, []);
@@ -334,5 +369,233 @@ describe('terrain and pathfinding', () => {
     const c = census(w);
     // The armies found each other across the river and fought.
     expect(c.wrecks + c.free).toBeGreaterThan(100);
+  });
+});
+
+describe('cities', () => {
+  /** Flat ground with one 2x2 building at cells (126..127, 124..125): x 504..512, y 496..504. */
+  const withHouse = () => {
+    const m = flatMap();
+    addTown(m, fx(508), fx(500), fx(30), 'Test');
+    addStructure(m, S_BUILDING, 126, 124, 2, 2, 0, 3);
+    refreshPassability(m);
+    return m;
+  };
+  const place = (w: World, id: number, x: number, y: number) => {
+    w.posX[id] = fx(x);
+    w.posY[id] = fx(y);
+  };
+  const hasEvent = (w: World, type: number) => {
+    for (let e = 0; e < w.events.length; e += 3) if (w.events[e] === type) return true;
+    return false;
+  };
+  const shotsBy = (w: World) => {
+    const n = new Map<number, number>();
+    for (let e = 0; e < w.events.length; e += 3) {
+      if (w.events[e] === EV_SHOT) n.set(w.events[e + 1], (n.get(w.events[e + 1]) ?? 0) + 1);
+    }
+    return n;
+  };
+
+  it('the generated map has towns on both banks and bridges that carry traffic', () => {
+    const m = generateMap(1);
+    expect(m.townCount).toBe(6);
+    const kinds = Array.from(m.sKind.slice(0, m.structCount));
+    expect(kinds.filter((k) => k === S_BRIDGE).length).toBeGreaterThanOrEqual(2);
+    expect(kinds.filter((k) => k === S_BUILDING).length).toBeGreaterThan(20);
+    for (let c = 0; c < MAP_CELLS * MAP_CELLS; c++) {
+      if (m.type[c] === T_BUILDING) expect(m.cost[CLASS_FOOT][c]).toBe(0);
+      if (m.type[c] === T_BRIDGE) expect(m.cost[CLASS_VEHICLE][c]).toBe(1);
+    }
+  });
+
+  it('a building blocks movement, sight and fire', () => {
+    const w = createWorld(1, withHouse());
+    step(w, [spawnAt(0, KIND_TANK, 1, 495, 500), spawnAt(1, KIND_TANK, 1, 521, 500)]);
+    place(w, 0, 495, 500);
+    place(w, 1, 521, 500);
+    for (let t = 0; t < 30; t++) step(w, []);
+    // 26 apart with a house in between: neither sees the other.
+    expect(w.attack[0]).toBe(-1);
+    expect(w.attack[1]).toBe(-1);
+    expect(w.events.length).toBe(0);
+    // Step sideways past the corner and the fight is on.
+    place(w, 0, 495, 512);
+    place(w, 1, 521, 512);
+    for (let t = 0; t < 80; t++) step(w, []);
+    expect(hasEvent(w, EV_SHOT)).toBe(true);
+    // Ordered straight through the house, a tank goes around it.
+    const w2 = createWorld(1, withHouse());
+    step(w2, [spawnAt(0, KIND_TANK, 1, 495, 500)]);
+    step(w2, [{ type: CMD_MOVE, units: [0], x: fx(525), y: fx(500) }]);
+    for (let t = 0; t < 400; t++) {
+      step(w2, []);
+      expect(w2.map.type[cellOfPos(w2.posX[0], w2.posY[0])]).not.toBe(T_BUILDING);
+    }
+    expect(w2.posX[0]).toBeGreaterThan(fx(520));
+  });
+
+  it('infantry occupies a building, ambushes from it and shrugs off rifle fire', () => {
+    const w = createWorld(1, withHouse());
+    step(w, [spawnAt(0, KIND_INFANTRY, 2, 495, 500)]);
+    step(w, [{ type: CMD_GARRISON, units: [0, 1], structure: 0 }]);
+    for (let t = 0; t < 200; t++) step(w, []);
+    expect(w.inside[0]).toBe(0);
+    expect(w.inside[1]).toBe(0);
+    expect(w.sOcc[0]).toBe(2);
+    // Enemy squads walk up: the garrison shoots first, because it cannot be seen.
+    step(w, [spawnAt(1, KIND_INFANTRY, 2, 540, 500)]);
+    step(w, [{ type: CMD_ATTACK_MOVE, units: [2, 3], x: fx(500), y: fx(500) }]);
+    w.events.length = 0;
+    for (let t = 0; t < 600 && w.events.length === 0; t++) step(w, []);
+    expect(w.events[0]).toBe(EV_SHOT);
+    expect(w.inside[w.events[1]]).toBe(0);
+    // Equal numbers, equal weapons: the side behind walls wins without losing a squad.
+    for (let t = 0; t < 2500; t++) step(w, []);
+    expect(w.state[2]).not.toBe(STATE_ALIVE);
+    expect(w.state[3]).not.toBe(STATE_ALIVE);
+    expect(w.state[0]).toBe(STATE_ALIVE);
+    expect(w.state[1]).toBe(STATE_ALIVE);
+    // A move order brings the garrison out onto walkable ground.
+    step(w, [{ type: CMD_MOVE, units: [0, 1], x: fx(480), y: fx(500) }]);
+    expect(w.inside[0]).toBe(-1);
+    expect(w.sOcc[0]).toBe(0);
+    expect(w.map.cost[CLASS_FOOT][cellOfPos(w.posX[0], w.posY[0])]).toBeGreaterThan(0);
+  });
+
+  it('tanks bring the house down on its garrison; the ruin stays and still gives cover', () => {
+    const w = createWorld(1, withHouse());
+    step(w, [spawnAt(0, KIND_INFANTRY, 2, 495, 500)]);
+    step(w, [{ type: CMD_GARRISON, units: [0, 1], structure: 0 }]);
+    for (let t = 0; t < 200; t++) step(w, []);
+    step(w, [spawnAt(1, KIND_TANK, 4, 540, 500)]);
+    step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [2, 3, 4, 5], structure: 0 }]);
+    w.events.length = 0;
+    let fell = -1;
+    for (let t = 0; t < 1500 && fell < 0; t++) {
+      step(w, []);
+      if (hasEvent(w, EV_COLLAPSE)) fell = t;
+    }
+    expect(fell).toBeGreaterThan(0);
+    expect(hasEvent(w, EV_SIEGE)).toBe(true);
+    expect(w.sHp[0]).toBe(0);
+    expect(w.map.type[cellOfPos(fx(506), fx(498))]).toBe(T_RUBBLE);
+    expect(w.map.cost[CLASS_FOOT][cellOfPos(fx(506), fx(498))]).toBe(2);
+    expect(w.map.cost[CLASS_VEHICLE][cellOfPos(fx(506), fx(498))]).toBe(0);
+    // Survivors are out in the rubble, hurt.
+    for (const i of [0, 1]) {
+      expect(w.inside[i]).toBe(-1);
+      if (w.state[i] === STATE_ALIVE)
+        expect(w.hp[i]).toBeLessThanOrEqual(KINDS[KIND_INFANTRY].hp / 2);
+    }
+    // Nobody can go back in, and the ruin never clears.
+    step(w, [{ type: CMD_GARRISON, units: [0, 1], structure: 0 }]);
+    for (let t = 0; t < 3000; t++) step(w, []);
+    expect(w.sOcc[0]).toBe(0);
+    expect(w.map.type[cellOfPos(fx(506), fx(498))]).toBe(T_RUBBLE);
+  });
+
+  it('high ground shoots further', () => {
+    const hill = flatMap();
+    // Everything west of x = 500 is a plateau 9 units up.
+    for (let v = 0; v < hill.heights.length; v++) {
+      if (v % (MAP_CELLS + 1) <= 125) hill.heights[v] = fx(10);
+    }
+    const w = createWorld(1, hill);
+    step(w, [spawnAt(0, KIND_TANK, 1, 499, 500), spawnAt(1, KIND_TANK, 1, 528, 500)]);
+    // At the lip of the plateau: from further back its own edge would hide the ground below.
+    place(w, 0, 499, 500);
+    place(w, 1, 528, 500);
+    w.speed[0] = w.speed[1] = 0;
+    w.cooldown[0] = w.cooldown[1] = 0;
+    // 29 apart: beyond a tank's 26, but within reach from 9 units up (and not from below).
+    for (let t = 0; t < 100; t++) step(w, []);
+    const shots = shotsBy(w);
+    expect(shots.get(0) ?? 0).toBeGreaterThan(0);
+    expect(shots.get(1) ?? 0).toBe(0);
+  });
+
+  it('a town goes to the army alone in it and then pays income; a garrison blocks capture', () => {
+    const w = createWorld(1, withHouse());
+    step(w, [spawnAt(1, KIND_INFANTRY, 1, 495, 500)]);
+    step(w, [{ type: CMD_GARRISON, units: [0], structure: 0 }]);
+    for (let t = 0; t < 1400; t++) step(w, []);
+    expect(w.townOwner[0]).toBe(1);
+    expect(w.credits[1]).toBeGreaterThan(0);
+    expect(w.credits[0]).toBe(0);
+    // Red tanks roll in. The squad in the house keeps the town contested.
+    step(w, [spawnAt(0, KIND_TANK, 6, 530, 500)]);
+    for (let t = 0; t < 300; t++) step(w, []);
+    expect(w.townOwner[0]).toBe(1);
+    // Once the house and its squad are gone the town changes hands.
+    const tanks = [1, 2, 3, 4, 5, 6];
+    step(w, [{ type: CMD_ATTACK_STRUCTURE, units: tanks, structure: 0 }]);
+    for (let t = 0; t < 3000 && w.townOwner[0] !== 0; t++) step(w, []);
+    expect(w.townOwner[0]).toBe(0);
+    expect(hasEvent(w, EV_CAPTURE)).toBe(true);
+  });
+
+  it('a bridge can be cut, drowning what is on it, and rebuilt by idle infantry', () => {
+    const w = createWorld(1);
+    const m = w.map;
+    let b = 0;
+    while (m.sKind[b] !== S_BRIDGE) b++;
+    const y = fx(m.sY[b] * 4 + 4);
+    const west = fx(m.sX[b] * 4 - 10);
+    const mid = fx((m.sX[b] + m.sW[b] / 2) * 4);
+    const veh = m.cost[CLASS_VEHICLE];
+    expect(veh[cellOfPos(mid, y)]).toBe(1);
+    step(w, [
+      {
+        type: CMD_SPAWN,
+        count: 4,
+        team: 0,
+        kind: KIND_TANK,
+        x: west - fx(14),
+        y,
+        radius: fx(3),
+        wander: false,
+      },
+      { type: CMD_SPAWN, count: 1, team: 1, kind: KIND_TANK, x: mid, y, radius: 1, wander: false },
+    ]);
+    w.speed[4] = 0; // parked on the span
+    w.cooldown[4] = 30000; // and not shooting back
+    step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [0, 1, 2, 3], structure: b }]);
+    w.hp[4] = 30000;
+    for (let t = 0; t < 4000 && w.sHp[b] > 0; t++) {
+      w.attack[0] = w.attack[1] = w.attack[2] = w.attack[3] = -1;
+      step(w, []);
+    }
+    expect(w.sHp[b]).toBe(0);
+    expect(w.state[4]).not.toBe(STATE_ALIVE);
+    expect(veh[cellOfPos(mid, y)]).toBe(0);
+    // Two squads stand by the stump with nothing else to do: the bridge comes back.
+    step(w, [
+      {
+        type: CMD_SPAWN,
+        count: 2,
+        team: 0,
+        kind: KIND_INFANTRY,
+        x: west,
+        y,
+        radius: fx(2),
+        wander: false,
+      },
+    ]);
+    for (let t = 0; t < 1500 && w.sHp[b] <= 0; t++) step(w, []);
+    expect(w.sHp[b]).toBe(m.sMaxHp[b]);
+    expect(m.cost[CLASS_VEHICLE][cellOfPos(mid, y)]).toBe(1);
+    expect(hasEvent(w, EV_REPAIR)).toBe(true);
+  });
+
+  it('the assault scenario starts with blue dug in on the east bank', () => {
+    const w = createWorld(1);
+    step(w, assaultCommands(w.map, 1200));
+    let inside = 0;
+    for (let i = 0; i < w.count; i++) if (w.inside[i] >= 0) inside++;
+    expect(inside).toBeGreaterThan(60);
+    for (let t = 0; t < 200; t++) step(w, []);
+    expect(w.townOwner[1]).toBe(1);
+    expect(w.townOwner[0]).toBe(0);
   });
 });

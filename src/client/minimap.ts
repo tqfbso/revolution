@@ -1,6 +1,16 @@
 import * as THREE from 'three/webgpu';
-import { MAP_CELLS, MAP_SIZE, T_CLIFF, T_FORD, T_FOREST, T_WATER, type GameMap } from '../sim/map';
+import {
+  MAP_CELLS,
+  MAP_SIZE,
+  S_BRIDGE,
+  T_CLIFF,
+  T_FORD,
+  T_FOREST,
+  T_WATER,
+  type GameMap,
+} from '../sim/map';
 import type { Fog } from './fog';
+import type { StructureView } from './structures';
 import type { UnitView } from './units';
 
 const N = MAP_CELLS;
@@ -30,25 +40,23 @@ export class Minimap {
   private readonly ray = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private lastDraw = 0;
+  private baseVersion = -1;
 
   constructor(
     canvas: HTMLCanvasElement,
-    map: GameMap,
+    _map: GameMap,
     private readonly fog: Fog,
     private readonly units: UnitView,
     private readonly camera: THREE.PerspectiveCamera,
     lookAt: (x: number, z: number) => void,
     order: (x: number, z: number, attack: boolean) => void,
+    private readonly structures: StructureView,
+    private readonly map: GameMap,
   ) {
     canvas.width = canvas.height = N;
     this.ctx = canvas.getContext('2d')!;
     this.image = this.ctx.createImageData(N, N);
-    for (let c = 0; c < N * N; c++) {
-      const rgb = TERRAIN_RGB[map.type[c]] ?? OPEN_RGB;
-      // Lighter on high ground, so mesas read on the minimap too.
-      const lift = Math.min(1.25, Math.max(0.85, 0.95 + map.heights[c + ((c / N) | 0)] / 40000));
-      for (let k = 0; k < 3; k++) this.base[3 * c + k] = rgb[k] * lift;
-    }
+    this.paintBase();
 
     const toWorld = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
@@ -78,10 +86,29 @@ export class Minimap {
     canvas.addEventListener('pointerup', () => (dragging = false));
   }
 
+  /** Terrain colours. Redone when a building falls or a bridge is cut: the map changes. */
+  private paintBase(): void {
+    const map = this.map;
+    this.baseVersion = this.structures.version;
+    for (let c = 0; c < N * N; c++) {
+      let rgb = TERRAIN_RGB[map.baseType[c]] ?? OPEN_RGB;
+      const s = map.structAt[c];
+      if (s >= 0) {
+        const standing = this.structures.hp[s] > 0;
+        if (map.sKind[s] === S_BRIDGE) rgb = standing ? [196, 192, 180] : rgb;
+        else rgb = standing ? [168, 162, 150] : [74, 70, 66];
+      }
+      // Lighter on high ground, so mesas read on the minimap too.
+      const lift = Math.min(1.25, Math.max(0.85, 0.95 + map.heights[c + ((c / N) | 0)] / 40000));
+      for (let k = 0; k < 3; k++) this.base[3 * c + k] = rgb[k] * lift;
+    }
+  }
+
   /** Redraw at most ten times a second. */
   update(now: number): void {
     if (now - this.lastDraw < 100) return;
     this.lastDraw = now;
+    if (this.baseVersion !== this.structures.version) this.paintBase();
     const px = this.image.data;
     const base = this.base;
     const { visible, explored } = this.fog;
@@ -111,8 +138,18 @@ export class Minimap {
     }
     this.ctx.putImageData(this.image, 0, 0);
 
-    // Outline of the ground the camera sees: the four screen corners cast onto y = 0.
+    // Towns: a ring in the colour of whoever holds them.
     const ctx = this.ctx;
+    ctx.lineWidth = 1.5;
+    for (let t = 0; t < this.map.townCount; t++) {
+      const owner = TEAM_RGB[this.structures.townOwner[t]];
+      ctx.strokeStyle = owner ? `rgb(${owner[0]},${owner[1]},${owner[2]})` : 'rgb(215,215,205)';
+      ctx.beginPath();
+      ctx.arc(this.map.townX[t] / 4096, this.map.townY[t] / 4096, 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Outline of the ground the camera sees: the four screen corners cast onto y = 0.
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();

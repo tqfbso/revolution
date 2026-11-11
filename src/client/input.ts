@@ -1,5 +1,15 @@
 import * as THREE from 'three/webgpu';
-import { CMD_ATTACK_MOVE, CMD_MOVE, CMD_STOP, type Command } from '../sim/commands';
+import {
+  CMD_ATTACK_MOVE,
+  CMD_ATTACK_STRUCTURE,
+  CMD_GARRISON,
+  CMD_MOVE,
+  CMD_STOP,
+  type Command,
+} from '../sim/commands';
+import { S_BUILDING } from '../sim/map';
+import { KINDS } from '../sim/units';
+import type { StructureView } from './structures';
 import { fx } from '../sim/fixed';
 import type { Terrain } from './terrain';
 import type { UnitView } from './units';
@@ -12,7 +22,8 @@ const DOUBLE_MS = 350;
  * Turns mouse and keyboard into selection (client-only state) and commands (sent to the sim).
  * Left drag: box select. Left click: select one. Double click (or Ctrl + click): everything
  * of that type on screen. Shift: add. Right click: attack-move (fight on the way). Alt +
- * right click: plain move (do not stop to fight). Ctrl/Alt + 1..9: save the selection as a
+ * right click: plain move (do not stop to fight). Right click a building: infantry moves in.
+ * Ctrl + right click a building or bridge: shell it. Ctrl/Alt + 1..9: save the selection as a
  * control group; 1..9: recall it; twice: jump the camera to it.
  */
 export class Input {
@@ -36,6 +47,7 @@ export class Input {
     private readonly units: UnitView,
     private readonly send: (command: Command) => void,
     private readonly lookAt: (x: number, z: number) => void,
+    private readonly structures: StructureView,
   ) {
     const markerMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
     markerMaterial.depthWrite = false;
@@ -51,7 +63,7 @@ export class Input {
         this.dragStart = { x: e.clientX, y: e.clientY };
         dom.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
-        this.orderMove(e.clientX, e.clientY, !e.altKey);
+        this.orderMove(e.clientX, e.clientY, !e.altKey, e.ctrlKey || e.metaKey);
       }
     });
     dom.addEventListener('pointermove', (e) => {
@@ -176,21 +188,72 @@ export class Input {
           if (u.kindOf(i) === u.kindOf(best) && u.teamOf(i) === u.teamOf(best)) picked.push(i);
         }
       } else picked.push(best);
+    } else if (isClick) {
+      // Clicking a house selects the squads you have inside it.
+      const s = this.structureAt(x1, y1).structure;
+      if (s >= 0) {
+        for (let i = 0; i < this.units.count; i++) {
+          if (this.mayCommand(i) && this.units.insideOf(i) === s) picked.push(i);
+        }
+      }
     }
     this.units.setSelected(picked, additive);
   }
 
-  private orderMove(clientX: number, clientY: number, attack: boolean): void {
-    if (this.units.selectedCount === 0) return;
+  /** What is under a screen point: the ground point, and a standing structure if any. */
+  private structureAt(
+    clientX: number,
+    clientY: number,
+  ): { ground: THREE.Vector3 | null; structure: number } {
     const rect = this.dom.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.ray.setFromCamera(ndc, this.camera);
-    const p = this.terrain.raycast(this.ray.ray.origin, this.ray.ray.direction, this.hit);
-    if (!p) return;
-    this.orderTo(p.x, p.z, attack);
+    const { origin, direction } = this.ray.ray;
+    const ground = this.terrain.raycast(origin, direction, this.hit);
+    const reach = ground ? origin.distanceTo(ground) : 1200;
+    return { ground, structure: this.structures.pick(origin, direction, reach) };
+  }
+
+  private orderMove(clientX: number, clientY: number, attack: boolean, shell: boolean): void {
+    if (this.units.selectedCount === 0) return;
+    const { ground, structure } = this.structureAt(clientX, clientY);
+    const ids = this.units.selectedIds();
+    if (structure >= 0 && shell) {
+      this.send({ type: CMD_ATTACK_STRUCTURE, units: ids, structure });
+      const c = this.structures.centreOf(structure);
+      this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z);
+      return;
+    }
+    if (structure >= 0 && this.terrain.map.sKind[structure] === S_BUILDING) {
+      // Infantry goes in; whatever else is selected moves up beside the house.
+      const foot = ids.filter((id) => KINDS[this.units.kindOf(id)].garrison);
+      if (foot.length > 0) {
+        this.send({ type: CMD_GARRISON, units: foot, structure });
+        const c = this.structures.centreOf(structure);
+        this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z);
+        const rest = ids.filter((id) => !KINDS[this.units.kindOf(id)].garrison);
+        if (rest.length > 0 && ground) {
+          this.send({
+            type: attack ? CMD_ATTACK_MOVE : CMD_MOVE,
+            units: rest,
+            x: fx(ground.x),
+            y: fx(ground.z),
+          });
+        }
+        return;
+      }
+    }
+    if (!ground) return;
+    this.orderTo(ground.x, ground.z, attack);
+  }
+
+  private mark(x: number, y: number, z: number): void {
+    this.marker.position.set(x, y, z);
+    this.marker.visible = true;
+    this.markerAge = 0;
   }
 
   /** Order the selection to a ground point (also used by the minimap). */
@@ -203,9 +266,7 @@ export class Input {
       x: fx(x),
       y: fx(z),
     });
-    this.marker.position.set(x, this.terrain.heightAt(x, z) + 0.15, z);
-    this.marker.visible = true;
-    this.markerAge = 0;
+    this.mark(x, this.terrain.heightAt(x, z) + 0.15, z);
   }
 }
 

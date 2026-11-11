@@ -45,15 +45,25 @@ and riflemen with a modern skin. Each milestone below adds a dynamic, not just c
 chokepoints and urban fighting (M4), the sensor-versus-shooter fight and combined arms (M5),
 and an economy that makes holding ground matter (M6). See decision 020.
 
-## M4 Cities as fortresses
+## M4 Cities as fortresses (done)
 
-- Towns and villages placed where they matter: at the central crossing, at fords, on roads
-- Bridges: fast crossings that can be destroyed and repaired, next to the slow fords
-- Buildings that can be garrisoned by infantry; garrison bonuses (cover, sight, ambush)
-- Building damage states and destruction by tanks and artillery; rubble still gives cover
-- True line of sight: buildings, forest and high ground block sight and direct fire;
-  high ground sees and shoots further
-- Towns as capturable territory that produces income
+- A town on both banks of the central crossing and villages at the fords north and south
+  of it; the two outer fords stay bare, as the ways around
+- Bridges just upstream of those fords: full speed, where a ford is now half speed. Tanks
+  can cut a bridge (whatever is on it is lost); idle infantry at the stump rebuilds it
+- Infantry occupies buildings. A garrison takes a quarter of the damage, shoots a little
+  further, and cannot be seen from beyond 13 units until it fires
+- Tanks shell buildings (on order, or by firing at a garrison): shot up at 60% health, then
+  rubble that falls on the garrison. Ruins stay for the rest of the game and still give
+  infantry cover and concealment; vehicles cannot cross them
+- True line of sight in the fight and in the fog of war: buildings, hills and deep forest
+  block sight and direct fire; high ground sees over things and shoots further
+- Six capturable town districts. A district goes to the army alone in it and pays credits
+- New opening scenario: blue is dug in on the east bank, you attack from the west.
+  `?scenario=clash` is the old head-on battle
+
+Moved out of M4: artillery against buildings (M5, with artillery itself), spending the
+income (M6), and roads as terrain (not needed: the bridges already make the fast routes).
 
 ## M5 Combined arms
 

@@ -1,5 +1,7 @@
 import {
   CMD_ATTACK_MOVE,
+  CMD_ATTACK_STRUCTURE,
+  CMD_GARRISON,
   CMD_MOVE,
   CMD_SPAWN,
   CMD_STOP,
@@ -7,17 +9,59 @@ import {
   type SpawnCommand,
 } from './commands';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
-import { CELL_FX, CELL_SHIFT, CLASS_COUNT, MAP_CELLS, T_FOREST, cellOfPos } from './map';
+import {
+  CELL_FX,
+  CELL_SHIFT,
+  CLASS_COUNT,
+  CLASS_FOOT,
+  FLOOR_HEIGHT,
+  MAP_CELLS,
+  MAX_STRUCTS,
+  MAX_TOWNS,
+  S_BRIDGE,
+  S_BUILDING,
+  T_BRIDGE,
+  T_FOREST,
+  T_RUBBLE,
+  cellOfPos,
+  deckHeight,
+  heightAt,
+  lineOfSight,
+  razeStructure,
+  refreshPassability,
+  stampStructure,
+} from './map';
 import { DIR_X, DIR_Y, UNREACHABLE, buildField, clearLine, flowDirection, newField } from './path';
 import { nextInt } from './rng';
-import { ACQUIRE_RANGE, CONCEAL_RANGE, KINDS, KIND_COUNT, KIND_TANK } from './units';
+import {
+  ACQUIRE_RANGE,
+  CAPTURE_POINTS,
+  CONCEAL_RANGE,
+  EYE_HEIGHT,
+  GARRISON_MAX,
+  GARRISON_RANGE_BONUS,
+  HEIGHT_RANGE_MAX,
+  HEIGHT_RANGE_MIN,
+  HEIGHT_RANGE_SHIFT,
+  KINDS,
+  KIND_COUNT,
+  KIND_TANK,
+  REVEAL_TICKS,
+  TOWN_INCOME,
+} from './units';
 import {
   CHASE_FIELDS,
+  EV_CAPTURE,
+  EV_COLLAPSE,
   EV_DEATH,
+  EV_REPAIR,
   EV_SHOT,
+  EV_SIEGE,
   FLAG_AMOVE,
   FLAG_DIRECT,
+  FLAG_GARRISON,
   FLAG_MOVING,
+  FLAG_SIEGE,
   FLAG_WANDER,
   MAP_SIZE,
   MAP_SIZE_FX,
@@ -25,6 +69,7 @@ import {
   MAX_TEAMS,
   MAX_UNITS,
   NO_TARGET,
+  NO_TEAM,
   STATE_ALIVE,
   STATE_FREE,
   STATE_WRECK,
@@ -81,6 +126,24 @@ const projSide = new Int32Array(MAX_UNITS);
 const fieldRefs = new Int32Array(MAX_FIELDS);
 const goalScratch = new Int32Array(MAX_UNITS);
 const KIND_CLASS = KINDS.map((k) => k.cls);
+const structDamage = new Int32Array(MAX_STRUCTS);
+const townCount = new Int32Array(MAX_TOWNS * MAX_TEAMS);
+const repairCrew = new Int32Array(MAX_STRUCTS * MAX_TEAMS);
+/** Set when a structure fell or was rebuilt this tick: routes must be recomputed. */
+let topologyChanged = false;
+
+// Line-of-sight checks per target search. Candidates beyond the budget count as unseen.
+const MAX_SIGHT_TESTS = 8;
+/** Value of `los` for a unit with no target because nothing near it is in sight. */
+const SIGHT_NONE = 2;
+// A unit with a target re-checks its line of sight this often, staggered by id.
+const SIGHT_RECHECK_MASK = 3;
+// How close infantry must get to a building to slip inside.
+const ENTER_DIST = fx(3.5);
+// Idle infantry this close to a cut bridge works on rebuilding it.
+const REPAIR_DIST = fx(14);
+const REPAIR_PER_SQUAD = 40;
+const TOWN_PERIOD = 20;
 
 // Direct-line checks for units on a move order are repeated every 16 ticks, staggered by id.
 const DIRECT_RECHECK_MASK = 15;
@@ -97,12 +160,24 @@ export function step(w: World, commands: readonly Command[]): void {
   bucket(w, CELL_SHIFT, GRID_DIM, cellStart, sorted);
   bucket(w, COARSE_SHIFT, COARSE_DIM, coarseStart, coarseSorted);
   updateChaseFields(w);
+  updateStructureOrders(w);
+  updateEyes(w);
   acquireTargets(w);
   steer(w);
   separate(w);
   fire(w);
   integrate(w);
   resolveDamage(w);
+  resolveStructures(w);
+  if (w.tick % TOWN_PERIOD === 0) updateTowns(w);
+  if (topologyChanged) {
+    // The ground changed: every route computed so far may run through a wall or off a bridge.
+    topologyChanged = false;
+    refreshPassability(w.map);
+    w.fieldGoal.fill(-1);
+    w.path.fill(-1, 0, w.count);
+    w.chaseBuilt.fill(-1);
+  }
   w.tick++;
 }
 
@@ -111,11 +186,41 @@ function applyCommand(w: World, cmd: Command): void {
     case CMD_MOVE:
     case CMD_ATTACK_MOVE: {
       const units = validUnits(w, cmd.units);
+      for (let k = 0; k < units.length; k++) leaveBuilding(w, units[k]);
       orderFormationMove(w, units, cmd.x | 0, cmd.y | 0);
       const attack = cmd.type === CMD_ATTACK_MOVE;
       for (let k = 0; k < units.length; k++) {
         const id = units[k];
-        w.flags[id] = (w.flags[id] & ~(FLAG_WANDER | FLAG_AMOVE)) | (attack ? FLAG_AMOVE : 0);
+        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | (attack ? FLAG_AMOVE : 0);
+      }
+      break;
+    }
+    case CMD_GARRISON:
+    case CMD_ATTACK_STRUCTURE: {
+      const st = cmd.structure;
+      const map = w.map;
+      if (!Number.isInteger(st) || st < 0 || st >= map.structCount || w.sHp[st] <= 0) break;
+      const garrison = cmd.type === CMD_GARRISON;
+      if (garrison && map.sKind[st] !== S_BUILDING) break;
+      const units = validUnits(w, cmd.units).filter((id) => {
+        const kind = KINDS[w.kind[id]];
+        return garrison ? kind.garrison && w.inside[id] !== st : kind.siege > 0;
+      });
+      // Everyone heads for the middle of the structure; they stop (or go in) on the way.
+      const gx = ((2 * map.sX[st] + map.sW[st]) << CELL_SHIFT) >> 1;
+      const gy = ((2 * map.sY[st] + map.sH[st]) << CELL_SHIFT) >> 1;
+      for (let k = 0; k < units.length; k++) {
+        const id = units[k];
+        leaveBuilding(w, id);
+        w.targetX[id] = gx;
+        w.targetY[id] = gy;
+        w.orderSpeed[id] = w.speed[id];
+        w.orderStruct[id] = st;
+      }
+      routeUnits(w, units, gx, gy);
+      for (let k = 0; k < units.length; k++) {
+        const id = units[k];
+        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | (garrison ? FLAG_GARRISON : FLAG_SIEGE);
       }
       break;
     }
@@ -127,6 +232,118 @@ function applyCommand(w: World, cmd: Command): void {
     case CMD_SPAWN:
       spawn(w, cmd);
       break;
+  }
+}
+
+const ORDER_FLAGS = FLAG_WANDER | FLAG_AMOVE | FLAG_GARRISON | FLAG_SIEGE;
+
+/** Squared distance from a point to the footprint of a structure (0 inside it). */
+function structDist2(w: World, s: number, x: number, y: number): number {
+  const map = w.map;
+  const x0 = map.sX[s] << CELL_SHIFT;
+  const y0 = map.sY[s] << CELL_SHIFT;
+  const x1 = (map.sX[s] + map.sW[s]) << CELL_SHIFT;
+  const y1 = (map.sY[s] + map.sH[s]) << CELL_SHIFT;
+  const dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
+  const dy = y < y0 ? y0 - y : y > y1 ? y - y1 : 0;
+  return dx * dx + dy * dy;
+}
+
+/** Can unit `i` see (and so shell) structure `s`? Sight to the nearest point of it. */
+function seesStructure(w: World, i: number, s: number): boolean {
+  const map = w.map;
+  const x = w.posX[i];
+  const y = w.posY[i];
+  const px = clampInt(x, map.sX[s] << CELL_SHIFT, ((map.sX[s] + map.sW[s]) << CELL_SHIFT) - 1);
+  const py = clampInt(y, map.sY[s] << CELL_SHIFT, ((map.sY[s] + map.sH[s]) << CELL_SHIFT) - 1);
+  return lineOfSight(map, x, y, eyeZ[i], px, py, eyeZ[i], s, w.inside[i]);
+}
+
+/** Eye height of every living unit at the start of the tick (see eyeHeight). */
+const eyeZ = new Int32Array(MAX_UNITS);
+
+function updateEyes(w: World): void {
+  for (let i = 0; i < w.count; i++) if (w.state[i] === STATE_ALIVE) eyeZ[i] = eyeHeight(w, i);
+}
+
+/** Height of a unit's eyes: the ground (or deck, or upper floor) it is on plus its own. */
+function eyeHeight(w: World, i: number): number {
+  const map = w.map;
+  const s = w.inside[i];
+  if (s >= 0) return map.sBase[s] + map.sFloors[s] * FLOOR_HEIGHT;
+  const x = w.posX[i];
+  const y = w.posY[i];
+  const c = cellOfPos(x, y);
+  if (map.type[c] === T_BRIDGE) return deckHeight(map, map.structAt[c], x) + EYE_HEIGHT;
+  return heightAt(map, x, y) + EYE_HEIGHT;
+}
+
+/** Weapon range of `i` against `t`: longer from upper floors and from higher ground. */
+function rangeTo(w: World, i: number, t: number): number {
+  let bonus = (eyeZ[i] - eyeZ[t]) >> HEIGHT_RANGE_SHIFT;
+  bonus = clampInt(bonus, HEIGHT_RANGE_MIN, HEIGHT_RANGE_MAX);
+  if (w.inside[i] >= 0 && bonus < GARRISON_RANGE_BONUS) bonus = GARRISON_RANGE_BONUS;
+  return KINDS[w.kind[i]].range + bonus;
+}
+
+function garrisonCapacity(w: World, s: number): number {
+  const cells = w.map.sW[s] * w.map.sH[s];
+  return cells < GARRISON_MAX ? cells : GARRISON_MAX;
+}
+
+function hasRoom(w: World, s: number, team: number): boolean {
+  return (
+    w.sHp[s] > 0 &&
+    (w.sOcc[s] === 0 || w.sOccTeam[s] === team) &&
+    w.sOcc[s] < garrisonCapacity(w, s)
+  );
+}
+
+function enterBuilding(w: World, i: number, s: number): void {
+  const map = w.map;
+  // One squad per room, so to speak: occupants sit on the centres of the building's cells.
+  const k = w.sOcc[s] % (map.sW[s] * map.sH[s]);
+  const cx = map.sX[s] + (k % map.sW[s]);
+  const cy = map.sY[s] + Math.trunc(k / map.sW[s]);
+  w.posX[i] = (cx << CELL_SHIFT) + (CELL_FX >> 1);
+  w.posY[i] = (cy << CELL_SHIFT) + (CELL_FX >> 1);
+  w.velX[i] = 0;
+  w.velY[i] = 0;
+  w.flags[i] = 0;
+  w.path[i] = -1;
+  w.inside[i] = s;
+  w.reveal[i] = 0;
+  w.sOcc[s]++;
+  w.sOccTeam[s] = w.team[i];
+}
+
+/** Step out of a building onto the nearest ground. Does nothing for a unit outside. */
+function leaveBuilding(w: World, i: number): void {
+  const s = w.inside[i];
+  if (s < 0) return;
+  w.inside[i] = -1;
+  w.sOcc[s]--;
+  const to = w.map.snap[KIND_CLASS[w.kind[i]]][cellOfPos(w.posX[i], w.posY[i])];
+  w.posX[i] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+  w.posY[i] = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+}
+
+/** Carry out garrison orders that have arrived and drop orders whose structure is gone. */
+function updateStructureOrders(w: World): void {
+  const n = w.count;
+  for (let i = 0; i < n; i++) {
+    const flags = w.flags[i];
+    if ((flags & (FLAG_GARRISON | FLAG_SIEGE)) === 0 || w.state[i] !== STATE_ALIVE) continue;
+    const s = w.orderStruct[i];
+    if (w.sHp[s] <= 0) {
+      w.flags[i] = 0;
+    } else if ((flags & FLAG_GARRISON) !== 0) {
+      if (structDist2(w, s, w.posX[i], w.posY[i]) <= ENTER_DIST * ENTER_DIST) {
+        // Full, or the enemy got there first: wait outside.
+        if (hasRoom(w, s, w.team[i])) enterBuilding(w, i, s);
+        else w.flags[i] = 0;
+      } else if ((flags & FLAG_MOVING) === 0) w.flags[i] = 0;
+    }
   }
 }
 
@@ -339,7 +556,20 @@ function spawn(w: World, cmd: SpawnCommand): void {
     w.orderSpeed[id] = w.speed[id];
     w.path[id] = -1;
     w.goal[id] = 0;
+    w.inside[id] = -1;
+    w.orderStruct[id] = -1;
+    w.reveal[id] = 0;
+    w.los[id] = 0;
     w.flags[id] = wanderFlag(cmd.wander && !advance);
+    if (cmd.garrisonTown !== undefined && kind.garrison) {
+      // Spread over the town's buildings: always the emptiest one that still has room.
+      let best = -1;
+      for (let st = 0; st < map.structCount; st++) {
+        if (map.sTown[st] !== cmd.garrisonTown || map.sKind[st] !== S_BUILDING) continue;
+        if (hasRoom(w, st, teamId) && (best < 0 || w.sOcc[st] < w.sOcc[best])) best = st;
+      }
+      if (best >= 0) enterBuilding(w, id, best);
+    }
     if (advance) {
       w.targetX[id] = w.posX[id] + ax;
       w.targetY[id] = w.posY[id] + ay;
@@ -407,23 +637,41 @@ function bucket(w: World, shift: number, dim: number, start: Int32Array, out: In
 function acquireTargets(w: World): void {
   const n = w.count;
   const tick = w.tick;
-  const terrain = w.map.type;
+  const map = w.map;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
     const x = w.posX[i];
     const y = w.posY[i];
     const t = w.attack[i];
+    const phase = tick + i;
     let valid = false;
+    let targetD = 0;
     if (t !== NO_TARGET && w.state[t] === STATE_ALIVE && w.team[t] !== w.team[i]) {
       const dx = w.posX[t] - x;
       const dy = w.posY[t] - y;
       const d2 = dx * dx + dy * dy;
-      valid =
-        d2 <= ACQUIRE_RANGE_SQ &&
-        (d2 <= CONCEAL_RANGE_SQ || terrain[cellOfPos(w.posX[t], w.posY[t])] !== T_FOREST);
+      targetD = d2;
+      valid = d2 <= ACQUIRE_RANGE_SQ && (d2 <= CONCEAL_RANGE_SQ || !concealed(w, t));
+      if (valid && (phase & SIGHT_RECHECK_MASK) === 0) {
+        w.los[i] = lineOfSight(
+          map,
+          x,
+          y,
+          eyeZ[i],
+          w.posX[t],
+          w.posY[t],
+          eyeZ[t],
+          w.inside[i],
+          w.inside[t],
+        )
+          ? 1
+          : 0;
+      }
     }
-    const phase = tick + i;
-    if (valid ? (phase & SEARCH_ALL_MASK) !== 0 : (phase & SEARCH_IDLE_MASK) !== 0) {
+    // A unit whose last look found enemies near but none in sight looks again at the slow
+    // rate: scanning a crowd it cannot see four times as often would buy nothing.
+    const slow = valid || w.los[i] === SIGHT_NONE;
+    if (slow ? (phase & SEARCH_ALL_MASK) !== 0 : (phase & SEARCH_IDLE_MASK) !== 0) {
       if (!valid) w.attack[i] = NO_TARGET;
       continue;
     }
@@ -434,9 +682,16 @@ function acquireTargets(w: World): void {
     const y1 = cy < COARSE_DIM - 1 - ACQUIRE_CELLS ? cy + ACQUIRE_CELLS : COARSE_DIM - 1;
     const x0 = cx > ACQUIRE_CELLS ? cx - ACQUIRE_CELLS : 0;
     const x1 = cx < COARSE_DIM - 1 - ACQUIRE_CELLS ? cx + ACQUIRE_CELLS : COARSE_DIM - 1;
-    let best = NO_TARGET;
-    let bestD = ACQUIRE_RANGE_SQ + 1;
+    // A target still in sight stays unless something closer shows up, which saves most of
+    // the sight tests in a standing fight.
+    const keep = valid && w.los[i] !== 0;
+    let best = keep ? t : NO_TARGET;
+    let bestD = keep ? targetD : ACQUIRE_RANGE_SQ + 1;
     let budget = MAX_TARGET_TESTS;
+    let sightTests = MAX_SIGHT_TESTS;
+    let blocked = false;
+    const z = eyeZ[i];
+    const own = w.inside[i];
     for (let gy = y0; gy <= y1 && budget > 0; gy++) {
       const from = coarseStart[gy * COARSE_DIM + x0];
       let to = coarseStart[gy * COARSE_DIM + x1 + 1];
@@ -449,18 +704,36 @@ function acquireTargets(w: World): void {
         const dy = w.posY[j] - y;
         const d2 = dx * dx + dy * dy;
         if (d2 >= bestD && (d2 > bestD || j >= best)) continue;
-        // Units in forest are concealed: they can only be spotted from close by.
-        if (d2 > CONCEAL_RANGE_SQ && terrain[cellOfPos(w.posX[j], w.posY[j])] === T_FOREST) {
+        // Units in forest, rubble or a building are concealed: spotted only from close by.
+        if (d2 > CONCEAL_RANGE_SQ && concealed(w, j)) continue;
+        // Seeing is the expensive test, so it comes last and only for a closer candidate.
+        if (sightTests-- <= 0) continue;
+        if (!lineOfSight(map, x, y, z, w.posX[j], w.posY[j], eyeZ[j], own, w.inside[j])) {
+          blocked = true;
           continue;
         }
-        {
-          bestD = d2;
-          best = j;
-        }
+        bestD = d2;
+        best = j;
       }
     }
-    w.attack[i] = best;
+    // Nothing visible: keep the current target only while it is itself still in sight.
+    if (best !== NO_TARGET) {
+      w.attack[i] = best;
+      w.los[i] = 1;
+    } else if (!keep) {
+      w.attack[i] = NO_TARGET;
+      w.los[i] = blocked ? SIGHT_NONE : 0;
+    }
   }
+}
+
+/**
+ * Is unit `j` hard to spot? In forest and in rubble always; in a building until it fires.
+ */
+function concealed(w: World, j: number): boolean {
+  if (w.inside[j] >= 0) return w.reveal[j] <= w.tick;
+  const t = w.map.type[cellOfPos(w.posX[j], w.posY[j])];
+  return t === T_FOREST || (t === T_RUBBLE && KIND_CLASS[w.kind[j]] === CLASS_FOOT);
 }
 
 /**
@@ -476,15 +749,43 @@ function fire(w: World): void {
       w.cooldown[i]--;
       continue;
     }
-    const t = w.attack[i];
-    if (t === NO_TARGET) continue;
     const kind = KINDS[w.kind[i]];
+    if ((w.flags[i] & FLAG_SIEGE) !== 0) {
+      // Ordered to bring a structure down: that comes before targets of opportunity.
+      const s = w.orderStruct[i];
+      if (
+        w.sHp[s] > 0 &&
+        structDist2(w, s, w.posX[i], w.posY[i]) <= kind.range * kind.range &&
+        seesStructure(w, i, s)
+      ) {
+        structDamage[s] += kind.siege;
+        w.cooldown[i] = kind.reload;
+        w.events.push(EV_SIEGE, i, s);
+        continue;
+      }
+    }
+    const t = w.attack[i];
+    if (t === NO_TARGET || w.los[i] === 0) continue;
     const dx = w.posX[t] - w.posX[i];
     const dy = w.posY[t] - w.posY[i];
-    if (dx * dx + dy * dy > kind.range * kind.range) continue;
-    damage[t] += kind.damage[w.kind[t]];
+    const range = rangeTo(w, i, t);
+    if (dx * dx + dy * dy > range * range) continue;
+    let dmg = kind.damage[w.kind[t]];
+    const cover = w.inside[t];
+    if (cover >= 0) {
+      // Walls stop most of it. What a tank gun does not do to the men it does to the house.
+      dmg = dmg >> 2 || 1;
+      structDamage[cover] += kind.siege;
+    } else if (
+      KIND_CLASS[w.kind[t]] === CLASS_FOOT &&
+      w.map.type[cellOfPos(w.posX[t], w.posY[t])] === T_RUBBLE
+    ) {
+      dmg = (dmg + 1) >> 1;
+    }
+    damage[t] += dmg;
     killer[t] = i;
     w.cooldown[i] = kind.reload;
+    if (w.inside[i] >= 0) w.reveal[i] = w.tick + REVEAL_TICKS;
     w.events.push(EV_SHOT, i, t);
   }
 }
@@ -502,17 +803,142 @@ function resolveDamage(w: World): void {
         w.hp[i] = hp;
         continue;
       }
-      w.hp[i] = 0;
-      w.state[i] = STATE_WRECK;
-      w.cooldown[i] = KINDS[w.kind[i]].wreckTicks;
-      w.flags[i] = 0;
-      w.velX[i] = 0;
-      w.velY[i] = 0;
-      w.attack[i] = NO_TARGET;
-      w.events.push(EV_DEATH, i, killer[i]);
+      kill(w, i, killer[i]);
     } else if (state === STATE_WRECK && --w.cooldown[i] <= 0) {
       w.state[i] = STATE_FREE;
     }
+  }
+}
+
+function kill(w: World, i: number, by: number): void {
+  if (w.inside[i] >= 0) {
+    w.sOcc[w.inside[i]]--;
+    w.inside[i] = -1;
+  }
+  w.hp[i] = 0;
+  w.state[i] = STATE_WRECK;
+  w.cooldown[i] = KINDS[w.kind[i]].wreckTicks;
+  w.flags[i] = 0;
+  w.velX[i] = 0;
+  w.velY[i] = 0;
+  w.attack[i] = NO_TARGET;
+  w.events.push(EV_DEATH, i, by);
+}
+
+/** Apply the tick's damage to structures. A structure at zero comes down for good. */
+function resolveStructures(w: World): void {
+  const map = w.map;
+  for (let s = 0; s < map.structCount; s++) {
+    const d = structDamage[s];
+    if (d === 0) continue;
+    structDamage[s] = 0;
+    if (w.sHp[s] <= 0) continue;
+    w.sHp[s] -= d;
+    if (w.sHp[s] > 0) continue;
+    w.sHp[s] = 0;
+    w.sRepair[s] = 0;
+    const bridge = map.sKind[s] === S_BRIDGE;
+    for (let i = 0; i < w.count; i++) {
+      if (w.state[i] !== STATE_ALIVE) continue;
+      if (bridge) {
+        // Whoever is on the span goes down with it.
+        const c = cellOfPos(w.posX[i], w.posY[i]);
+        if (map.structAt[c] === s && map.type[c] === T_BRIDGE) kill(w, i, i);
+      } else if (w.inside[i] === s) {
+        // The house falls on its garrison: half of what is left of each squad walks out.
+        w.inside[i] = -1;
+        w.hp[i] -= w.hp[i] >> 1;
+      }
+    }
+    w.sOcc[s] = 0;
+    razeStructure(map, s);
+    topologyChanged = true;
+    w.events.push(EV_COLLAPSE, s, 0);
+  }
+}
+
+/**
+ * Once a second: who holds each town, what it pays, and work on cut bridges. A town goes
+ * to the only army inside its circle, faster with more units; while two armies are inside,
+ * nothing moves. A garrison counts, so a town is not taken until its houses are cleared.
+ */
+function updateTowns(w: World): void {
+  const map = w.map;
+  const towns = map.townCount;
+  townCount.fill(0);
+  repairCrew.fill(0);
+  let cut = 0;
+  for (let s = 0; s < map.structCount; s++) {
+    if (map.sKind[s] === S_BRIDGE && w.sHp[s] <= 0) cut++;
+  }
+  for (let i = 0; i < w.count; i++) {
+    if (w.state[i] !== STATE_ALIVE) continue;
+    const x = w.posX[i];
+    const y = w.posY[i];
+    const team = w.team[i];
+    for (let t = 0; t < towns; t++) {
+      const dx = x - map.townX[t];
+      const dy = y - map.townY[t];
+      if (dx * dx + dy * dy <= map.townR[t] * map.townR[t]) townCount[t * MAX_TEAMS + team]++;
+    }
+    if (cut === 0 || !KINDS[w.kind[i]].garrison) continue;
+    if ((w.flags[i] & FLAG_MOVING) !== 0 || w.attack[i] !== NO_TARGET) continue;
+    for (let s = 0; s < map.structCount; s++) {
+      if (map.sKind[s] !== S_BRIDGE || w.sHp[s] > 0) continue;
+      if (structDist2(w, s, x, y) <= REPAIR_DIST * REPAIR_DIST) repairCrew[s * MAX_TEAMS + team]++;
+    }
+  }
+  for (let t = 0; t < towns; t++) {
+    let present = 0;
+    let team = NO_TEAM;
+    let count = 0;
+    for (let k = 0; k < MAX_TEAMS; k++) {
+      const c = townCount[t * MAX_TEAMS + k];
+      if (c === 0) continue;
+      present++;
+      team = k;
+      count = c;
+    }
+    if (present === 0) {
+      if (w.townProgress[t] > 0) w.townProgress[t] -= w.townProgress[t] < 5 ? w.townProgress[t] : 5;
+    } else if (present === 1) {
+      if (team === w.townOwner[t]) {
+        w.townProgress[t] = 0;
+        w.townCapturer[t] = NO_TEAM;
+      } else {
+        if (w.townCapturer[t] !== team) {
+          w.townCapturer[t] = team;
+          w.townProgress[t] = 0;
+        }
+        w.townProgress[t] += count < 10 ? count : 10;
+        if (w.townProgress[t] >= CAPTURE_POINTS) {
+          w.townOwner[t] = team;
+          w.townCapturer[t] = NO_TEAM;
+          w.townProgress[t] = 0;
+          w.events.push(EV_CAPTURE, t, team);
+        }
+      }
+    }
+    if (w.townOwner[t] !== NO_TEAM) w.credits[w.townOwner[t]] += TOWN_INCOME;
+  }
+  for (let s = 0; cut > 0 && s < map.structCount; s++) {
+    if (map.sKind[s] !== S_BRIDGE || w.sHp[s] > 0) continue;
+    let crew = 0;
+    let teams = 0;
+    for (let k = 0; k < MAX_TEAMS; k++) {
+      const c = repairCrew[s * MAX_TEAMS + k];
+      if (c === 0) continue;
+      teams++;
+      crew = c;
+    }
+    if (teams !== 1) continue;
+    w.sRepair[s] += (crew < 5 ? crew : 5) * REPAIR_PER_SQUAD;
+    if (w.sRepair[s] < map.sMaxHp[s]) continue;
+    w.sRepair[s] = 0;
+    w.sHp[s] = map.sMaxHp[s];
+    stampStructure(map, s);
+    topologyChanged = true;
+    w.events.push(EV_REPAIR, s, 0);
   }
 }
 
@@ -528,6 +954,7 @@ function steer(w: World): void {
   const tick = w.tick;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.inside[i] >= 0) continue; // garrisons stay put
     let flags = w.flags[i];
     const cls = KIND_CLASS[w.kind[i]];
     const x = w.posX[i];
@@ -537,6 +964,16 @@ function steer(w: World): void {
     let vx = 0;
     let vy = 0;
     let busy = false;
+    if ((flags & FLAG_SIEGE) !== 0) {
+      // Close enough to shell the structure and able to see it: stop here.
+      const st = w.orderStruct[i];
+      const reach = KINDS[w.kind[i]].range - fx(1);
+      if (structDist2(w, st, x, y) <= reach * reach && seesStructure(w, i, st)) {
+        w.velX[i] = 0;
+        w.velY[i] = 0;
+        continue;
+      }
+    }
     const t = w.attack[i];
     if (
       t !== NO_TARGET &&
@@ -545,8 +982,8 @@ function steer(w: World): void {
       const dx = w.posX[t] - x;
       const dy = w.posY[t] - y;
       const d2 = dx * dx + dy * dy;
-      const range = KINDS[w.kind[i]].range;
-      if (d2 <= range * range) {
+      const range = rangeTo(w, i, t);
+      if (d2 <= range * range && w.los[i] !== 0) {
         busy = true;
       } else if (clearLine(map, cls, x, y, w.posX[t], w.posY[t])) {
         const dist = isqrt(d2);
@@ -577,7 +1014,7 @@ function steer(w: World): void {
       let field = -1;
       if ((flags & FLAG_DIRECT) === 0) {
         field = w.path[i];
-        if (field < 0) field = w.path[i] = acquireField(w, w.goal[i], cls);
+        if (field < 0) field = w.path[i] = acquireField(w, map.snap[cls][w.goal[i]], cls);
       }
       if (field < 0) {
         const dx = tx - x;
@@ -622,6 +1059,10 @@ function separate(w: World): void {
   const n = w.count;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.inside[i] >= 0) {
+      pushX[i] = pushY[i] = 0;
+      continue;
+    }
     const x = w.posX[i];
     const y = w.posY[i];
     const cx = x >> CELL_SHIFT;
@@ -669,7 +1110,7 @@ function integrate(w: World): void {
   const n = w.count;
   const map = w.map;
   for (let i = 0; i < n; i++) {
-    if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0) continue;
     const x = w.posX[i];
     const y = w.posY[i];
     let nx = clampInt(x + w.velX[i] + pushX[i], 0, POS_MAX);
