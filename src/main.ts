@@ -13,7 +13,7 @@ import { Minimap } from './client/minimap';
 import { StructureView } from './client/structures';
 import { UnitView } from './client/units';
 import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
-import { KIND_INFANTRY, KIND_TANK } from './sim/units';
+import { KINDS, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from './sim/units';
 
 const SKY = 0x9db4c4;
 
@@ -149,18 +149,41 @@ async function start(): Promise<void> {
     }
     townsEl.innerHTML = html;
   }, 500);
+  // What is selected, by type: with ten kinds of unit a box of rings is not enough.
+  const selectionEl = document.getElementById('selection');
+  setInterval(() => {
+    if (!selectionEl) return;
+    const n = new Array<number>(KINDS.length).fill(0);
+    let aboard = 0;
+    for (const id of units.selectedIds()) {
+      n[units.kindOf(id)]++;
+      aboard += units.load[id];
+    }
+    const parts = KINDS.map((k, i) => (n[i] > 0 ? `${n[i]} ${k.name.toLowerCase()}` : '')).filter(
+      (p) => p !== '',
+    );
+    if (aboard > 0) parts.push(`${aboard} squads aboard`);
+    selectionEl.style.display = parts.length > 0 ? 'block' : 'none';
+    selectionEl.textContent = parts.join(' · ');
+  }, 250);
 
-  // Reinforcements: 250 tanks and 250 infantry squads per side, attacking toward the centre.
+  // Reinforcements: a combined-arms battlegroup of 500 per side, attacking toward the centre.
   document.getElementById('add-units')?.addEventListener('click', () => {
     for (let team = 0; team < 2; team++) {
       const dir = team === 0 ? -1 : 1;
-      for (const kind of [KIND_TANK, KIND_INFANTRY]) {
+      const mix: [number, number, number][] = [
+        [KIND_TANK, 200, 150],
+        [KIND_IFV, 80, 165],
+        [KIND_INFANTRY, 160, 180],
+        [KIND_ATGM, 60, 190],
+      ];
+      for (const [kind, count, back] of mix) {
         send({
           type: CMD_SPAWN,
-          count: 250,
+          count,
           team,
           kind,
-          x: fx(MAP_SIZE / 2 + dir * (kind === KIND_TANK ? 150 : 175)),
+          x: fx(MAP_SIZE / 2 + dir * back),
           y: fx(MAP_SIZE / 2),
           radius: fx(70),
           wander: scenario === 'roam',

@@ -246,6 +246,140 @@ export class Effects {
     }
   }
 
+  /** A guided missile: back-blast at the launcher, a bright motor trailing smoke, a shaped-charge hit. */
+  missile(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): void {
+    const d = Math.hypot(x1 - x0, z1 - z0) || 1;
+    const ux = (x1 - x0) / d;
+    const uz = (z1 - z0) / d;
+    this.emit(ADDITIVE, x0, y0, z0, 0, 0, 0, 0.1, 0.9, 1.6, 1, 0.8, 0.5, 1);
+    for (let k = 0; k < 4; k++) {
+      this.emit(
+        SMOKE,
+        x0 - ux * 0.5,
+        y0,
+        z0 - uz * 0.5,
+        -ux * (2 + k) + rnd(0.5),
+        0.4,
+        -uz * (2 + k) + rnd(0.5),
+        1.6,
+        0.6,
+        2.4,
+        0.62,
+        0.6,
+        0.56,
+        0.4,
+      );
+    }
+    const life = Math.min(0.9, 0.2 + d / 60);
+    this.tracer(x0, y0, z0, x1, y1, z1, life, 0.3, 1);
+    // The motor's smoke hangs along the flight path for a few seconds.
+    const puffs = Math.min(14, Math.ceil(d / 3));
+    for (let k = 1; k <= puffs; k++) {
+      const f = k / (puffs + 1);
+      this.emit(
+        SMOKE,
+        x0 + (x1 - x0) * f + rnd(0.15),
+        y0 + (y1 - y0) * f + 0.2 + rnd(0.15),
+        z0 + (z1 - z0) * f + rnd(0.15),
+        rnd(0.2),
+        0.15,
+        rnd(0.2),
+        2.2 + f,
+        0.35,
+        1.3,
+        0.7,
+        0.69,
+        0.66,
+        0.3,
+      );
+    }
+    this.emit(ADDITIVE, x1, y1, z1, 0, 0, 0, 0.14, 1.6, 3.6, 1, 0.85, 0.55, 1);
+    for (let k = 0; k < 6; k++) {
+      this.emit(
+        ADDITIVE,
+        x1,
+        y1,
+        z1,
+        rnd(9),
+        2 + Math.random() * 6,
+        rnd(9),
+        0.4,
+        0.18,
+        0.04,
+        1,
+        0.75,
+        0.4,
+        1,
+      );
+    }
+    this.emit(
+      SMOKE,
+      x1,
+      y1 + 0.3,
+      z1,
+      rnd(0.5),
+      1.4,
+      rnd(0.5),
+      2.4,
+      1.2,
+      3.8,
+      0.16,
+      0.15,
+      0.14,
+      0.5,
+    );
+  }
+
+  /** A burst from an autocannon: three fat tracers and small bursts where they land. */
+  autocannon(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): void {
+    this.emit(ADDITIVE, x0, y0, z0, 0, 0, 0, 0.06, 0.6, 1.0, 1, 0.8, 0.45, 1);
+    for (let k = 0; k < 2; k++) {
+      this.tracer(
+        x0,
+        y0,
+        z0,
+        x1 + rnd(0.5),
+        y1 + rnd(0.2),
+        z1 + rnd(0.5),
+        0.12 + k * 0.05,
+        0.11,
+        0.9,
+      );
+    }
+    this.emit(
+      ADDITIVE,
+      x1 + rnd(0.4),
+      y1,
+      z1 + rnd(0.4),
+      0,
+      0,
+      0,
+      0.08,
+      0.5,
+      0.9,
+      1,
+      0.8,
+      0.5,
+      0.9,
+    );
+    this.emit(
+      SMOKE,
+      x1 + rnd(0.4),
+      y1,
+      z1 + rnd(0.4),
+      rnd(0.4),
+      0.8,
+      rnd(0.4),
+      1.1,
+      0.4,
+      1.3,
+      0.4,
+      0.38,
+      0.34,
+      0.3,
+    );
+  }
+
   /** A vehicle brewing up: fireball, sparks, a column of black smoke. */
   explosion(x: number, y: number, z: number): void {
     this.emit(ADDITIVE, x, y + 0.8, z, 0, 0, 0, 0.16, 3, 7.5, 1, 0.82, 0.5, 1);

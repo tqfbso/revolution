@@ -18,6 +18,8 @@ export const FLAG_DIRECT = 8;
 export const FLAG_GARRISON = 16;
 /** Ordered to shell the structure `orderStruct`. */
 export const FLAG_SIEGE = 32;
+/** Ordered to climb aboard the carrier `orderUnit`. */
+export const FLAG_BOARD = 64;
 
 /** Owner of a town nobody holds. */
 export const NO_TEAM = 255;
@@ -41,6 +43,7 @@ export const EV_SIEGE = 3; // a = shooter, b = structure
 export const EV_COLLAPSE = 4; // a = structure
 export const EV_CAPTURE = 5; // a = town, b = team
 export const EV_REPAIR = 6; // a = structure
+export const EV_UNLOAD = 7; // a = carrier
 
 /**
  * Structure-of-arrays world state. An entity is an index in [0, count).
@@ -63,7 +66,7 @@ export interface World {
   speed: Int32Array;
   group: Uint16Array;
   team: Uint8Array;
-  flags: Uint8Array;
+  flags: Uint16Array;
   state: Uint8Array;
   kind: Uint8Array;
   hp: Int16Array;
@@ -85,6 +88,15 @@ export interface World {
   reveal: Int32Array;
   /** 1 while the unit has a line of sight to its target. */
   los: Uint8Array;
+  /** Which way the hull points: a unit vector in Q10. Decides which armour a hit meets. */
+  faceX: Int16Array;
+  faceY: Int16Array;
+  /** Vehicle this squad rides in, or -1. A carried unit is out of play until it dismounts. */
+  carrier: Int32Array;
+  /** Squads aboard this vehicle. */
+  load: Uint8Array;
+  /** Carrier a boarding order refers to (see FLAG_BOARD). */
+  orderUnit: Int32Array;
   /** Structures: health (0 or less = destroyed), repair work done, occupants and their team. */
   sHp: Int32Array;
   sRepair: Int32Array;
@@ -129,7 +141,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     speed: new Int32Array(MAX_UNITS),
     group: new Uint16Array(MAX_UNITS),
     team: new Uint8Array(MAX_UNITS),
-    flags: new Uint8Array(MAX_UNITS),
+    flags: new Uint16Array(MAX_UNITS),
     state: new Uint8Array(MAX_UNITS),
     kind: new Uint8Array(MAX_UNITS),
     hp: new Int16Array(MAX_UNITS),
@@ -142,6 +154,11 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     orderStruct: new Int16Array(MAX_UNITS).fill(-1),
     reveal: new Int32Array(MAX_UNITS),
     los: new Uint8Array(MAX_UNITS),
+    faceX: new Int16Array(MAX_UNITS),
+    faceY: new Int16Array(MAX_UNITS),
+    carrier: new Int32Array(MAX_UNITS).fill(-1),
+    load: new Uint8Array(MAX_UNITS),
+    orderUnit: new Int32Array(MAX_UNITS).fill(-1),
     sHp: map.sMaxHp.slice(),
     sRepair: new Int32Array(MAX_STRUCTS),
     sOcc: new Uint8Array(MAX_STRUCTS),
@@ -199,7 +216,10 @@ export function hashWorld(w: World): number {
     mix(w.targetX[i]);
     mix(w.targetY[i]);
     mix(w.speed[i]);
-    mix(w.group[i] | (w.team[i] << 16) | (w.flags[i] << 24));
+    mix(w.group[i] | (w.team[i] << 16) | (w.load[i] << 24));
+    mix(w.flags[i] ^ (w.carrier[i] << 16));
+    mix((w.faceX[i] & 0xffff) | (w.faceY[i] << 16));
+    mix(w.orderUnit[i]);
     mix(w.state[i] | (w.kind[i] << 8) | ((w.hp[i] & 0xffff) << 16));
     mix(w.cooldown[i]);
     mix(w.attack[i]);

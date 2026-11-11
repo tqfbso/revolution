@@ -65,7 +65,9 @@ and an economy that makes holding ground matter (M6). See decision 020.
 Moved out of M4: artillery against buildings (M5, with artillery itself), spending the
 income (M6), and roads as terrain (not needed: the bridges already make the fast routes).
 
-## M5 Combined arms
+## M5 Combined arms (in progress)
+
+Done so far: armour facing, missile teams, carriers.
 
 - Spotting: a unit can fire at what any friendly unit sees. Recon teams see far and hide
   well; everything else is half blind without them

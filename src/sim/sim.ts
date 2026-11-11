@@ -2,9 +2,11 @@ import {
   CMD_ATTACK_MOVE,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
+  CMD_LOAD,
   CMD_MOVE,
   CMD_SPAWN,
   CMD_STOP,
+  CMD_UNLOAD,
   type Command,
   type SpawnCommand,
 } from './commands';
@@ -35,9 +37,11 @@ import { DIR_X, DIR_Y, UNREACHABLE, buildField, clearLine, flowDirection, newFie
 import { nextInt } from './rng';
 import {
   ACQUIRE_RANGE,
+  BOARD_DIST,
   CAPTURE_POINTS,
   CONCEAL_RANGE,
   EYE_HEIGHT,
+  FACING_COS,
   GARRISON_MAX,
   GARRISON_RANGE_BONUS,
   HEIGHT_RANGE_MAX,
@@ -57,7 +61,9 @@ import {
   EV_REPAIR,
   EV_SHOT,
   EV_SIEGE,
+  EV_UNLOAD,
   FLAG_AMOVE,
+  FLAG_BOARD,
   FLAG_DIRECT,
   FLAG_GARRISON,
   FLAG_MOVING,
@@ -82,6 +88,8 @@ const SEP_RADIUS_SQ = SEP_RADIUS * SEP_RADIUS;
 // (thousands of units on one spot) so a tick can never go quadratic.
 const MAX_NEIGHBOUR_TESTS = 64;
 const MAX_PUSH = fx(0.2);
+// Below this speed a hull does not swing to follow its own drift.
+const FACE_MIN_SPEED_SQ = fx(0.05) * fx(0.05);
 const FORMATION_SPACING = fx(2.6);
 const SQUAD_SIZE = 48;
 const SQUAD_SPREAD = fx(10);
@@ -161,6 +169,7 @@ export function step(w: World, commands: readonly Command[]): void {
   bucket(w, COARSE_SHIFT, COARSE_DIM, coarseStart, coarseSorted);
   updateChaseFields(w);
   updateStructureOrders(w);
+  updateTransport(w);
   updateEyes(w);
   acquireTargets(w);
   steer(w);
@@ -229,13 +238,162 @@ function applyCommand(w: World, cmd: Command): void {
       for (let k = 0; k < units.length; k++) w.flags[units[k]] = 0;
       break;
     }
+    case CMD_LOAD:
+      orderBoarding(w, validUnits(w, cmd.units), validUnits(w, cmd.carriers));
+      break;
+    case CMD_UNLOAD: {
+      const units = validUnits(w, cmd.units);
+      for (let k = 0; k < units.length; k++) unload(w, units[k], false);
+      break;
+    }
     case CMD_SPAWN:
       spawn(w, cmd);
       break;
   }
 }
 
-const ORDER_FLAGS = FLAG_WANDER | FLAG_AMOVE | FLAG_GARRISON | FLAG_SIEGE;
+const ORDER_FLAGS = FLAG_WANDER | FLAG_AMOVE | FLAG_GARRISON | FLAG_SIEGE | FLAG_BOARD;
+
+/**
+ * Send each squad to the nearest carrier of its own army that still has a seat free,
+ * counting the seats promised earlier in the same order. The carriers stop and wait.
+ */
+function orderBoarding(w: World, squads: readonly number[], carriers: readonly number[]): void {
+  const taken = new Map<number, number>();
+  const one = [0];
+  for (let k = 0; k < squads.length; k++) {
+    const id = squads[k];
+    // Whatever can hold a house can ride: infantry and weapon teams.
+    if (!KINDS[w.kind[id]].garrison) continue;
+    let best = -1;
+    let bestD = 0;
+    for (let c = 0; c < carriers.length; c++) {
+      const v = carriers[c];
+      const seats = KINDS[w.kind[v]].carry - w.load[v] - (taken.get(v) ?? 0);
+      if (seats <= 0 || w.team[v] !== w.team[id]) continue;
+      const dx = w.posX[v] - w.posX[id];
+      const dy = w.posY[v] - w.posY[id];
+      const d2 = dx * dx + dy * dy;
+      if (best < 0 || d2 < bestD) {
+        best = v;
+        bestD = d2;
+      }
+    }
+    if (best < 0) continue;
+    taken.set(best, (taken.get(best) ?? 0) + 1);
+    w.flags[best] = 0;
+    leaveBuilding(w, id);
+    w.orderUnit[id] = best;
+    w.targetX[id] = w.posX[best];
+    w.targetY[id] = w.posY[best];
+    w.orderSpeed[id] = w.speed[id];
+    one[0] = id;
+    routeUnits(w, one, w.posX[best], w.posY[best]);
+    w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | FLAG_BOARD;
+  }
+}
+
+/**
+ * Put down everyone aboard carrier `c`, in a line behind it. With `follow` the squads take
+ * over the carrier's attack-move, so a column that meets the enemy goes on as infantry.
+ */
+function unload(w: World, c: number, follow: boolean): void {
+  if (w.load[c] === 0) return;
+  const map = w.map;
+  const cost = map.cost[CLASS_FOOT];
+  const one = [0];
+  const fxc = w.faceX[c];
+  const fyc = w.faceY[c];
+  let k = 0;
+  for (let j = 0; j < w.count; j++) {
+    if (w.carrier[j] !== c) continue;
+    w.carrier[j] = -1;
+    // Two units behind the hull, squads side by side.
+    const side = (2 * k - (w.load[c] - 1)) * fx(1.2);
+    let x = clampInt(w.posX[c] - 2 * fxc + Math.trunc((-fyc * side) / 1024), 0, POS_MAX);
+    let y = clampInt(w.posY[c] - 2 * fyc + Math.trunc((fxc * side) / 1024), 0, POS_MAX);
+    const cell = cellOfPos(x, y);
+    if (cost[cell] === 0) {
+      const to = map.snap[CLASS_FOOT][cell];
+      x = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+      y = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+    }
+    w.posX[j] = x;
+    w.posY[j] = y;
+    w.velX[j] = 0;
+    w.velY[j] = 0;
+    w.flags[j] = 0;
+    w.attack[j] = NO_TARGET;
+    if (follow && (w.flags[c] & FLAG_MOVING) !== 0) {
+      w.targetX[j] = w.targetX[c];
+      w.targetY[j] = w.targetY[c];
+      w.orderSpeed[j] = w.speed[j];
+      one[0] = j;
+      routeUnits(w, one, w.targetX[c], w.targetY[c]);
+      w.flags[j] |= FLAG_AMOVE;
+    }
+    k++;
+  }
+  w.load[c] = 0;
+  w.events.push(EV_UNLOAD, c, k);
+}
+
+/**
+ * Boarding orders that have arrived, and carriers that have met the enemy: a carrier that
+ * is free to fight (not under a plain move order) dismounts its squads once it has a target
+ * in range.
+ */
+function updateTransport(w: World): void {
+  const n = w.count;
+  const one = [0];
+  for (let i = 0; i < n; i++) {
+    if (w.state[i] !== STATE_ALIVE) continue;
+    const flags = w.flags[i];
+    if (w.load[i] > 0) {
+      const t = w.attack[i];
+      if (
+        t !== NO_TARGET &&
+        w.los[i] === 1 &&
+        ((flags & FLAG_MOVING) === 0 || (flags & (FLAG_AMOVE | FLAG_WANDER)) !== 0)
+      ) {
+        const dx = w.posX[t] - w.posX[i];
+        const dy = w.posY[t] - w.posY[i];
+        const range = KINDS[w.kind[i]].range;
+        if (dx * dx + dy * dy <= range * range) unload(w, i, true);
+      }
+    }
+    if ((flags & FLAG_BOARD) === 0) continue;
+    const c = w.orderUnit[i];
+    if (
+      c < 0 ||
+      w.state[c] !== STATE_ALIVE ||
+      w.team[c] !== w.team[i] ||
+      w.load[c] >= KINDS[w.kind[c]].carry
+    ) {
+      w.flags[i] = 0;
+      continue;
+    }
+    const dx = w.posX[c] - w.posX[i];
+    const dy = w.posY[c] - w.posY[i];
+    if (dx * dx + dy * dy <= BOARD_DIST * BOARD_DIST) {
+      w.carrier[i] = c;
+      w.load[c]++;
+      w.flags[i] = 0;
+      w.path[i] = -1;
+      w.velX[i] = 0;
+      w.velY[i] = 0;
+      w.attack[i] = NO_TARGET;
+      w.posX[i] = w.posX[c];
+      w.posY[i] = w.posY[c];
+    } else if ((flags & FLAG_MOVING) === 0 || ((w.tick + i) & 31) === 0) {
+      // The carrier is not where it was when the order came: walk to where it is now.
+      w.targetX[i] = w.posX[c];
+      w.targetY[i] = w.posY[c];
+      one[0] = i;
+      routeUnits(w, one, w.posX[c], w.posY[c]);
+    }
+  }
+}
 
 /** Squared distance from a point to the footprint of a structure (0 inside it). */
 function structDist2(w: World, s: number, x: number, y: number): number {
@@ -352,7 +510,13 @@ function validUnits(w: World, ids: readonly number[]): number[] {
   const out: number[] = [];
   for (let k = 0; k < ids.length; k++) {
     const id = ids[k];
-    if (Number.isInteger(id) && id >= 0 && id < w.count && w.state[id] === STATE_ALIVE) {
+    if (
+      Number.isInteger(id) &&
+      id >= 0 &&
+      id < w.count &&
+      w.state[id] === STATE_ALIVE &&
+      w.carrier[id] < 0
+    ) {
       out.push(id);
     }
   }
@@ -560,6 +724,12 @@ function spawn(w: World, cmd: SpawnCommand): void {
     w.orderStruct[id] = -1;
     w.reveal[id] = 0;
     w.los[id] = 0;
+    // Hulls start pointing at the other side of the map.
+    w.faceX[id] = teamId === 0 ? 1024 : -1024;
+    w.faceY[id] = 0;
+    w.carrier[id] = -1;
+    w.load[id] = 0;
+    w.orderUnit[id] = -1;
     w.flags[id] = wanderFlag(cmd.wander && !advance);
     if (cmd.garrisonTown !== undefined && kind.garrison) {
       // Spread over the town's buildings: always the emptiest one that still has room.
@@ -613,7 +783,7 @@ function bucket(w: World, shift: number, dim: number, start: Int32Array, out: In
   const n = w.count;
   start.fill(0);
   for (let i = 0; i < n; i++) {
-    if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const c = (w.posY[i] >> shift) * dim + (w.posX[i] >> shift);
     cellOf[i] = c;
     start[c + 1]++;
@@ -623,7 +793,7 @@ function bucket(w: World, shift: number, dim: number, start: Int32Array, out: In
   // Ascending id order inside each cell.
   cellFill.fill(0, 0, cells);
   for (let i = 0; i < n; i++) {
-    if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const c = cellOf[i];
     out[start[c] + cellFill[c]++] = i;
   }
@@ -639,14 +809,20 @@ function acquireTargets(w: World): void {
   const tick = w.tick;
   const map = w.map;
   for (let i = 0; i < n; i++) {
-    if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const x = w.posX[i];
     const y = w.posY[i];
     const t = w.attack[i];
     const phase = tick + i;
+    const dmgTable = KINDS[w.kind[i]].damage;
     let valid = false;
     let targetD = 0;
-    if (t !== NO_TARGET && w.state[t] === STATE_ALIVE && w.team[t] !== w.team[i]) {
+    if (
+      t !== NO_TARGET &&
+      w.state[t] === STATE_ALIVE &&
+      w.team[t] !== w.team[i] &&
+      w.carrier[t] < 0
+    ) {
       const dx = w.posX[t] - x;
       const dy = w.posY[t] - y;
       const d2 = dx * dx + dy * dy;
@@ -699,7 +875,8 @@ function acquireTargets(w: World): void {
       budget -= to - from;
       for (let s = from; s < to; s++) {
         const j = coarseSorted[s];
-        if (w.team[j] === team) continue;
+        // Not an enemy, or nothing this unit carries can hurt it.
+        if (w.team[j] === team || dmgTable[w.kind[j]] === 0) continue;
         const dx = w.posX[j] - x;
         const dy = w.posY[j] - y;
         const d2 = dx * dx + dy * dy;
@@ -744,7 +921,7 @@ function concealed(w: World, j: number): boolean {
 function fire(w: World): void {
   const n = w.count;
   for (let i = 0; i < n; i++) {
-    if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     if (w.cooldown[i] > 0) {
       w.cooldown[i]--;
       continue;
@@ -769,9 +946,17 @@ function fire(w: World): void {
     const dx = w.posX[t] - w.posX[i];
     const dy = w.posY[t] - w.posY[i];
     const range = rangeTo(w, i, t);
-    if (dx * dx + dy * dy > range * range) continue;
+    const d2 = dx * dx + dy * dy;
+    if (d2 > range * range) continue;
     let dmg = kind.damage[w.kind[t]];
     const cover = w.inside[t];
+    const armour = KINDS[w.kind[t]].armour;
+    if (armour !== null && d2 > 0) {
+      // Which plate the shot meets: the angle between the target's nose and the shooter.
+      const cos = Math.trunc((-dx * w.faceX[t] - dy * w.faceY[t]) / isqrt(d2));
+      dmg =
+        Math.trunc((dmg * armour[cos >= FACING_COS ? 0 : cos <= -FACING_COS ? 2 : 1]) / 100) || 1;
+    }
     if (cover >= 0) {
       // Walls stop most of it. What a tank gun does not do to the men it does to the house.
       dmg = dmg >> 2 || 1;
@@ -815,6 +1000,20 @@ function kill(w: World, i: number, by: number): void {
     w.sOcc[w.inside[i]]--;
     w.inside[i] = -1;
   }
+  if (w.carrier[i] >= 0) {
+    w.load[w.carrier[i]]--;
+    w.carrier[i] = -1;
+  }
+  if (w.load[i] > 0) {
+    // The vehicle is hit with its squads aboard: half of each gets out.
+    for (let j = 0; j < w.count; j++) {
+      if (w.carrier[j] !== i) continue;
+      w.carrier[j] = -1;
+      w.hp[j] -= w.hp[j] >> 1;
+      w.flags[j] = 0;
+    }
+    w.load[i] = 0;
+  }
   w.hp[i] = 0;
   w.state[i] = STATE_WRECK;
   w.cooldown[i] = KINDS[w.kind[i]].wreckTicks;
@@ -838,16 +1037,19 @@ function resolveStructures(w: World): void {
     w.sHp[s] = 0;
     w.sRepair[s] = 0;
     const bridge = map.sKind[s] === S_BRIDGE;
-    for (let i = 0; i < w.count; i++) {
-      if (w.state[i] !== STATE_ALIVE) continue;
-      if (bridge) {
-        // Whoever is on the span goes down with it.
-        const c = cellOfPos(w.posX[i], w.posY[i]);
-        if (map.structAt[c] === s && map.type[c] === T_BRIDGE) kill(w, i, i);
-      } else if (w.inside[i] === s) {
-        // The house falls on its garrison: half of what is left of each squad walks out.
-        w.inside[i] = -1;
-        w.hp[i] -= w.hp[i] >> 1;
+    // Twice for a bridge: squads thrown out of a sinking carrier are in the river too.
+    for (let pass = 0; pass < (bridge ? 2 : 1); pass++) {
+      for (let i = 0; i < w.count; i++) {
+        if (w.state[i] !== STATE_ALIVE) continue;
+        if (bridge) {
+          // Whoever is on the span goes down with it.
+          const c = cellOfPos(w.posX[i], w.posY[i]);
+          if (map.structAt[c] === s && map.type[c] === T_BRIDGE) kill(w, i, i);
+        } else if (w.inside[i] === s) {
+          // The house falls on its garrison: half of what is left of each squad walks out.
+          w.inside[i] = -1;
+          w.hp[i] -= w.hp[i] >> 1;
+        }
       }
     }
     w.sOcc[s] = 0;
@@ -872,7 +1074,7 @@ function updateTowns(w: World): void {
     if (map.sKind[s] === S_BRIDGE && w.sHp[s] <= 0) cut++;
   }
   for (let i = 0; i < w.count; i++) {
-    if (w.state[i] !== STATE_ALIVE) continue;
+    if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const x = w.posX[i];
     const y = w.posY[i];
     const team = w.team[i];
@@ -954,7 +1156,7 @@ function steer(w: World): void {
   const tick = w.tick;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
-    if (w.inside[i] >= 0) continue; // garrisons stay put
+    if (w.inside[i] >= 0 || w.carrier[i] >= 0) continue; // garrisons and passengers stay put
     let flags = w.flags[i];
     const cls = KIND_CLASS[w.kind[i]];
     const x = w.posX[i];
@@ -1047,6 +1249,33 @@ function steer(w: World): void {
     }
     w.velX[i] = vx;
     w.velY[i] = vy;
+    const turn = KINDS[w.kind[i]].turn;
+    if (turn === 0) continue;
+    // The hull turns toward where it is driving, or, standing, toward what it is shooting.
+    let hx = vx;
+    let hy = vy;
+    if (vx * vx + vy * vy < FACE_MIN_SPEED_SQ) {
+      if (t === NO_TARGET || w.los[i] !== 1) continue;
+      hx = w.posX[t] - x;
+      hy = w.posY[t] - y;
+    }
+    const len = isqrt(hx * hx + hy * hy);
+    if (len === 0) continue;
+    let ux = Math.trunc((hx * 1024) / len);
+    let uy = Math.trunc((hy * 1024) / len);
+    const fxi = w.faceX[i];
+    const fyi = w.faceY[i];
+    if (fxi * ux + fyi * uy < -1000 * 1024) {
+      // Dead astern: pick a side, or the blend below would never leave the spot.
+      ux = -fyi;
+      uy = fxi;
+    }
+    const bx = fxi * turn + ux;
+    const by = fyi * turn + uy;
+    const bl = isqrt(bx * bx + by * by);
+    if (bl === 0) continue;
+    w.faceX[i] = Math.trunc((bx * 1024) / bl);
+    w.faceY[i] = Math.trunc((by * 1024) / bl);
   }
 }
 
@@ -1059,7 +1288,7 @@ function separate(w: World): void {
   const n = w.count;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
-    if (w.inside[i] >= 0) {
+    if (w.inside[i] >= 0 || w.carrier[i] >= 0) {
       pushX[i] = pushY[i] = 0;
       continue;
     }
@@ -1110,7 +1339,7 @@ function integrate(w: World): void {
   const n = w.count;
   const map = w.map;
   for (let i = 0; i < n; i++) {
-    if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0) continue;
+    if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0 || w.carrier[i] >= 0) continue;
     const x = w.posX[i];
     const y = w.posY[i];
     let nx = clampInt(x + w.velX[i] + pushX[i], 0, POS_MAX);
@@ -1128,5 +1357,12 @@ function integrate(w: World): void {
     }
     w.posX[i] = nx;
     w.posY[i] = ny;
+  }
+  // Passengers go where their vehicle goes.
+  for (let i = 0; i < n; i++) {
+    const c = w.carrier[i];
+    if (c < 0) continue;
+    w.posX[i] = w.posX[c];
+    w.posY[i] = w.posY[c];
   }
 }

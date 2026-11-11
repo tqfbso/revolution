@@ -17,8 +17,8 @@ import {
 } from '../sim/world';
 import { CAPTURE_POINTS } from '../sim/units';
 import {
+  INFO_CARRIED,
   INFO_INSIDE,
-  INFO_KIND_SHIFT,
   INFO_REVEALED,
   INFO_TEAM_SHIFT,
   NO_AIM,
@@ -81,6 +81,9 @@ function postSnapshot(w: World, simMs: number): void {
   const info = new Uint8Array(n);
   const hp = new Uint8Array(n);
   const aim = new Uint16Array(n);
+  const kinds = w.kind.slice(0, n);
+  const load = w.load.slice(0, n);
+  const heading = new Uint8Array(n);
   const alive = new Array<number>(MAX_TEAMS).fill(0);
   for (let i = 0; i < n; i++) {
     positions[2 * i] = fromFx(w.posX[i]);
@@ -88,12 +91,15 @@ function postSnapshot(w: World, simMs: number): void {
     const kind = w.kind[i];
     info[i] =
       w.state[i] |
-      (kind << INFO_KIND_SHIFT) |
       (w.team[i] << INFO_TEAM_SHIFT) |
       (w.inside[i] >= 0 ? INFO_INSIDE : 0) |
+      (w.carrier[i] >= 0 ? INFO_CARRIED : 0) |
       (w.reveal[i] > w.tick ? INFO_REVEALED : 0);
     hp[i] = Math.ceil((w.hp[i] * 255) / KINDS[kind].hp);
     aim[i] = w.attack[i] === NO_TARGET ? NO_AIM : w.attack[i];
+    if (KINDS[kind].turn > 0) {
+      heading[i] = Math.round((Math.atan2(w.faceX[i], w.faceY[i]) * 128) / Math.PI) & 255;
+    }
     if (w.state[i] === STATE_ALIVE) alive[w.team[i]]++;
   }
   const map = w.map;
@@ -113,6 +119,9 @@ function postSnapshot(w: World, simMs: number): void {
     count: n,
     positions,
     info,
+    kind: kinds,
+    heading,
+    load,
     hp,
     aim,
     events,
@@ -126,6 +135,15 @@ function postSnapshot(w: World, simMs: number): void {
   };
   if (w.tick % TICK_RATE === 0) snapshot.hash = hashWorld(w);
   self.postMessage(snapshot, {
-    transfer: [positions.buffer, info.buffer, hp.buffer, aim.buffer, events.buffer],
+    transfer: [
+      positions.buffer,
+      info.buffer,
+      kinds.buffer,
+      heading.buffer,
+      load.buffer,
+      hp.buffer,
+      aim.buffer,
+      events.buffer,
+    ],
   });
 }

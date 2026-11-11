@@ -95,12 +95,20 @@ path) with `inside` set to their building; they do not move or collide. Range is
 weapon's plus a bonus for height difference (and for firing from a building).
 
 Unit types live in `src/sim/units.ts` as a table of integers (health, speed, range, reload,
-movement class, damage per target type).
+movement class, damage per target type, armour by facing, seats). A damage of zero against
+a type means "cannot engage it": such targets are never acquired.
+
+Vehicles have a hull direction (`faceX`, `faceY`, a Q10 unit vector) that turns toward the
+direction of travel or, standing, toward the target; `fire` picks the front, side or rear
+armour from the angle between it and the shooter. A squad riding in a carrier stays in the
+unit arrays with `carrier` set to the vehicle: it is left out of both grids (so nothing can
+target or bump it), skips targeting, steering and firing, and has its position copied from
+the vehicle after `integrate`.
 
 ## Commands
 
 `src/sim/commands.ts` defines the only inputs to the sim: move, attack-move, stop, spawn,
-garrison a building, shell a structure. A
+garrison a building, shell a structure, mount carriers, dismount. A
 command holds integers only; float-to-fixed conversion happens once on the client before
 sending. In single player a command applies on the next tick. In lockstep multiplayer the
 same commands get scheduled a few ticks ahead and broadcast; the sim does not change.
@@ -112,7 +120,9 @@ Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwis
 - **Models** (`src/client/models.ts`) are generated at start-up from boxes and cylinders, in
   three levels of detail. Vertex attributes carry albedo and a team-marking mask.
 - **Batches** (`src/client/batch.ts`): one instanced draw call per model part per level of
-  detail (tank hull, tank turret, soldier, far tank, far squad). Per instance: a matrix and
+  detail. `UnitView` holds a table per unit type: a vehicle is a hull, a turret and a far
+  mesh; a foot unit is a list of figures (soldiers, a launcher) and a far mesh. Vehicles
+  other than the tank come from one parametric builder (`buildVehicle`). Per instance: a matrix and
   a 4-float tint (team colour and burn).
 - **Per frame** (`src/client/units.ts`): interpolate each unit between the last two 20 Hz
   snapshots, cull against the frustum, choose the level of detail by distance, write the
@@ -129,7 +139,7 @@ Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwis
   flag per town.
 
 Snapshots are transferred (not copied) from the worker as typed arrays: positions, a
-state/kind/team byte (plus "inside a building" and "revealed"), health, attack target,
+state/team byte, unit type, hull heading, squads aboard (plus "inside a building" and "revealed"), health, attack target,
 structure health, town owners, and the tick's combat events.
 
 ## Player view

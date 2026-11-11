@@ -225,3 +225,34 @@ game is about: blue holds the east bank with infantry in the houses and tanks be
 red starts west of the central town with no orders. Blue has no brain until M7; it
 shoots what it sees and chases what comes close. `?scenario=clash` keeps the old
 head-on battle for performance comparisons.
+
+## 027 Armour has a front, and a missile team is the unit that makes that matter
+
+Vehicles carry a hull direction in the sim. It follows the direction of travel, and a
+standing vehicle swings it toward what it is shooting at (a tank needs about a second and a
+half for a quarter turn). A hit within 60 degrees of the nose meets the front plate, within
+60 of the tail the rear, anything else the side. A tank lets through 70% from the front,
+115% from the side, 180% from behind; the carrier 100, 120, 150. So tank against tank head
+on takes six hits instead of four, and from behind three. The missile team is built around
+this: three men, 34 range against the tank gun's 26, a missile every seven seconds doing 150. Three missiles into the front, two into the side, one into the engine deck. It cannot
+hurt infantry at all, which is its weakness and the reason it needs riflemen around it.
+Because a lone tank turns to face its attacker, flanking only pays when the target is
+already busy with something else: that is the combined-arms rule the milestone is after.
+Missiles are still instant hits; a missile with flight time that smoke or a kill on the
+team can defeat is a later refinement. Rejected: a separate turret direction in the sim
+(the turret is presentation only; only the hull decides armour).
+
+## 028 Carriers: two squads a vehicle, mount on order, dismount on contact
+
+The infantry fighting vehicle moves at 0.4 against the squad's 0.16, carries two squads
+(rifle or missile teams) and has an autocannon that is the best infantry killer in the
+game and nearly useless against a tank. A carried squad is out of play: it cannot be
+seen, shot or ordered, and does not shoot. Mounting: right click a carrier, or select
+squads and carriers together and press L, and each squad walks to the nearest carrier
+with a free seat while the carriers wait. Dismounting: U, or by itself when a carrier that
+is free to fight (idle or on an attack-move) has an enemy in range; the squads then take
+over the carrier's attack-move on foot. Under a plain move order (Alt + right click) the
+carrier keeps its squads aboard and drives through. If the carrier is killed loaded, each
+squad aboard loses half its strength. Two squads per vehicle is a game number, not a real
+one: with one squad per vehicle a mechanised army would need as many carriers as squads
+and the screen would be all vehicles.
