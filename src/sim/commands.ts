@@ -9,6 +9,25 @@ export const CMD_ATTACK_MOVE = 4;
 export const CMD_GARRISON = 5;
 export const CMD_ATTACK_STRUCTURE = 6;
 
+export const CMD_LOAD = 7;
+export const CMD_UNLOAD = 8;
+
+/**
+ * Squads climb aboard carriers: each walks to the nearest of `carriers` that still has a
+ * seat. The carriers wait for them.
+ */
+export interface LoadCommand {
+  type: typeof CMD_LOAD;
+  units: number[];
+  carriers: number[];
+}
+
+/** Carriers put down everyone aboard, here and now. */
+export interface UnloadCommand {
+  type: typeof CMD_UNLOAD;
+  units: number[];
+}
+
 export interface MoveCommand {
   type: typeof CMD_MOVE;
   units: number[];
@@ -71,4 +90,6 @@ export type Command =
   | StopCommand
   | SpawnCommand
   | GarrisonCommand
-  | AttackStructureCommand;
+  | AttackStructureCommand
+  | LoadCommand
+  | UnloadCommand;

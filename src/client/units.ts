@@ -1,19 +1,21 @@
 import * as THREE from 'three/webgpu';
 import { attribute, mix, vec3 } from 'three/tsl';
-import { KIND_TANK } from '../sim/units';
+import { KINDS, KIND_ATGM, KIND_COUNT, KIND_IFV, KIND_INFANTRY, KIND_TANK } from '../sim/units';
+import { CLASS_VEHICLE } from '../sim/map';
 import {
   EV_COLLAPSE,
   EV_DEATH,
   EV_SHOT,
   EV_SIEGE,
+  EV_UNLOAD,
   MAX_UNITS,
   STATE_ALIVE,
   STATE_FREE,
   TICK_MS,
 } from '../sim/world';
 import {
+  INFO_CARRIED,
   INFO_INSIDE,
-  INFO_KIND_SHIFT,
   INFO_REVEALED,
   INFO_STATE_MASK,
   INFO_TEAM_MASK,
@@ -25,14 +27,13 @@ import { Batch } from './batch';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import {
-  MUZZLE_Y,
-  MUZZLE_Z,
   SQUAD_OFFSETS,
-  SQUAD_SIZE,
-  TURRET_Y,
-  TURRET_Z,
+  TEAM_OFFSETS,
+  buildIfv,
   buildInfantry,
+  buildLauncher,
   buildTank,
+  type VehicleModel,
 } from './models';
 import type { StructureView } from './structures';
 import type { Terrain } from './terrain';
@@ -49,6 +50,20 @@ const SOLDIER_TURN = 9;
 const CULL_RADIUS = 4;
 const WRECK_SMOKE_SECONDS = 50;
 const LOD_HIDDEN = 3;
+
+/** How a vehicle type is drawn: hull and turret batches per level of detail. */
+interface VehicleDraw {
+  model: VehicleModel;
+  hull: Batch[];
+  turret: Batch[];
+  far: Batch;
+}
+/** How a foot unit is drawn: figures (men, a launcher) around the unit's centre. */
+interface SquadDraw {
+  figures: { batch: Batch[]; x: number; z: number }[];
+  far: Batch;
+}
+const IS_VEHICLE = KINDS.map((k) => k.cls === CLASS_VEHICLE);
 
 export interface LodStats {
   /** Units drawn at each level of detail this frame, and units culled as off-screen. */
@@ -96,11 +111,12 @@ export class UnitView {
   /** Level of detail each unit was last drawn at; LOD_HIDDEN when off-screen. */
   private readonly lodOf = new Uint8Array(MAX_UNITS).fill(LOD_HIDDEN);
 
-  private readonly hull: Batch[];
-  private readonly turretBatch: Batch[];
-  private readonly tankFar: Batch;
-  private readonly soldier: Batch[];
-  private readonly squadFar: Batch;
+  /** Latest per-unit type, hull heading and passengers from the sim. */
+  readonly kind = new Uint8Array(MAX_UNITS);
+  readonly load = new Uint8Array(MAX_UNITS);
+  private readonly vehicles: (VehicleDraw | null)[] = new Array(KIND_COUNT).fill(null);
+  private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
+  private readonly batches: Batch[] = [];
   private readonly frustum = new THREE.Frustum();
   private readonly projScreen = new THREE.Matrix4();
 
@@ -117,21 +133,38 @@ export class UnitView {
     // tint.w is "burn": 1 turns the model into a scorched wreck.
     material.colorNode = mix(painted, vec3(0.022, 0.02, 0.019), tint.w);
 
-    const tank = buildTank();
-    const infantry = buildInfantry();
     const batch = (g: THREE.BufferGeometry, cap: number, lod: number) => {
       const b = new Batch(g, material, cap);
       // Far LOD is a few pixels: no shadow work for it.
       b.mesh.castShadow = shadows && lod < 2;
       b.mesh.receiveShadow = shadows && lod === 0;
       this.group.add(b.mesh);
+      this.batches.push(b);
       return b;
     };
-    this.hull = tank.hull.map((g, lod) => batch(g, MAX_UNITS, lod));
-    this.turretBatch = tank.turret.map((g, lod) => batch(g, MAX_UNITS, lod));
-    this.tankFar = batch(tank.far, MAX_UNITS, 2);
-    this.soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * SQUAD_SIZE, lod));
-    this.squadFar = batch(infantry.far, MAX_UNITS, 2);
+    const vehicle = (model: VehicleModel, cap: number): VehicleDraw => ({
+      model,
+      hull: model.hull.map((g, lod) => batch(g, cap, lod)),
+      turret: model.turret.map((g, lod) => batch(g, cap, lod)),
+      far: batch(model.far, cap, 2),
+    });
+    this.vehicles[KIND_TANK] = vehicle(buildTank(), MAX_UNITS);
+    this.vehicles[KIND_IFV] = vehicle(buildIfv(), MAX_UNITS >> 1);
+    const infantry = buildInfantry();
+    const soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * 5, lod));
+    this.squads[KIND_INFANTRY] = {
+      figures: SQUAD_OFFSETS.map(([x, z]) => ({ batch: soldier, x, z })),
+      far: batch(infantry.far, MAX_UNITS, 2),
+    };
+    const team = buildLauncher();
+    const launcher = [0, 1].map((lod) => batch(team.launcher.clone(), MAX_UNITS >> 2, lod));
+    this.squads[KIND_ATGM] = {
+      figures: [
+        { batch: launcher, x: 0, z: 0.25 },
+        ...TEAM_OFFSETS.map(([x, z]) => ({ batch: soldier, x, z })),
+      ],
+      far: batch(team.far, MAX_UNITS >> 2, 2),
+    };
 
     const ringGeometry = new THREE.RingGeometry(1.5, 1.72, 24).rotateX(-Math.PI / 2);
     const ringMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
@@ -190,9 +223,16 @@ export class UnitView {
       const d2 = dx * dx + dz * dz;
       // Only turn when really moving, so separation nudges do not make idle units twitch.
       this.moving[i] = d2 > 0.012 ? 1 : 0;
-      if (this.moving[i]) this.headingGoal[i] = Math.atan2(dx, dz);
+      if (IS_VEHICLE[s.kind[i]]) {
+        // Hulls point where the sim says: that is the armour the enemy is shooting at.
+        const h = (s.heading[i] * Math.PI) / 128;
+        this.headingGoal[i] = h > Math.PI ? h - 2 * Math.PI : h;
+        if (!wasAlive) this.heading[i] = this.turret[i] = this.headingGoal[i];
+      } else if (this.moving[i]) this.headingGoal[i] = Math.atan2(dx, dz);
     }
     this.info.set(s.info);
+    this.kind.set(s.kind);
+    this.load.set(s.load);
     this.hp.set(s.hp);
     this.aim.set(s.aim);
     this.count = n;
@@ -213,67 +253,70 @@ export class UnitView {
         if (this.fog.sees(c.x, c.z)) this.structures.collapse(a);
         continue;
       }
+      if (ev[e] === EV_UNLOAD) continue;
+      const veh = this.vehicles[this.kind[a]];
+      const ax = pos[3 * a];
+      const ay = pos[3 * a + 1];
+      const az = pos[3 * a + 2];
       if (ev[e] === EV_SIEGE) {
-        // A tank shelling a building or a bridge.
+        // Shelling a building or a bridge.
         this.shotAt[a] = seconds;
         if (this.lodOf[a] === LOD_HIDDEN) continue;
         const p = this.structures.hit(b);
-        const d = Math.hypot(p.x - pos[3 * a], p.z - pos[3 * a + 2]) || 1;
-        const ux = (p.x - pos[3 * a]) / d;
-        const uz = (p.z - pos[3 * a + 2]) / d;
-        this.turret[a] = Math.atan2(ux, uz);
         fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
-        fx.cannonShot(
-          pos[3 * a] + ux * MUZZLE_Z,
-          pos[3 * a + 1] + TURRET_Y + MUZZLE_Y,
-          pos[3 * a + 2] + uz * MUZZLE_Z,
-          p.x,
-          p.y,
-          p.z,
-        );
+        this.shoot(a, ax, ay, az, p.x, p.y, p.z);
         fx.squadHit(p.x, p.y, p.z);
         continue;
       }
       if (ev[e] !== EV_SHOT && ev[e] !== EV_DEATH) continue;
-      const isTank = (this.info[a] >> INFO_KIND_SHIFT) & 3 ? false : true;
       // Effects nobody can see are the main cost of a big battle: skip them when both ends
       // are off-screen and thin them when both are far away.
       const near = Math.min(this.lodOf[a], ev[e] === EV_SHOT ? this.lodOf[b] : LOD_HIDDEN);
       fx.thin = near >= 2 ? 1 : 0;
-      const ax = pos[3 * a];
-      const ay = pos[3 * a + 1];
-      const az = pos[3 * a + 2];
       if (ev[e] === EV_SHOT) {
         this.shotAt[a] = seconds;
         if (near === LOD_HIDDEN) continue;
-        const bx = pos[3 * b];
-        const bz = pos[3 * b + 2];
-        const targetTank = ((this.info[b] >> INFO_KIND_SHIFT) & 3) === KIND_TANK;
-        const by = pos[3 * b + 1] + (targetTank ? 0.7 : 0.35);
-        if (isTank) {
-          // The shot leaves along the turret, which is already laid on the target.
-          const d = Math.hypot(bx - ax, bz - az) || 1;
-          const ux = (bx - ax) / d;
-          const uz = (bz - az) / d;
-          this.turret[a] = Math.atan2(ux, uz);
-          fx.cannonShot(
-            ax + ux * MUZZLE_Z,
-            ay + TURRET_Y + MUZZLE_Y,
-            az + uz * MUZZLE_Z,
-            bx,
-            by,
-            bz,
-          );
-        } else {
-          fx.rifleBurst(ax, ay + 0.42, az, bx, by, bz);
-        }
+        const by = pos[3 * b + 1] + (IS_VEHICLE[this.kind[b]] ? 0.7 : 0.35);
+        this.shoot(a, ax, ay, az, pos[3 * b], by, pos[3 * b + 2]);
       } else if (ev[e] === EV_DEATH) {
         this.diedAt[a] = seconds;
-        if (isTank) fx.explosion(ax, ay, az);
+        if (near === LOD_HIDDEN) continue;
+        if (veh) fx.explosion(ax, ay, az);
         else fx.squadHit(ax, ay, az);
       }
     }
     fx.thin = 0;
+  }
+
+  /** The effect of unit `a` at (ax, ay, az) firing its weapon at a point. */
+  private shoot(
+    a: number,
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+  ): void {
+    const fx = this.effects;
+    const kind = this.kind[a];
+    const veh = this.vehicles[kind];
+    if (!veh) {
+      if (kind === KIND_ATGM) fx.missile(ax, ay + 0.45, az, bx, by, bz);
+      else fx.rifleBurst(ax, ay + 0.42, az, bx, by, bz);
+      return;
+    }
+    // The shot leaves along the turret, which is laid on the target.
+    const d = Math.hypot(bx - ax, bz - az) || 1;
+    const ux = (bx - ax) / d;
+    const uz = (bz - az) / d;
+    this.turret[a] = Math.atan2(ux, uz);
+    const m = veh.model;
+    const mx = ax + ux * m.muzzleZ;
+    const my = ay + m.turretY + m.muzzleY;
+    const mz = az + uz * m.muzzleZ;
+    if (kind === KIND_IFV) fx.autocannon(mx, my, mz, bx, by, bz);
+    else fx.cannonShot(mx, my, mz, bx, by, bz);
   }
 
   teamOf(id: number): number {
@@ -290,7 +333,7 @@ export class UnitView {
   }
 
   kindOf(id: number): number {
-    return (this.info[id] >> INFO_KIND_SHIFT) & 3;
+    return this.kind[id];
   }
 
   /** A living unit of the player's army. */
@@ -313,7 +356,8 @@ export class UnitView {
   }
 
   isAlive(id: number): boolean {
-    return id < this.count && (this.info[id] & INFO_STATE_MASK) === STATE_ALIVE;
+    // A squad riding in a carrier is out of play: not drawn, not selectable.
+    return id < this.count && (this.info[id] & (INFO_STATE_MASK | INFO_CARRIED)) === STATE_ALIVE;
   }
 
   setSelected(ids: Iterable<number>, additive: boolean): void {
@@ -347,13 +391,7 @@ export class UnitView {
     const near2 = this.lodNear * this.lodNear;
     const far2 = this.lodFar * this.lodFar;
 
-    const batches = [
-      ...this.hull,
-      ...this.turretBatch,
-      this.tankFar,
-      ...this.soldier,
-      this.squadFar,
-    ];
+    const batches = this.batches;
     for (const b of batches) b.n = 0;
     const lodCount = this.stats.lod;
     lodCount[0] = lodCount[1] = lodCount[2] = 0;
@@ -364,9 +402,14 @@ export class UnitView {
     for (let i = 0; i < n; i++) {
       const state = info[i] & INFO_STATE_MASK;
       if (state === STATE_FREE) continue;
-      const isTank = ((info[i] >> INFO_KIND_SHIFT) & 3) === KIND_TANK;
+      const veh = this.vehicles[this.kind[i]];
+      const isTank = veh !== null;
       const alive = state === STATE_ALIVE;
       if (!alive && !isTank) continue; // fallen squads leave no wreck
+      if ((info[i] & INFO_CARRIED) !== 0) {
+        this.lodOf[i] = LOD_HIDDEN;
+        continue;
+      }
 
       const x = prev[2 * i] + (curr[2 * i] - prev[2 * i]) * alpha;
       const z = prev[2 * i + 1] + (curr[2 * i + 1] - prev[2 * i + 1]) * alpha;
@@ -446,12 +489,12 @@ export class UnitView {
       const sin = Math.sin(h);
       const cos = Math.cos(h);
 
-      if (isTank) {
+      if (veh) {
         const burn = alive ? 0 : 1;
         if (lod === 2) {
-          this.tankFar.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
+          veh.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
         } else {
-          this.hull[lod].put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
+          veh.hull[lod].put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
           // Wrecks keep the turret where it died, knocked slightly askew.
           const th = this.turret[i] + (alive ? 0 : 0.5);
           const ts = Math.sin(th);
@@ -459,20 +502,10 @@ export class UnitView {
           // Recoil: the turret kicks back along the gun and recovers.
           const since = seconds - this.shotAt[i];
           const kick = since < 0.35 ? 0.16 * (1 - since / 0.35) ** 2 : 0;
-          const px = x + sin * TURRET_Z - ts * kick;
-          const pz = z + cos * TURRET_Z - tc * kick;
-          this.turretBatch[lod].put(
-            px,
-            y + TURRET_Y,
-            pz,
-            ts,
-            tc,
-            1,
-            team[0],
-            team[1],
-            team[2],
-            burn,
-          );
+          const m = veh.model;
+          const px = x + sin * m.turretZ - ts * kick;
+          const pz = z + cos * m.turretZ - tc * kick;
+          veh.turret[lod].put(px, y + m.turretY, pz, ts, tc, 1, team[0], team[1], team[2], burn);
         }
         if (!alive && lod < 2) {
           const age = seconds - this.diedAt[i];
@@ -480,34 +513,36 @@ export class UnitView {
             fx.wreckSmoke(x, y, z, Math.max(0, 1 - age / 12));
           }
         }
-      } else if (lod === 2) {
-        this.squadFar.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], 0);
       } else {
-        // Soldiers drop out of the squad as it loses health.
-        const men = Math.ceil((this.hp[i] * SQUAD_SIZE) / 255);
-        const face = Number.isNaN(aimAngle) ? h : aimAngle;
-        const fs = Math.sin(face);
-        const fc = Math.cos(face);
-        const batch = this.soldier[lod];
-        const walking = this.moving[i] === 1;
-        for (let k = 0; k < men; k++) {
-          const ox = SQUAD_OFFSETS[k][0];
-          const oz = SQUAD_OFFSETS[k][1];
-          const sx = x + ox * cos + oz * sin;
-          const sz = z - ox * sin + oz * cos;
-          const bob = walking ? Math.abs(Math.sin(seconds * 9 + i + k * 1.7)) * 0.035 : 0;
-          batch.put(
-            sx,
-            this.terrain.heightAt(sx, sz) + bob,
-            sz,
-            fs,
-            fc,
-            1,
-            team[0],
-            team[1],
-            team[2],
-            0,
-          );
+        const squad = this.squads[this.kind[i]] ?? this.squads[KIND_INFANTRY]!;
+        if (lod === 2) {
+          squad.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], 0);
+        } else {
+          // Men drop out of the squad as it loses health.
+          const figures = squad.figures;
+          const men = Math.ceil((this.hp[i] * figures.length) / 255);
+          const face = Number.isNaN(aimAngle) ? h : aimAngle;
+          const fs = Math.sin(face);
+          const fc = Math.cos(face);
+          const walking = this.moving[i] === 1;
+          for (let k = 0; k < men; k++) {
+            const f = figures[k];
+            const sx = x + f.x * cos + f.z * sin;
+            const sz = z - f.x * sin + f.z * cos;
+            const bob = walking ? Math.abs(Math.sin(seconds * 9 + i + k * 1.7)) * 0.035 : 0;
+            f.batch[lod].put(
+              sx,
+              this.terrain.heightAt(sx, sz) + bob,
+              sz,
+              fs,
+              fc,
+              1,
+              team[0],
+              team[1],
+              team[2],
+              0,
+            );
+          }
         }
       }
 

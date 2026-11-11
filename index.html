@@ -48,6 +48,12 @@
         transform: translateX(-50%);
         min-width: 190px;
       }
+      #selection {
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+      }
       #actions {
         position: fixed;
         top: 10px;
@@ -100,6 +106,7 @@
     <canvas id="game"></canvas>
     <pre id="perf" class="panel">starting…</pre>
     <div id="towns" class="panel"></div>
+    <div id="selection" class="panel"></div>
     <div id="actions">
       <button id="add-units">+1000 units</button>
       <button id="reset">Reset</button>
@@ -109,6 +116,7 @@
       Right click: attack-move · Alt+right click: move · X: stop · Esc: clear<br />
       Right click a building: infantry moves in · Ctrl+right click a building or bridge: tanks shell
       it<br />
+      Right click a carrier (or L with squads and carriers selected): mount up · U: dismount<br />
       Ctrl or Alt + 1..9: save group · 1..9: recall · twice: jump to it · Minimap: click to look,
       right click to order<br />
       WASD / arrows / screen edge: pan · Wheel: zoom · Q/E or middle drag: rotate

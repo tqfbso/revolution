@@ -3,9 +3,11 @@ import {
   CMD_ATTACK_MOVE,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
+  CMD_LOAD,
   CMD_MOVE,
   CMD_SPAWN,
   CMD_STOP,
+  CMD_UNLOAD,
   type Command,
 } from '../src/sim/commands';
 import { fx, isqrt } from '../src/sim/fixed';
@@ -28,7 +30,7 @@ import {
   refreshPassability,
 } from '../src/sim/map';
 import { assaultCommands, battleCommands, stressTestCommands } from '../src/sim/scenarios';
-import { KINDS, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
+import { KINDS, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
 import { step } from '../src/sim/sim';
 import {
   EV_CAPTURE,
@@ -74,6 +76,32 @@ function script(tick: number): Command[] {
       { type: CMD_ATTACK_STRUCTURE, units, structure: 2 },
       { type: CMD_ATTACK_STRUCTURE, units: units.slice(0, 80), structure: 16 },
     ];
+  }
+  if (tick === 100) {
+    // A mechanised company next to the battle: carriers, squads and missile teams.
+    const at = (kind: number, count: number, team: number): Command => ({
+      type: CMD_SPAWN,
+      count,
+      team,
+      kind,
+      x: fx(team === 0 ? 420 : 600),
+      y: fx(430),
+      radius: fx(25),
+      wander: false,
+    });
+    return [
+      at(KIND_IFV, 40, 0),
+      at(KIND_INFANTRY, 60, 0),
+      at(KIND_ATGM, 30, 0),
+      at(KIND_IFV, 40, 1),
+      at(KIND_ATGM, 30, 1),
+    ];
+  }
+  if (tick === 130 || tick === 330 || tick === 360) {
+    const units = Array.from({ length: 800 }, (_, i) => 2800 + i);
+    if (tick === 130) return [{ type: CMD_LOAD, units, carriers: units }];
+    if (tick === 330) return [{ type: CMD_ATTACK_MOVE, units, x: fx(600), y: fx(430) }];
+    return [{ type: CMD_UNLOAD, units: units.slice(0, 400) }];
   }
   if (tick === 120) {
     return [
@@ -138,7 +166,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 2184234842;
+const GOLDEN = 4171841269;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -597,5 +625,121 @@ describe('cities', () => {
     for (let t = 0; t < 200; t++) step(w, []);
     expect(w.townOwner[1]).toBe(1);
     expect(w.townOwner[0]).toBe(0);
+  });
+});
+
+describe('combined arms', () => {
+  const flat = () => createWorld(1, flatMap());
+  const lone = (w: World, team: number, kind: number, x: number, y: number) => {
+    const id = w.count;
+    step(w, [
+      { type: CMD_SPAWN, count: 1, team, kind, x: fx(x), y: fx(y), radius: 1, wander: false },
+    ]);
+    w.posX[id] = fx(x);
+    w.posY[id] = fx(y);
+    return id;
+  };
+  /** Health a blue tank facing west (toward x = 0) loses to one red hit from (x, y). */
+  const hitFrom = (kind: number, x: number, y: number) => {
+    const w = flat();
+    const tank = lone(w, 1, KIND_TANK, 500, 500);
+    const shooter = lone(w, 0, kind, x, y);
+    w.cooldown[shooter] = 0;
+    w.cooldown[tank] = 9999;
+    for (let t = 0; t < 8 && w.hp[tank] === KINDS[KIND_TANK].hp; t++) step(w, []);
+    return KINDS[KIND_TANK].hp - w.hp[tank];
+  };
+
+  it('armour is thickest in front: the same hit does more from the side and most from behind', () => {
+    const front = hitFrom(KIND_TANK, 480, 500);
+    const side = hitFrom(KIND_TANK, 500, 480);
+    const rear = hitFrom(KIND_TANK, 520, 500);
+    expect(front).toBe(42);
+    expect(side).toBe(69);
+    expect(rear).toBe(108);
+    // A missile into the engine deck is a kill; into the front plate it is not.
+    expect(hitFrom(KIND_ATGM, 530, 500)).toBeGreaterThanOrEqual(KINDS[KIND_TANK].hp);
+    expect(hitFrom(KIND_ATGM, 470, 500)).toBeLessThan(KINDS[KIND_TANK].hp / 2);
+  });
+
+  it('a standing tank turns its hull toward what it is fighting', () => {
+    const w = flat();
+    const tank = lone(w, 1, KIND_TANK, 500, 500);
+    lone(w, 0, KIND_INFANTRY, 500, 520);
+    expect(w.faceX[tank]).toBe(-1024);
+    for (let t = 0; t < 100; t++) step(w, []);
+    expect(w.faceY[tank]).toBeGreaterThan(1000);
+  });
+
+  it('a missile team outranges a tank and kills it, but cannot touch infantry', () => {
+    const w = flat();
+    const tank = lone(w, 1, KIND_TANK, 532, 500);
+    const team = lone(w, 0, KIND_ATGM, 500, 500);
+    step(w, [{ type: CMD_STOP, units: [tank] }]);
+    w.flags[tank] = 0;
+    // Hold the tank in place: it would close the range otherwise.
+    for (let t = 0; t < 600 && w.state[tank] === STATE_ALIVE; t++) {
+      step(w, []);
+      w.posX[tank] = fx(532);
+      w.velX[tank] = 0;
+    }
+    expect(w.state[tank]).toBe(STATE_WRECK);
+    expect(w.hp[team]).toBe(KINDS[KIND_ATGM].hp);
+    const squad = lone(w, 1, KIND_INFANTRY, 510, 500);
+    for (let t = 0; t < 400 && w.state[team] === STATE_ALIVE; t++) step(w, []);
+    expect(w.state[team]).not.toBe(STATE_ALIVE);
+    expect(w.hp[squad]).toBe(KINDS[KIND_INFANTRY].hp);
+  });
+
+  it('squads mount a carrier, ride with it out of harm, and dismount on order', () => {
+    const w = flat();
+    const ifv = lone(w, 0, KIND_IFV, 300, 500);
+    const a = lone(w, 0, KIND_INFANTRY, 306, 500);
+    const b = lone(w, 0, KIND_ATGM, 300, 506);
+    const c = lone(w, 0, KIND_INFANTRY, 294, 500);
+    step(w, [{ type: CMD_LOAD, units: [a, b, c, ifv], carriers: [ifv, a] }]);
+    for (let t = 0; t < 100; t++) step(w, []);
+    // Two seats: the third squad stays on the ground.
+    expect(w.load[ifv]).toBe(2);
+    expect([a, b, c].filter((id) => w.carrier[id] === ifv).length).toBe(2);
+    step(w, [{ type: CMD_MOVE, units: [ifv, a, b], x: fx(400), y: fx(500) }]);
+    for (let t = 0; t < 300; t++) step(w, []);
+    const riders = [a, b, c].filter((id) => w.carrier[id] === ifv);
+    for (const id of riders) expect(w.posX[id]).toBe(w.posX[ifv]);
+    expect(w.posX[ifv]).toBeGreaterThan(fx(395));
+    step(w, [{ type: CMD_UNLOAD, units: [ifv] }]);
+    expect(w.load[ifv]).toBe(0);
+    for (const id of riders) {
+      expect(w.carrier[id]).toBe(-1);
+      expect(Math.abs(w.posX[id] - w.posX[ifv])).toBeLessThan(fx(5));
+    }
+  });
+
+  it('a carrier that meets the enemy on an attack-move dismounts; one killed loaded spills half', () => {
+    const w = flat();
+    const ifv = lone(w, 0, KIND_IFV, 300, 500);
+    const a = lone(w, 0, KIND_INFANTRY, 303, 500);
+    step(w, [{ type: CMD_LOAD, units: [a], carriers: [ifv] }]);
+    for (let t = 0; t < 60; t++) step(w, []);
+    expect(w.carrier[a]).toBe(ifv);
+    const enemy = lone(w, 1, KIND_INFANTRY, 380, 500);
+    w.hp[enemy] = 30000;
+    step(w, [{ type: CMD_ATTACK_MOVE, units: [ifv], x: fx(380), y: fx(500) }]);
+    for (let t = 0; t < 400 && w.carrier[a] >= 0; t++) step(w, []);
+    expect(w.carrier[a]).toBe(-1);
+    expect(w.state[a]).toBe(STATE_ALIVE);
+
+    const w2 = flat();
+    const ifv2 = lone(w2, 0, KIND_IFV, 300, 500);
+    const b = lone(w2, 0, KIND_INFANTRY, 303, 500);
+    step(w2, [{ type: CMD_LOAD, units: [b], carriers: [ifv2] }]);
+    for (let t = 0; t < 60; t++) step(w2, []);
+    lone(w2, 1, KIND_TANK, 315, 500);
+    step(w2, [{ type: CMD_MOVE, units: [ifv2], x: fx(100), y: fx(500) }]);
+    w2.hp[ifv2] = 1;
+    for (let t = 0; t < 200 && w2.state[ifv2] === STATE_ALIVE; t++) step(w2, []);
+    expect(w2.state[ifv2]).toBe(STATE_WRECK);
+    expect(w2.carrier[b]).toBe(-1);
+    expect(w2.hp[b]).toBeLessThanOrEqual(KINDS[KIND_INFANTRY].hp / 2);
   });
 });

@@ -70,11 +70,17 @@ function cyl(r: number, len: number, axis: 'x' | 'y' | 'z', o: Opts = {}, seg = 
 
 const merge = (parts: THREE.BufferGeometry[]) => mergeGeometries(parts);
 
-export interface TankModel {
+export interface VehicleModel {
   hull: THREE.BufferGeometry[]; // LOD 0, 1
   turret: THREE.BufferGeometry[]; // LOD 0, 1
   far: THREE.BufferGeometry; // LOD 2: hull and turret in one tiny mesh
+  /** Turret ring position on the hull, and the muzzle relative to the turret pivot. */
+  turretY: number;
+  turretZ: number;
+  muzzleY: number;
+  muzzleZ: number;
 }
+export type TankModel = VehicleModel;
 
 /** Turret ring position on the hull, and the muzzle relative to the turret pivot. */
 export const TURRET_Y = 0.7;
@@ -173,7 +179,137 @@ export function buildTank(): TankModel {
     box(0.95, 0.3, 1.3, { at: [0, 0.82, -0.1], team: 0.8 }),
     box(0.12, 0.12, 1.4, { at: [0, 0.84, 1.2], color: STEEL }),
   ]);
-  return { hull: [merge(h), hull1], turret: [merge(t), turret1], far };
+  return {
+    hull: [merge(h), hull1],
+    turret: [merge(t), turret1],
+    far,
+    turretY: TURRET_Y,
+    turretZ: TURRET_Z,
+    muzzleY: MUZZLE_Y,
+    muzzleZ: MUZZLE_Z,
+  };
+}
+
+export interface VehicleSpec {
+  /** Hull length, width and height (without running gear). */
+  len: number;
+  wid: number;
+  height: number;
+  /** Wheels per side; 0 = tracked. */
+  wheels: number;
+  /** Turret box and where it sits along the hull. */
+  turret: { w: number; h: number; d: number; z: number };
+  /** Gun barrels on the turret: sideways offset, length, radius, elevation in radians. */
+  barrels: { x: number; len: number; r: number; pitch: number }[];
+}
+
+/**
+ * A box-bodied armoured vehicle from a few numbers: sloped nose, wheels or tracks, a turret
+ * with its guns. Every vehicle that is not the tank is one of these.
+ */
+export function buildVehicle(v: VehicleSpec): VehicleModel {
+  const tint = { team: TINT };
+  const gear = v.wheels > 0 ? 0.42 : 0.34;
+  const top = gear + v.height;
+  const h: THREE.BufferGeometry[] = [];
+  h.push(
+    box(v.wid * 0.78, v.height * 0.5, v.len * 0.94, {
+      at: [0, gear * 0.6 + v.height * 0.25, 0],
+      color: PAINT_DARK,
+      ...tint,
+    }),
+  );
+  h.push(
+    box(v.wid, v.height * 0.62, v.len, {
+      at: [0, top - v.height * 0.31, 0],
+      top: [0.86, 0.84],
+      shear: -v.len * 0.05,
+      ...tint,
+    }),
+  );
+  h.push(box(v.wid * 0.4, 0.02, v.len * 0.13, { at: [0, top + 0.005, -v.len * 0.36], team: 1 }));
+  for (const s of [-1, 1]) {
+    const x = s * v.wid * 0.5;
+    if (v.wheels > 0) {
+      for (let k = 0; k < v.wheels; k++) {
+        const z = -v.len * 0.36 + (k * v.len * 0.72) / (v.wheels - 1);
+        h.push(cyl(0.2, 0.16, 'x', { at: [x - s * 0.06, 0.2, z], color: RUBBER }, 10));
+        h.push(cyl(0.09, 0.17, 'x', { at: [x - s * 0.05, 0.2, z], color: STEEL }, 6));
+      }
+    } else {
+      h.push(box(0.28, 0.34, v.len * 1.02, { at: [x - s * 0.1, 0.18, 0], color: RUBBER }));
+      for (let k = 0; k < 5; k++) {
+        const z = -v.len * 0.4 + k * v.len * 0.2;
+        h.push(cyl(0.12, 0.07, 'x', { at: [x + s * 0.045, 0.14, z], color: STEEL }, 8));
+      }
+    }
+    h.push(
+      box(0.04, v.height * 0.22, v.len * 0.3, { at: [x * 0.99, top - v.height * 0.3, 0], team: 1 }),
+    );
+    h.push(
+      box(0.1, 0.05, 0.04, { at: [x * 0.7, top - v.height * 0.35, v.len * 0.46], color: 0xd8d2b0 }),
+    );
+  }
+  h.push(
+    box(v.wid * 0.6, v.height * 0.5, 0.04, {
+      at: [0, gear + v.height * 0.4, -v.len * 0.5],
+      color: PAINT_DARK,
+    }),
+  );
+
+  const tu = v.turret;
+  const t: THREE.BufferGeometry[] = [];
+  const t1: THREE.BufferGeometry[] = [];
+  t.push(box(tu.w, tu.h, tu.d, { at: [0, tu.h / 2, 0], top: [0.8, 0.8], ...tint }));
+  t.push(box(tu.w * 0.4, 0.02, tu.d * 0.25, { at: [0, tu.h + 0.005, -tu.d * 0.28], team: 1 }));
+  t.push(box(0.12, 0.1, 0.12, { at: [tu.w * 0.25, tu.h + 0.05, 0.05], color: STEEL }));
+  t1.push(box(tu.w, tu.h, tu.d, { at: [0, tu.h / 2, 0], top: [0.8, 0.8], team: 0.3 }));
+  let muzzleY = tu.h * 0.55;
+  let muzzleZ = tu.d / 2;
+  for (const b of v.barrels) {
+    const cy = tu.h * 0.55 + (Math.sin(b.pitch) * b.len) / 2;
+    const cz = tu.d * 0.4 + (Math.cos(b.pitch) * b.len) / 2;
+    const o = { at: [b.x, cy, cz] as Vec3, rot: [-b.pitch, 0, 0] as Vec3, color: STEEL };
+    t.push(cyl(b.r, b.len, 'z', o, 8));
+    t1.push(box(b.r * 2, b.r * 2, b.len, o));
+    muzzleY = tu.h * 0.55 + Math.sin(b.pitch) * b.len;
+    muzzleZ = tu.d * 0.4 + Math.cos(b.pitch) * b.len;
+  }
+  const hull1 = merge([
+    box(v.wid, v.height, v.len, { at: [0, gear + v.height / 2, 0], top: [0.86, 0.84], ...tint }),
+    box(v.wid * 0.96, gear, v.len * 0.9, { at: [0, gear / 2, 0], color: RUBBER }),
+    box(v.wid * 0.5, 0.02, v.len * 0.2, { at: [0, top + 0.005, -v.len * 0.33], team: 1 }),
+  ]);
+  const longest = v.barrels.reduce((m, b) => Math.max(m, b.len * Math.cos(b.pitch)), 0);
+  const far = merge([
+    box(v.wid, top, v.len, { at: [0, top / 2, 0], team: 0.45 }),
+    box(tu.w, tu.h + 0.1, tu.d, { at: [0, top + tu.h / 2, tu.z], team: 0.8 }),
+    box(0.1, 0.1, longest || 0.1, {
+      at: [0, top + tu.h * 0.6, tu.z + tu.d / 2 + longest / 2],
+      color: STEEL,
+    }),
+  ]);
+  return {
+    hull: [merge(h), hull1],
+    turret: [merge(t), merge(t1)],
+    far,
+    turretY: top,
+    turretZ: tu.z,
+    muzzleY,
+    muzzleZ,
+  };
+}
+
+/** Eight wheels, a boat-shaped hull, a small turret with a long thin autocannon. */
+export function buildIfv(): VehicleModel {
+  return buildVehicle({
+    len: 2.3,
+    wid: 1.1,
+    height: 0.52,
+    wheels: 4,
+    turret: { w: 0.6, h: 0.22, d: 0.7, z: 0.15 },
+    barrels: [{ x: 0, len: 0.95, r: 0.028, pitch: 0.03 }],
+  });
 }
 
 export interface InfantryModel {
@@ -222,4 +358,33 @@ export function buildInfantry(): InfantryModel {
     ),
   );
   return { soldier: [merge(s), soldier1], far };
+}
+
+/** Where the two crewmen of a missile team stand, and the launcher between them. */
+export const TEAM_OFFSETS: readonly [number, number][] = [
+  [-0.4, -0.05],
+  [0.42, -0.3],
+];
+
+/** An anti-tank missile launcher on its tripod: a fat tube, a sight, three legs. */
+export function buildLauncher(): { launcher: THREE.BufferGeometry; far: THREE.BufferGeometry } {
+  const g: THREE.BufferGeometry[] = [];
+  g.push(cyl(0.075, 0.95, 'z', { at: [0, 0.4, 0.1], rot: [-0.06, 0, 0], color: 0x3c4030 }, 8));
+  g.push(cyl(0.09, 0.12, 'z', { at: [0, 0.43, 0.56], color: RUBBER }, 8));
+  g.push(box(0.1, 0.12, 0.2, { at: [-0.12, 0.47, 0.0], color: STEEL }));
+  g.push(box(0.05, 0.03, 0.05, { at: [-0.12, 0.54, 0.0], team: 1 }));
+  for (const [x, z] of [
+    [0, 0.3],
+    [-0.22, -0.18],
+    [0.22, -0.18],
+  ]) {
+    g.push(box(0.03, 0.36, 0.03, { at: [x * 0.6, 0.17, z * 0.6], rot: [z, 0, -x], color: STEEL }));
+  }
+  const far = merge([
+    ...TEAM_OFFSETS.map(([x, z]) =>
+      box(0.3, 0.6, 0.3, { at: [x, 0.3, z], color: 0x3a3d2e, team: 0.7 }),
+    ),
+    box(0.22, 0.2, 1.1, { at: [0, 0.45, 0.15], color: 0x2c2f25, team: 0.5 }),
+  ]);
+  return { launcher: merge(g), far };
 }

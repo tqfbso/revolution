@@ -4,15 +4,15 @@ import type { Command } from '../sim/commands';
 export type Scenario = 'assault' | 'clash' | 'roam';
 
 /**
- * Bits of Snapshot.info: life state (2 bits), unit kind (2 bits), team (2 bits), inside a
- * building, and (for a garrison) given away by its own fire.
+ * Bits of Snapshot.info: life state (2 bits), team (2 bits), inside a building, (for a
+ * garrison) given away by its own fire, and riding in a carrier.
  */
-export const INFO_INSIDE = 64;
-export const INFO_REVEALED = 128;
 export const INFO_STATE_MASK = 3;
-export const INFO_KIND_SHIFT = 2;
-export const INFO_TEAM_SHIFT = 4;
+export const INFO_TEAM_SHIFT = 2;
 export const INFO_TEAM_MASK = 3;
+export const INFO_INSIDE = 16;
+export const INFO_REVEALED = 32;
+export const INFO_CARRIED = 64;
 export const NO_AIM = 0xffff;
 
 /** Main thread -> simulation worker. */
@@ -27,8 +27,14 @@ export interface Snapshot {
   count: number;
   /** Interleaved x, y in world units (floats, presentation only). */
   positions: Float32Array;
-  /** Per unit: state | kind << 2 | team << 4 (see INFO_*). */
+  /** Per unit: state | team << 2 | flags (see INFO_*). */
   info: Uint8Array;
+  /** Per unit: its type (see KIND_* in the sim). */
+  kind: Uint8Array;
+  /** Per unit: where the hull points, 0..255 for a full turn, 0 = +z, 64 = +x. */
+  heading: Uint8Array;
+  /** Per unit: squads aboard. */
+  load: Uint8Array;
   /** Per unit: health as 0..255 of its maximum. */
   hp: Uint8Array;
   /** Per unit: id of the unit it is attacking, or NO_AIM. */

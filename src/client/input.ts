@@ -3,8 +3,10 @@ import {
   CMD_ATTACK_MOVE,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
+  CMD_LOAD,
   CMD_MOVE,
   CMD_STOP,
+  CMD_UNLOAD,
   type Command,
 } from '../sim/commands';
 import { S_BUILDING } from '../sim/map';
@@ -23,7 +25,8 @@ const DOUBLE_MS = 350;
  * Left drag: box select. Left click: select one. Double click (or Ctrl + click): everything
  * of that type on screen. Shift: add. Right click: attack-move (fight on the way). Alt +
  * right click: plain move (do not stop to fight). Right click a building: infantry moves in.
- * Ctrl + right click a building or bridge: shell it. Ctrl/Alt + 1..9: save the selection as a
+ * Ctrl + right click a building or bridge: shell it. Right click one of your carriers, or L
+ * with squads and carriers selected: mount up. U: dismount. Ctrl/Alt + 1..9: save the selection as a
  * control group; 1..9: recall it; twice: jump the camera to it.
  */
 export class Input {
@@ -99,6 +102,16 @@ export class Input {
         );
       } else if (e.code === 'KeyX' && units.selectedCount > 0) {
         send({ type: CMD_STOP, units: units.selectedIds() });
+      } else if (e.code === 'KeyU' && units.selectedCount > 0) {
+        send({ type: CMD_UNLOAD, units: units.selectedIds().filter((id) => units.load[id] > 0) });
+      } else if (e.code === 'KeyL' && units.selectedCount > 0) {
+        // Mount up: every selected squad boards the nearest selected carrier with a seat.
+        const ids = units.selectedIds();
+        const carriers = ids.filter((id) => KINDS[units.kindOf(id)].carry > 0);
+        const squads = ids.filter((id) => KINDS[units.kindOf(id)].garrison);
+        if (carriers.length > 0 && squads.length > 0) {
+          send({ type: CMD_LOAD, units: squads, carriers });
+        }
       }
     });
   }
@@ -246,8 +259,38 @@ export class Input {
         return;
       }
     }
+    // On one of your carriers: the selected squads climb aboard.
+    const carrier = this.carrierAt(clientX, clientY);
+    const squads = ids.filter((id) => KINDS[this.units.kindOf(id)].garrison);
+    if (carrier >= 0 && squads.length > 0) {
+      this.send({ type: CMD_LOAD, units: squads, carriers: [carrier] });
+      const p = this.units.renderPos;
+      this.mark(p[3 * carrier], p[3 * carrier + 1] + 0.2, p[3 * carrier + 2]);
+      return;
+    }
     if (!ground) return;
     this.orderTo(ground.x, ground.z, attack);
+  }
+
+  /** The player's carrier under a screen point, or -1. */
+  private carrierAt(clientX: number, clientY: number): number {
+    const rect = this.dom.getBoundingClientRect();
+    const pos = this.units.renderPos;
+    let best = -1;
+    let bestD = CLICK_PICK_PX * CLICK_PICK_PX;
+    for (let i = 0; i < this.units.count; i++) {
+      if (!this.mayCommand(i) || KINDS[this.units.kindOf(i)].carry === 0) continue;
+      this.v.set(pos[3 * i], pos[3 * i + 1] + 0.5, pos[3 * i + 2]).project(this.camera);
+      if (this.v.z < -1 || this.v.z > 1) continue;
+      const sx = rect.left + (this.v.x * 0.5 + 0.5) * rect.width;
+      const sy = rect.top + (-this.v.y * 0.5 + 0.5) * rect.height;
+      const d = (sx - clientX) * (sx - clientX) + (sy - clientY) * (sy - clientY);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
   }
 
   private mark(x: number, y: number, z: number): void {
