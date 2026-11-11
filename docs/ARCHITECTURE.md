@@ -55,6 +55,15 @@ generated from the seed. Per movement class (vehicle, foot) it holds a cost per 
 (0 = impassable) and, for every cell, the nearest passable one, used to move spawn points
 and order targets off ground a unit cannot stand on. The collision grid uses the same cells.
 
+Structures (buildings and bridges) are rectangles of cells listed in the map; towns are
+circles. The layout is fixed and generated with the map. What changes in play lives in the
+world: structure health, who is inside, who owns a town. The world owns its map, because
+play changes the terrain: a collapsed building turns its cells to rubble, a cut bridge
+turns back into river. After such a change the passability tables are rebuilt and every
+flowfield is thrown away (`refreshPassability`, a few milliseconds, a handful of times per
+game). `lineOfSight` walks a line in half-cell steps and fails on a standing building, on
+more than 12 units of forest, or on ground that rises above the line between the two eyes.
+
 ## Pathfinding (`src/sim/path.ts`)
 
 Flowfields: `buildField` runs Dijkstra with a bucket queue from one or many goal cells and
@@ -69,19 +78,29 @@ move orders live in the world, shared by goal and class and built on first use.
 2. Sort living units into two uniform grids by counting sort: 4-unit cells for collisions,
    16-unit cells for targeting.
 3. Refresh at most one "nearest enemy" chase field, if any unit asked for one last tick.
-4. Acquire targets: nearest living enemy within 44 units that is not concealed by forest.
-   Units without a target look every 4 ticks, everyone re-evaluates every 16, staggered by id.
+4. Acquire targets: nearest living enemy within 44 units that is in line of sight and not
+   concealed (forest, rubble, or a building it has not fired from). Units without a target
+   look every 4 ticks, everyone re-evaluates every 16, staggered by id; sight to the current
+   target is re-checked every 4. Sight tests are the costly part, so they run last, only
+   for a candidate closer than the best so far, at most 8 per search.
 5. Steer: units free to fight close to weapon range and hold; plain move orders keep moving.
    Straight line if walkable, else the flowfield.
-6. Separate (soft collisions), fire (hitscan, damage accumulated), integrate (impassable
-   ground is a hard wall units slide along), then resolve damage, deaths, and wreck expiry.
+6. Separate (soft collisions), fire (hitscan, damage accumulated, for units and for
+   structures), integrate (impassable ground is a hard wall units slide along), then resolve
+   damage, deaths, wreck expiry and collapsing structures.
+7. Once a second: town capture, income, bridge repair.
+
+Garrisoned units stay in the unit arrays (they keep targeting and firing through the normal
+path) with `inside` set to their building; they do not move or collide. Range is the
+weapon's plus a bonus for height difference (and for firing from a building).
 
 Unit types live in `src/sim/units.ts` as a table of integers (health, speed, range, reload,
 movement class, damage per target type).
 
 ## Commands
 
-`src/sim/commands.ts` defines the only inputs to the sim: move, attack-move, stop, spawn. A
+`src/sim/commands.ts` defines the only inputs to the sim: move, attack-move, stop, spawn,
+garrison a building, shell a structure. A
 command holds integers only; float-to-fixed conversion happens once on the client before
 sending. In single player a command applies on the next tick. In lockstep multiplayer the
 same commands get scheduled a few ticks ahead and broadcast; the sim does not change.
@@ -104,22 +123,30 @@ Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwis
 - **Light**: hemisphere sky light plus one sun with a shadow map that follows the camera
   focus. ACES tone mapping.
 
+- **Structures** (`src/client/structures.ts`): one mesh per building or bridge, rebuilt
+  from boxes when it changes state (standing, shot up, collapsed). On top, two small
+  instanced batches for the readability layer: a pip per squad over an occupied house, a
+  flag per town.
+
 Snapshots are transferred (not copied) from the worker as typed arrays: positions, a
-state/kind/team byte, health, attack target, and the tick's combat events.
+state/kind/team byte (plus "inside a building" and "revealed"), health, attack target,
+structure health, town owners, and the tick's combat events.
 
 ## Player view
 
-The player commands team 0. `src/client/fog.ts` computes what that army sees (10 Hz, one
-stamp per occupied cell) into a 256x256 texture that every world material multiplies its
+The player commands team 0. `src/client/fog.ts` computes what that army sees (10 Hz: 120
+rays from one viewpoint per occupied 2x2 cells, each stopped by buildings, hills and deep
+forest) into a 256x256 texture that every world material multiplies its
 colour by; enemy units outside vision are not drawn and their effects not played.
 `src/client/minimap.ts` draws terrain, fog, units and the camera outline into a 256-pixel
 canvas ten times a second. Selection, control groups and the minimap are client state.
 
 ## Current limits, on purpose
 
-- Height does not affect the fight yet (no high-ground bonus, no line of sight). Planned
-  with buildings in M4.
-- Weapons fire over water, forest and cliffs: no line-of-fire check yet (M4).
+- Blue does not react beyond shooting what it sees: no AI until M7.
+- Credits accumulate but buy nothing until M6.
+- Fog of war (client) and the fight (sim) use the same sight rules but separate code; the
+  fog is per cell, so they can disagree by a cell at the edges.
 - If all 96 flowfield slots are in use, further units walk straight until one frees up.
 - A command naming a slot that died and was reused reaches the new occupant. Harmless in
   single player; multiplayer will add a generation counter per slot.

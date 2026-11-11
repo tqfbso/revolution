@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { positionWorld, texture } from 'three/tsl';
-import { MAP_CELLS, MAP_SIZE } from '../sim/map';
+import { MAP_CELLS, MAP_SIZE, T_FOREST, type GameMap } from '../sim/map';
 
 /** How far a unit sees, in terrain cells (4 world units each). */
 const SIGHT_CELLS = 15;
@@ -8,12 +8,23 @@ const BRIGHT_VISIBLE = 255;
 const BRIGHT_EXPLORED = 150;
 const BRIGHT_UNEXPLORED = 80;
 const CELLS = MAP_CELLS * MAP_CELLS;
+/** Rays cast from each viewpoint. At the edge of sight they are about one cell apart. */
+const RAYS = 120;
+const EYE = 0.7;
+/** Cells of forest one can see into before the trees close the view. */
+const FOREST_SIGHT = 3;
+/** Extra sight per unit of height above the plain, and its cap, in cells. */
+const HIGH_GROUND = 5;
+const SEE_WALL = 1;
+const SEE_FOREST = 2;
 
 /**
  * Fog of war for the player's army. Presentation only: the simulation knows everything,
  * this decides what the player is shown. A cell is visible while one of the player's units
- * is within sight range, explored once it has been visible, otherwise unexplored. The
- * result is a small texture that darkens the world, plus lookups for hiding enemy units.
+ * has a line of sight to it: within sight range, not behind a building, a hill or deep
+ * forest. From high ground one sees further and over things. Explored cells stay dimly
+ * lit. The result is a small texture that darkens the world, plus lookups for hiding
+ * enemy units.
  */
 export class Fog {
   readonly visible = new Uint8Array(CELLS);
@@ -21,16 +32,21 @@ export class Fog {
   readonly texture: THREE.DataTexture;
   private readonly pixels = new Uint8Array(CELLS * 4).fill(BRIGHT_VISIBLE);
   private readonly stamped = new Uint8Array(CELLS);
-  /** Half-width of the sight circle for each row offset. */
-  private readonly span: number[] = [];
+  /** What stands in each cell that stops the eye (SEE_*), and how high the ground is. */
+  private readonly block = new Uint8Array(CELLS);
+  private readonly ground = new Float32Array(CELLS);
+  private readonly rayX = new Float32Array(RAYS);
+  private readonly rayY = new Float32Array(RAYS);
+  private plain = 0;
 
   constructor(readonly enabled: boolean) {
     this.texture = new THREE.DataTexture(this.pixels, MAP_CELLS, MAP_CELLS, THREE.RGBAFormat);
     this.texture.magFilter = THREE.LinearFilter;
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.needsUpdate = true;
-    for (let dy = -SIGHT_CELLS; dy <= SIGHT_CELLS; dy++) {
-      this.span.push(Math.floor(Math.sqrt(SIGHT_CELLS * SIGHT_CELLS - dy * dy)));
+    for (let r = 0; r < RAYS; r++) {
+      this.rayX[r] = Math.cos((r / RAYS) * Math.PI * 2);
+      this.rayY[r] = Math.sin((r / RAYS) * Math.PI * 2);
     }
     if (!enabled) {
       this.visible.fill(1);
@@ -43,6 +59,25 @@ export class Fog {
     return texture(this.texture, positionWorld.xz.div(MAP_SIZE)).r;
   }
 
+  /** Take the lie of the land from the map: heights, forest. Buildings come via setWall. */
+  setMap(map: GameMap): void {
+    let sum = 0;
+    for (let c = 0; c < CELLS; c++) {
+      const v = c + ((c / MAP_CELLS) | 0);
+      const h = map.heights;
+      const avg = (h[v] + h[v + 1] + h[v + MAP_CELLS + 1] + h[v + MAP_CELLS + 2]) / 4096;
+      this.ground[c] = avg;
+      sum += avg;
+      this.block[c] = map.type[c] === T_FOREST ? SEE_FOREST : 0;
+    }
+    this.plain = sum / CELLS;
+  }
+
+  /** A building went up or came down in this cell. */
+  setWall(cell: number, standing: boolean): void {
+    this.block[cell] = standing ? SEE_WALL : 0;
+  }
+
   reset(): void {
     if (this.enabled) this.explored.fill(0);
   }
@@ -53,20 +88,36 @@ export class Fog {
     const visible = this.visible;
     visible.fill(0);
     this.stamped.fill(0);
+    const stamped = this.stamped;
+    const N = MAP_CELLS;
+    // Units standing close together see the same things: one viewpoint per 2x2 cells.
     for (let i = 0; i < count; i++) {
       if (!isMine(i)) continue;
-      const cx = Math.min(MAP_CELLS - 1, Math.max(0, positions[2 * i] >> 2));
-      const cy = Math.min(MAP_CELLS - 1, Math.max(0, positions[2 * i + 1] >> 2));
-      // Units sharing a cell see the same thing: stamp each cell once.
-      if (this.stamped[cy * MAP_CELLS + cx]) continue;
-      this.stamped[cy * MAP_CELLS + cx] = 1;
-      for (let dy = -SIGHT_CELLS; dy <= SIGHT_CELLS; dy++) {
-        const y = cy + dy;
-        if (y < 0 || y >= MAP_CELLS) continue;
-        const half = this.span[dy + SIGHT_CELLS];
-        const x0 = Math.max(0, cx - half);
-        const x1 = Math.min(MAP_CELLS - 1, cx + half);
-        visible.fill(1, y * MAP_CELLS + x0, y * MAP_CELLS + x1 + 1);
+      const cx = Math.min(N - 1, Math.max(0, positions[2 * i] >> 2));
+      const cy = Math.min(N - 1, Math.max(0, positions[2 * i + 1] >> 2));
+      const b = (cy >> 1) * N + (cx >> 1);
+      if (stamped[b] === 0) stamped[b] = 1 + (cy & 1) * 2 + (cx & 1);
+    }
+    const H = N >> 1;
+    for (let by = 0; by < H; by++) {
+      for (let bx = 0; bx < H; bx++) {
+        const b = by * N + bx;
+        if (stamped[b] === 0) continue;
+        // In the middle of a formation the neighbours see everything this one would.
+        if (
+          bx > 0 &&
+          by > 0 &&
+          bx < H - 1 &&
+          by < H - 1 &&
+          stamped[b - 1] !== 0 &&
+          stamped[b + 1] !== 0 &&
+          stamped[b - N] !== 0 &&
+          stamped[b + N] !== 0
+        ) {
+          continue;
+        }
+        const k = stamped[b] - 1;
+        this.look(bx * 2 + (k & 1), by * 2 + (k >> 1));
       }
     }
     const explored = this.explored;
@@ -80,6 +131,39 @@ export class Fog {
       px[4 * c] = step === 0 ? goal : v + step;
     }
     this.texture.needsUpdate = true;
+  }
+
+  /** Mark what can be seen from a cell: rays outward, each stopped by what blocks sight. */
+  private look(cx: number, cy: number): void {
+    const N = MAP_CELLS;
+    const visible = this.visible;
+    const block = this.block;
+    const ground = this.ground;
+    const from = cy * N + cx;
+    visible[from] = 1;
+    // On a roof when looking out of a building; a longer view from high ground.
+    const eye = ground[from] + EYE + (block[from] === SEE_WALL ? 2 : 0);
+    const lift = Math.min(HIGH_GROUND, Math.max(0, (ground[from] - this.plain - 2) * 0.7));
+    const reach = SIGHT_CELLS + Math.round(lift);
+    for (let r = 0; r < RAYS; r++) {
+      const dx = this.rayX[r];
+      const dy = this.rayY[r];
+      let slope = -1e9;
+      let forest = block[from] === SEE_FOREST ? 1 : 0;
+      for (let d = 1; d <= reach; d++) {
+        const x = Math.floor(cx + 0.5 + dx * d);
+        const y = Math.floor(cy + 0.5 + dy * d);
+        if (x < 0 || y < 0 || x >= N || y >= N) break;
+        const c = y * N + x;
+        const rise = (ground[c] - eye) / d;
+        // Seen if something standing there would clear every crest in between.
+        if (rise + EYE / d >= slope) visible[c] = 1;
+        if (rise > slope) slope = rise;
+        const what = block[c];
+        if (what === SEE_WALL) break;
+        if (what === SEE_FOREST && ++forest > FOREST_SIGHT) break;
+      }
+    }
   }
 
   /** Can the player currently see world position (x, z)? */

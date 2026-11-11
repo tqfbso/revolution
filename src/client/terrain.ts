@@ -5,6 +5,7 @@ import { fromFx } from '../sim/fixed';
 import {
   MAP_CELLS,
   MAP_SIZE,
+  MAX_STRUCTS,
   T_CLIFF,
   T_FOREST,
   T_OPEN,
@@ -54,6 +55,8 @@ export class Terrain {
   readonly water: THREE.Mesh;
   readonly trees = new THREE.Group();
   private readonly heights = new Float32Array(VERTS * VERTS);
+  /** Per structure: 1 while it is a standing bridge, whose deck units then stand on. */
+  readonly bridgeUp = new Uint8Array(MAX_STRUCTS);
 
   constructor(
     readonly map: GameMap,
@@ -70,6 +73,20 @@ export class Terrain {
     const rock = new THREE.Color(0x6b665d);
     const mud = new THREE.Color(0x6f6650);
     const bed = new THREE.Color(0x3d3f33);
+    const yard = new THREE.Color(0x67604f);
+    const street = new THREE.Color(0x56544e);
+    // Packed earth in the settlements, a paved road along the main street onto the bridge.
+    const built = (i: number, j: number) => {
+      let n = 0;
+      for (let t = 0; t < map.townCount; t++) {
+        const dx = i * CELL - map.townX[t] / 1024;
+        const dz = j * CELL - map.townY[t] / 1024;
+        const r = map.townR[t] / 1024 - 10;
+        if (Math.abs(dz) < 7 && Math.abs(dx) < r + 22) return 2;
+        if (Math.abs(dx) < r && Math.abs(dz) < r) n = 1;
+      }
+      return n;
+    };
     const floor = new THREE.Color(0x36422b);
     const c = new THREE.Color();
     const typeAt = (i: number, j: number) =>
@@ -95,6 +112,9 @@ export class Terrain {
         if (t < 0.5) c.copy(low).lerp(mid, t * 2);
         else c.copy(mid).lerp(high, (t - 0.5) * 2);
         if (forest > 0) c.lerp(floor, forest / 4);
+        const town = h > 0.2 ? built(i, j) : 0;
+        if (town === 2) c.lerp(street, 0.85);
+        else if (town === 1) c.lerp(yard, 0.6);
         if (h < 0.5) c.lerp(mud, THREE.MathUtils.clamp((0.5 - h) / 0.8, 0, 1));
         if (water > 0) c.lerp(bed, water / 4);
         if (cliff > 0) c.lerp(rock, Math.min(1, cliff / 2));
@@ -197,6 +217,12 @@ export class Terrain {
     const gz = Math.min(Math.max(z / CELL, 0), GRID - 0.0001);
     const i = Math.floor(gx);
     const j = Math.floor(gz);
+    const s = this.map.structAt[j * GRID + i];
+    if (s >= 0 && this.bridgeUp[s] === 1) {
+      const m = this.map;
+      const t = Math.min(Math.max((gx - m.sX[s]) / m.sW[s], 0), 1);
+      return (m.sBase[s] + (m.sEast[s] - m.sBase[s]) * t) / 1024;
+    }
     const fx = gx - i;
     const fz = gz - j;
     const k = j * VERTS + i;

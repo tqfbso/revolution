@@ -18,8 +18,21 @@ export const T_OPEN = 0;
 export const T_FOREST = 1;
 export const T_WATER = 2;
 export const T_CLIFF = 3;
-/** Shallow water: everyone can cross. */
+/** Shallow water: everyone can cross, slowly. */
 export const T_FORD = 4;
+/** A standing building: nobody walks through it, nobody sees or shoots through it. */
+export const T_BUILDING = 5;
+/** Bridge deck: the fast way across the river while it stands. */
+export const T_BRIDGE = 6;
+/** A collapsed building. Infantry can pick its way through and finds cover; vehicles cannot. */
+export const T_RUBBLE = 7;
+
+export const S_BUILDING = 0;
+export const S_BRIDGE = 1;
+export const MAX_STRUCTS = 256;
+export const MAX_TOWNS = 8;
+/** Height of one storey, for sight from upper floors and for drawing. */
+export const FLOOR_HEIGHT = fx(0.85);
 
 /** Movement classes: each has its own passability and therefore its own flowfields. */
 export const CLASS_VEHICLE = 0;
@@ -32,8 +45,39 @@ export const WATER_LEVEL = fx(-0.4);
 export interface GameMap {
   /** Height per grid vertex (MAP_VERTS squared), fixed-point world units. */
   heights: Int32Array;
-  /** Terrain type per cell (T_*). */
+  /**
+   * Terrain type per cell (T_*). Changes during a game when a building collapses or a bridge
+   * is cut or repaired; call refreshPassability() afterwards. A world owns its map.
+   */
   type: Uint8Array;
+  /** The natural terrain under each cell, before anything was built on it. */
+  baseType: Uint8Array;
+  /**
+   * Structures: buildings and bridges, each a rectangle of cells. The layout is fixed; what
+   * changes during a game (health, who is inside) lives in the world.
+   */
+  structCount: number;
+  sKind: Uint8Array;
+  sX: Int32Array;
+  sY: Int32Array;
+  sW: Int32Array;
+  sH: Int32Array;
+  /** Town the structure belongs to, or -1. */
+  sTown: Int8Array;
+  sFloors: Uint8Array;
+  sMaxHp: Int32Array;
+  /** Height of the ground floor (building) or of the west end of the deck (bridge). */
+  sBase: Int32Array;
+  /** Bridges: height of the east end of the deck. The deck slopes evenly between the two. */
+  sEast: Int32Array;
+  /** Structure occupying each cell, or -1. Stays set after the structure is destroyed. */
+  structAt: Int16Array;
+  /** Towns: capture zones, each a circle (centre and radius, fixed-point). */
+  townCount: number;
+  townX: Int32Array;
+  townY: Int32Array;
+  townR: Int32Array;
+  townName: string[];
   /**
    * Per movement class and cell: 0 = cannot enter, otherwise the cost multiplier of
    * crossing it. Cells cut off from the main connected area count as impassable, so any
@@ -91,8 +135,7 @@ export function generateMap(seed: number): GameMap {
 
   for (let vy = 0; vy < MAP_VERTS; vy++) {
     // The river runs north-south and meanders around the middle of the map.
-    const meander = (noise(5, vy, 6, s + 1) * 2 + noise(9, vy, 5, s + 2)) / 3;
-    const riverX = HALF + Math.trunc(meander - 512) * 170;
+    const riverX = riverXAt(vy, s);
     let ford = 0;
     for (let k = 0; k < FORD_COUNT; k++) {
       const d = vy > fords[k] ? vy - fords[k] : fords[k] - vy;
@@ -166,32 +209,337 @@ export function generateMap(seed: number): GameMap {
       type[cy * MAP_CELLS + cx] = t;
     }
   }
-  return finishMap(heights, type);
+  const map = newMap(heights, type);
+  // The three middle fords each get a bridge just upstream and a settlement on both banks:
+  // a town at the central crossing, villages at the other two. The outer fords stay bare.
+  placeCrossing(map, s, fords[2] - 9, 4, 2, 'Central');
+  placeCrossing(map, s, fords[1] - 9, 3, 1, 'North');
+  placeCrossing(map, s, fords[3] - 9, 3, 1, 'South');
+  return finishMap(map);
 }
 
 /** Featureless open ground, for tests that are about something other than terrain. */
 export function flatMap(): GameMap {
-  return finishMap(new Int32Array(MAP_VERTS * MAP_VERTS).fill(fx(1)), new Uint8Array(CELL_COUNT));
+  return finishMap(
+    newMap(new Int32Array(MAP_VERTS * MAP_VERTS).fill(fx(1)), new Uint8Array(CELL_COUNT)),
+  );
 }
 
-function finishMap(heights: Int32Array, type: Uint8Array): GameMap {
-  const cost: Uint8Array[] = [];
-  const snap: Int32Array[] = [];
+function newMap(heights: Int32Array, type: Uint8Array): GameMap {
+  return {
+    heights,
+    type,
+    baseType: type.slice(),
+    structCount: 0,
+    sKind: new Uint8Array(MAX_STRUCTS),
+    sX: new Int32Array(MAX_STRUCTS),
+    sY: new Int32Array(MAX_STRUCTS),
+    sW: new Int32Array(MAX_STRUCTS),
+    sH: new Int32Array(MAX_STRUCTS),
+    sTown: new Int8Array(MAX_STRUCTS).fill(-1),
+    sFloors: new Uint8Array(MAX_STRUCTS),
+    sMaxHp: new Int32Array(MAX_STRUCTS),
+    sBase: new Int32Array(MAX_STRUCTS),
+    sEast: new Int32Array(MAX_STRUCTS),
+    structAt: new Int16Array(CELL_COUNT).fill(-1),
+    townCount: 0,
+    townX: new Int32Array(MAX_TOWNS),
+    townY: new Int32Array(MAX_TOWNS),
+    townR: new Int32Array(MAX_TOWNS),
+    townName: [],
+    cost: [],
+    snap: [],
+    hash: 0,
+  };
+}
+
+function finishMap(map: GameMap): GameMap {
+  refreshPassability(map);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < CELL_COUNT; i++) hash = Math.imul(hash ^ map.type[i], 0x01000193);
+  for (let i = 0; i < map.heights.length; i++) {
+    hash = Math.imul(hash ^ map.heights[i], 0x01000193);
+  }
+  map.hash = hash >>> 0;
+  return map;
+}
+
+/** Recompute who can walk where from the terrain types. Call after changing `type`. */
+export function refreshPassability(map: GameMap): void {
+  const type = map.type;
   for (let cls = 0; cls < CLASS_COUNT; cls++) {
-    const c = new Uint8Array(CELL_COUNT);
+    const c = (map.cost[cls] ??= new Uint8Array(CELL_COUNT));
     for (let i = 0; i < CELL_COUNT; i++) {
       const t = type[i];
-      if (t === T_OPEN || t === T_FORD) c[i] = 1;
-      else if (t === T_FOREST && cls === CLASS_FOOT) c[i] = 2;
+      let v = 0;
+      if (t === T_OPEN || t === T_BRIDGE) v = 1;
+      else if (t === T_FORD) v = 2;
+      else if ((t === T_FOREST || t === T_RUBBLE) && cls === CLASS_FOOT) v = 2;
+      c[i] = v;
     }
     keepMainArea(c);
-    cost.push(c);
-    snap.push(nearestPassable(c));
+    map.snap[cls] = nearestPassable(c);
   }
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < CELL_COUNT; i++) hash = Math.imul(hash ^ type[i], 0x01000193);
-  for (let i = 0; i < heights.length; i++) hash = Math.imul(hash ^ heights[i], 0x01000193);
-  return { heights, type, cost, snap, hash: hash >>> 0 };
+}
+
+/** Add a town: a circle that an army captures by being the only one inside it. */
+export function addTown(map: GameMap, x: number, y: number, r: number, name: string): number {
+  const t = map.townCount++;
+  map.townX[t] = x;
+  map.townY[t] = y;
+  map.townR[t] = r;
+  map.townName[t] = name;
+  return t;
+}
+
+/**
+ * Add a structure on the cell rectangle (x, y, w, h). Returns its id, or -1 if the table is
+ * full. Callers that add structures after the map was finished must call
+ * refreshPassability().
+ */
+export function addStructure(
+  map: GameMap,
+  kind: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  town: number,
+  floors: number,
+): number {
+  if (map.structCount >= MAX_STRUCTS) return -1;
+  const s = map.structCount++;
+  map.sKind[s] = kind;
+  map.sX[s] = x;
+  map.sY[s] = y;
+  map.sW[s] = w;
+  map.sH[s] = h;
+  map.sTown[s] = town;
+  map.sFloors[s] = floors;
+  map.sMaxHp[s] = kind === S_BRIDGE ? 2400 : 220 * w * h;
+  // Buildings stand on the lowest corner of their plot; a deck spans at the higher bank.
+  let lo = map.heights[y * MAP_VERTS + x];
+  let hi = lo;
+  for (let j = y; j <= y + h; j++) {
+    for (let i = x; i <= x + w; i++) {
+      const v = map.heights[j * MAP_VERTS + i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+  }
+  if (kind === S_BRIDGE) {
+    // Each end sits on its bank (the higher corner, so the deck never dips into the ground).
+    const end = (vx: number) => {
+      const a = map.heights[y * MAP_VERTS + vx];
+      const b = map.heights[(y + h) * MAP_VERTS + vx];
+      return (a > b ? a : b) + fx(0.2);
+    };
+    map.sBase[s] = end(x);
+    map.sEast[s] = end(x + w);
+  } else {
+    map.sBase[s] = lo;
+  }
+  for (let j = y; j < y + h; j++) {
+    for (let i = x; i < x + w; i++) map.baseType[j * MAP_CELLS + i] = map.type[j * MAP_CELLS + i];
+  }
+  stampStructure(map, s);
+  return s;
+}
+
+/** Write a standing structure into the terrain types. */
+export function stampStructure(map: GameMap, s: number): void {
+  const t = map.sKind[s] === S_BRIDGE ? T_BRIDGE : T_BUILDING;
+  for (let j = map.sY[s]; j < map.sY[s] + map.sH[s]; j++) {
+    for (let i = map.sX[s]; i < map.sX[s] + map.sW[s]; i++) {
+      map.type[j * MAP_CELLS + i] = t;
+      map.structAt[j * MAP_CELLS + i] = s;
+    }
+  }
+}
+
+/** Write a destroyed structure into the terrain types: rubble, or the river as it was. */
+export function razeStructure(map: GameMap, s: number): void {
+  const bridge = map.sKind[s] === S_BRIDGE;
+  for (let j = map.sY[s]; j < map.sY[s] + map.sH[s]; j++) {
+    for (let i = map.sX[s]; i < map.sX[s] + map.sW[s]; i++) {
+      const c = j * MAP_CELLS + i;
+      map.type[c] = bridge ? map.baseType[c] : T_RUBBLE;
+    }
+  }
+}
+
+function riverXAt(vy: number, s: number): number {
+  const meander = (noise(5, vy, 6, s + 1) * 2 + noise(9, vy, 5, s + 2)) / 3;
+  return HALF + Math.trunc(meander - 512) * 170;
+}
+
+const LOT = 5;
+
+/**
+ * A crossing: a bridge over the river at cell row `row`, and on each bank a settlement of
+ * `cols` by 2 x `rows` lots along a main street that leads onto the bridge.
+ */
+function placeCrossing(
+  map: GameMap,
+  seed: number,
+  row: number,
+  cols: number,
+  rows: number,
+  name: string,
+): void {
+  const type = map.type;
+  const br = clampInt(row, 16, MAP_CELLS - 18);
+  const rc = clampInt(riverXAt(br, seed) >> CELL_SHIFT, 30, MAP_CELLS - 31);
+  const solid = (x: number, y: number) => {
+    const t = type[y * MAP_CELLS + x];
+    return t === T_OPEN || t === T_FOREST;
+  };
+  // Widest stretch of water and bank across the two rows of the deck.
+  let x0 = rc;
+  let x1 = rc;
+  for (let y = br; y <= br + 1; y++) {
+    let a = rc;
+    while (a > 4 && !(solid(a, y) && solid(a - 1, y))) a--;
+    let b = rc;
+    while (b < MAP_CELLS - 5 && !(solid(b, y) && solid(b + 1, y))) b++;
+    if (a < x0) x0 = a;
+    if (b > x1) x1 = b;
+  }
+  for (let side = 0; side < 2; side++) {
+    const base = side === 0 ? x0 - 2 - cols * LOT : x1 + 3;
+    const cx = base + ((cols * LOT) >> 1);
+    const town = addTown(
+      map,
+      (cx << CELL_SHIFT) + (CELL_FX >> 1),
+      (br + 1) << CELL_SHIFT,
+      fx(cols * LOT * 2 + 10),
+      `${name} ${side === 0 ? 'West' : 'East'}`,
+    );
+    // Clear the trees off the whole settlement and the road onto the bridge.
+    for (let y = br - rows * LOT - 2; y <= br + 3 + rows * LOT; y++) {
+      for (let x = base - 2; x <= base + cols * LOT + 3; x++) {
+        if (x < 0 || y < 0 || x >= MAP_CELLS || y >= MAP_CELLS) continue;
+        if (type[y * MAP_CELLS + x] === T_FOREST) type[y * MAP_CELLS + x] = T_OPEN;
+      }
+    }
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < 2 * rows; j++) {
+        // Lots north of the street (rows br-1 .. br+2 stay free) and south of it.
+        const ly = j < rows ? br - 1 - LOT * (j + 1) : br + 3 + LOT * (j - rows);
+        const lx = base + i * LOT;
+        const h = lattice(lx, ly, seed + 31);
+        if (h % 100 < 14) continue; // a yard, a square, a gap in the row
+        const w = 2 + ((h >> 8) & 1);
+        const d = 2 + ((h >> 9) & 1);
+        const bx = lx + 1 + (w === 2 ? (h >> 7) & 1 : 0);
+        const by = ly + 1 + (d === 2 ? (h >> 6) & 1 : 0);
+        if (bx < 2 || by < 2 || bx + w > MAP_CELLS - 2 || by + d > MAP_CELLS - 2) continue;
+        if (!levelPlot(map, bx, by, w, d)) continue;
+        const floors = 2 + ((h >> 3) % 3) + (cols > 3 && j % rows === 0 ? 1 : 0);
+        addStructure(map, S_BUILDING, bx, by, w, d, town, floors);
+      }
+    }
+  }
+  if (x1 - x0 <= 26) addStructure(map, S_BRIDGE, x0, br, x1 - x0 + 1, 2, -1, 0);
+}
+
+/** True if a building can stand on the plot; if so, levels the ground under it. */
+function levelPlot(map: GameMap, x: number, y: number, w: number, h: number): boolean {
+  for (let j = y; j < y + h; j++) {
+    for (let i = x; i < x + w; i++) if (map.type[j * MAP_CELLS + i] !== T_OPEN) return false;
+  }
+  let lo = map.heights[y * MAP_VERTS + x];
+  let hi = lo;
+  let sum = 0;
+  for (let j = y; j <= y + h; j++) {
+    for (let i = x; i <= x + w; i++) {
+      const v = map.heights[j * MAP_VERTS + i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+      sum += v;
+    }
+  }
+  if (hi - lo > fx(2.2)) return false;
+  const level = Math.trunc(sum / ((w + 1) * (h + 1)));
+  for (let j = y; j <= y + h; j++) {
+    for (let i = x; i <= x + w; i++) map.heights[j * MAP_VERTS + i] = level;
+  }
+  return true;
+}
+
+/** Height of the deck of bridge `s` under world x. */
+export function deckHeight(map: GameMap, s: number, x: number): number {
+  const span = map.sW[s] << CELL_SHIFT;
+  const along = clampInt(x - (map.sX[s] << CELL_SHIFT), 0, span);
+  return map.sBase[s] + Math.trunc(((map.sEast[s] - map.sBase[s]) * along) / span);
+}
+
+/** Ground height at a point (bilinear over the grid vertices), fixed-point. */
+export function heightAt(map: GameMap, x: number, y: number): number {
+  const cx = x >> CELL_SHIFT;
+  const cy = y >> CELL_SHIFT;
+  const fxq = x & (CELL_FX - 1);
+  const fyq = y & (CELL_FX - 1);
+  const v = cy * MAP_VERTS + cx;
+  const h = map.heights;
+  const top = h[v] + (((h[v + 1] - h[v]) * fxq) >> CELL_SHIFT);
+  const bottom =
+    h[v + MAP_VERTS] + (((h[v + MAP_VERTS + 1] - h[v + MAP_VERTS]) * fxq) >> CELL_SHIFT);
+  return top + (((bottom - top) * fyq) >> CELL_SHIFT);
+}
+
+/** How many half-cell steps of forest a line of sight can pass through. */
+const FOREST_SIGHT_STEPS = 6;
+
+/**
+ * True line of sight between two eye points (z0 and z1 are eye heights). Blocked by
+ * standing buildings, by more than a thin belt of forest, and by ground that rises above
+ * the line. `skipA` and `skipB` are structures to ignore: the ones the two ends are in.
+ */
+export function lineOfSight(
+  map: GameMap,
+  x0: number,
+  y0: number,
+  z0: number,
+  x1: number,
+  y1: number,
+  z1: number,
+  skipA: number,
+  skipB: number,
+): boolean {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const ax = dx < 0 ? -dx : dx;
+  const ay = dy < 0 ? -dy : dy;
+  const steps = ((ax > ay ? ax : ay) >> (CELL_SHIFT - 1)) + 1;
+  const type = map.type;
+  const h = map.heights;
+  const dz = z1 - z0;
+  let forest = 0;
+  for (let k = 1; k < steps; k++) {
+    const x = x0 + Math.trunc((dx * k) / steps);
+    const y = y0 + Math.trunc((dy * k) / steps);
+    const cx = x >> CELL_SHIFT;
+    const cy = y >> CELL_SHIFT;
+    const c = cy * MAP_CELLS + cx;
+    const t = type[c];
+    if (t === T_BUILDING) {
+      const s = map.structAt[c];
+      if (s !== skipA && s !== skipB) return false;
+      continue;
+    }
+    if (t === T_FOREST && ++forest > FOREST_SIGHT_STEPS) return false;
+    // Ground is checked once per cell (every other step); walls and trees every step.
+    if ((k & 1) !== 0 || t === T_BRIDGE) continue;
+    const v = cy * MAP_VERTS + cx;
+    const fxq = x & (CELL_FX - 1);
+    const top = h[v] + (((h[v + 1] - h[v]) * fxq) >> CELL_SHIFT);
+    const v2 = v + MAP_VERTS;
+    const bottom = h[v2] + (((h[v2 + 1] - h[v2]) * fxq) >> CELL_SHIFT);
+    const ground = top + (((bottom - top) * (y & (CELL_FX - 1))) >> CELL_SHIFT);
+    if (ground > z0 + Math.trunc((dz * k) / steps)) return false;
+  }
+  return true;
 }
 
 const queue = new Int32Array(CELL_COUNT);

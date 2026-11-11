@@ -1,11 +1,18 @@
 import type { Command } from '../sim/commands';
 
-export type Scenario = 'battle' | 'roam';
+/** assault: storm a held town. clash: two armies meet head on. roam: stress test. */
+export type Scenario = 'assault' | 'clash' | 'roam';
 
-/** Bits of Snapshot.info: life state (2 bits), unit kind (2 bits), team (2 bits). */
+/**
+ * Bits of Snapshot.info: life state (2 bits), unit kind (2 bits), team (2 bits), inside a
+ * building, and (for a garrison) given away by its own fire.
+ */
+export const INFO_INSIDE = 64;
+export const INFO_REVEALED = 128;
 export const INFO_STATE_MASK = 3;
 export const INFO_KIND_SHIFT = 2;
 export const INFO_TEAM_SHIFT = 4;
+export const INFO_TEAM_MASK = 3;
 export const NO_AIM = 0xffff;
 
 /** Main thread -> simulation worker. */
@@ -30,6 +37,14 @@ export interface Snapshot {
   events: Int32Array;
   /** Living units per team. */
   alive: number[];
+  /** Per structure: health as 0..255 of its maximum; 0 = destroyed. */
+  structHp: Uint8Array;
+  /** Per town: owner and capturing team (255 = none), capture progress 0..100. */
+  townOwner: Uint8Array;
+  townCapturer: Uint8Array;
+  townProgress: Uint8Array;
+  /** Income collected per team. */
+  credits: number[];
   /** Wall-clock cost of the last sim tick, in milliseconds. */
   simMs: number;
   /** State hash, sent once per second. Two clients in sync show the same value. */

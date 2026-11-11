@@ -1,10 +1,22 @@
 import * as THREE from 'three/webgpu';
 import { attribute, mix, vec3 } from 'three/tsl';
 import { KIND_TANK } from '../sim/units';
-import { EV_DEATH, EV_SHOT, MAX_UNITS, STATE_ALIVE, STATE_FREE, TICK_MS } from '../sim/world';
 import {
+  EV_COLLAPSE,
+  EV_DEATH,
+  EV_SHOT,
+  EV_SIEGE,
+  MAX_UNITS,
+  STATE_ALIVE,
+  STATE_FREE,
+  TICK_MS,
+} from '../sim/world';
+import {
+  INFO_INSIDE,
   INFO_KIND_SHIFT,
+  INFO_REVEALED,
   INFO_STATE_MASK,
+  INFO_TEAM_MASK,
   INFO_TEAM_SHIFT,
   NO_AIM,
   type Snapshot,
@@ -22,6 +34,7 @@ import {
   buildInfantry,
   buildTank,
 } from './models';
+import type { StructureView } from './structures';
 import type { Terrain } from './terrain';
 
 // Marking colours (linear RGB): red, blue, gold. Hulls stay in service paint.
@@ -96,6 +109,7 @@ export class UnitView {
     private readonly effects: Effects,
     private readonly fog: Fog,
     shadows: boolean,
+    private readonly structures: StructureView,
   ) {
     const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.82, metalness: 0.08 });
     const tint = attribute('aTint', 'vec4');
@@ -166,7 +180,8 @@ export class UnitView {
         prev[2 * i] = curr[2 * i];
         prev[2 * i + 1] = curr[2 * i + 1];
         // Face the enemy side of the map until it moves.
-        const h = s.info[i] >> INFO_TEAM_SHIFT === 0 ? Math.PI / 2 : -Math.PI / 2;
+        const h =
+          ((s.info[i] >> INFO_TEAM_SHIFT) & INFO_TEAM_MASK) === 0 ? Math.PI / 2 : -Math.PI / 2;
         this.heading[i] = this.headingGoal[i] = this.turret[i] = h + ((i * 0.618) % 0.3) - 0.15;
         this.shotAt[i] = -1e9;
       }
@@ -193,6 +208,33 @@ export class UnitView {
     for (let e = 0; e < ev.length; e += 3) {
       const a = ev[e + 1];
       const b = ev[e + 2];
+      if (ev[e] === EV_COLLAPSE) {
+        const c = this.structures.centreOf(a);
+        if (this.fog.sees(c.x, c.z)) this.structures.collapse(a);
+        continue;
+      }
+      if (ev[e] === EV_SIEGE) {
+        // A tank shelling a building or a bridge.
+        this.shotAt[a] = seconds;
+        if (this.lodOf[a] === LOD_HIDDEN) continue;
+        const p = this.structures.hit(b);
+        const d = Math.hypot(p.x - pos[3 * a], p.z - pos[3 * a + 2]) || 1;
+        const ux = (p.x - pos[3 * a]) / d;
+        const uz = (p.z - pos[3 * a + 2]) / d;
+        this.turret[a] = Math.atan2(ux, uz);
+        fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
+        fx.cannonShot(
+          pos[3 * a] + ux * MUZZLE_Z,
+          pos[3 * a + 1] + TURRET_Y + MUZZLE_Y,
+          pos[3 * a + 2] + uz * MUZZLE_Z,
+          p.x,
+          p.y,
+          p.z,
+        );
+        fx.squadHit(p.x, p.y, p.z);
+        continue;
+      }
+      if (ev[e] !== EV_SHOT && ev[e] !== EV_DEATH) continue;
       const isTank = (this.info[a] >> INFO_KIND_SHIFT) & 3 ? false : true;
       // Effects nobody can see are the main cost of a big battle: skip them when both ends
       // are off-screen and thin them when both are far away.
@@ -235,7 +277,16 @@ export class UnitView {
   }
 
   teamOf(id: number): number {
-    return this.info[id] >> INFO_TEAM_SHIFT;
+    return (this.info[id] >> INFO_TEAM_SHIFT) & INFO_TEAM_MASK;
+  }
+
+  /** Structure a unit is garrisoned in, or -1. */
+  insideOf(id: number): number {
+    if ((this.info[id] & INFO_INSIDE) === 0) return -1;
+    const map = this.terrain.map;
+    const cx = Math.min(255, Math.max(0, this.curr[2 * id] >> 2));
+    const cy = Math.min(255, Math.max(0, this.curr[2 * id + 1] >> 2));
+    return map.structAt[cy * 256 + cx];
   }
 
   kindOf(id: number): number {
@@ -323,8 +374,26 @@ export class UnitView {
       pos[3 * i] = x;
       pos[3 * i + 1] = y;
       pos[3 * i + 2] = z;
+      const teamId = (info[i] >> INFO_TEAM_SHIFT) & INFO_TEAM_MASK;
+      if (alive && (info[i] & INFO_INSIDE) !== 0) {
+        // In a building: no model to draw. The house shows a pip per squad, for your own
+        // garrisons always and for the enemy's once its fire has given it away.
+        const st = this.insideOf(i);
+        const known =
+          teamId === this.playerTeam || ((info[i] & INFO_REVEALED) !== 0 && this.fog.sees(x, z));
+        if (st >= 0) {
+          pos[3 * i + 1] = this.structures.topOf(st) - 0.6;
+          if (known) {
+            this.structures.occ[st]++;
+            this.structures.occTeam[st] = teamId;
+            if (this.selected[i]) this.structures.occSelected[st] = 1;
+          }
+        }
+        this.lodOf[i] = known ? 1 : LOD_HIDDEN;
+        continue;
+      }
       // Fog of war: enemies show only where the player can see, wrecks where they have been.
-      if (info[i] >> INFO_TEAM_SHIFT !== this.playerTeam || !alive) {
+      if (teamId !== this.playerTeam || !alive) {
         if (alive ? !this.fog.sees(x, z) : !this.fog.hasExplored(x, z)) {
           this.lodOf[i] = LOD_HIDDEN;
           continue;
@@ -372,7 +441,7 @@ export class UnitView {
       lodCount[lod]++;
       this.lodOf[i] = lod;
 
-      const team = TEAM_RGB[info[i] >> INFO_TEAM_SHIFT] ?? TEAM_RGB[0];
+      const team = TEAM_RGB[teamId] ?? TEAM_RGB[0];
       const h = this.heading[i];
       const sin = Math.sin(h);
       const cos = Math.cos(h);

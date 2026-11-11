@@ -1,4 +1,4 @@
-import { CLASS_COUNT, generateMap, type GameMap } from './map';
+import { CLASS_COUNT, MAX_STRUCTS, MAX_TOWNS, generateMap, type GameMap } from './map';
 import { seedRng } from './rng';
 
 export { MAP_SIZE, MAP_SIZE_FX } from './map';
@@ -13,6 +13,14 @@ export const FLAG_WANDER = 2;
 export const FLAG_AMOVE = 4;
 /** The straight line to the move target is walkable: no need to consult the flowfield. */
 export const FLAG_DIRECT = 8;
+
+/** Ordered to occupy the building `orderStruct`. */
+export const FLAG_GARRISON = 16;
+/** Ordered to shell the structure `orderStruct`. */
+export const FLAG_SIEGE = 32;
+
+/** Owner of a town nobody holds. */
+export const NO_TEAM = 255;
 
 /** Flowfields kept for move orders in progress. */
 export const MAX_FIELDS = 96;
@@ -29,13 +37,17 @@ export const NO_TARGET = -1;
 /** Presentation events produced by a tick: three integers each (type, a, b). Not state. */
 export const EV_SHOT = 1; // a = shooter, b = target
 export const EV_DEATH = 2; // a = unit, b = killer
+export const EV_SIEGE = 3; // a = shooter, b = structure
+export const EV_COLLAPSE = 4; // a = structure
+export const EV_CAPTURE = 5; // a = town, b = team
+export const EV_REPAIR = 6; // a = structure
 
 /**
  * Structure-of-arrays world state. An entity is an index in [0, count).
  * Everything that affects the simulation lives here and is covered by hashWorld().
  */
 export interface World {
-  /** The battlefield. Fixed for the life of the world. */
+  /** The battlefield. Owned by this world: structures on it are destroyed and repaired. */
   map: GameMap;
   tick: number;
   /** High-water mark: every slot in [0, count) is free, alive or a wreck. */
@@ -65,6 +77,25 @@ export interface World {
   path: Int16Array;
   /** Goal cell of the unit's move order: where its flowfield leads. */
   goal: Int32Array;
+  /** Building the unit is inside, or -1. */
+  inside: Int16Array;
+  /** Structure a garrison or siege order refers to (see FLAG_GARRISON, FLAG_SIEGE). */
+  orderStruct: Int16Array;
+  /** Tick until which a garrisoned unit that fired can be seen from afar. */
+  reveal: Int32Array;
+  /** 1 while the unit has a line of sight to its target. */
+  los: Uint8Array;
+  /** Structures: health (0 or less = destroyed), repair work done, occupants and their team. */
+  sHp: Int32Array;
+  sRepair: Int32Array;
+  sOcc: Uint8Array;
+  sOccTeam: Uint8Array;
+  /** Towns: owner (or NO_TEAM), the team capturing it and how far it has got. */
+  townOwner: Uint8Array;
+  townCapturer: Uint8Array;
+  townProgress: Int16Array;
+  /** Income collected per team. Nothing to spend it on until the economy milestone. */
+  credits: Int32Array;
   /** Flowfields for move orders: goal cell (-1 = unused), movement class, cost-to-goal. */
   fieldGoal: Int32Array;
   fieldClass: Uint8Array;
@@ -107,6 +138,18 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     orderSpeed: new Int32Array(MAX_UNITS),
     path: new Int16Array(MAX_UNITS).fill(-1),
     goal: new Int32Array(MAX_UNITS),
+    inside: new Int16Array(MAX_UNITS).fill(-1),
+    orderStruct: new Int16Array(MAX_UNITS).fill(-1),
+    reveal: new Int32Array(MAX_UNITS),
+    los: new Uint8Array(MAX_UNITS),
+    sHp: map.sMaxHp.slice(),
+    sRepair: new Int32Array(MAX_STRUCTS),
+    sOcc: new Uint8Array(MAX_STRUCTS),
+    sOccTeam: new Uint8Array(MAX_STRUCTS),
+    townOwner: new Uint8Array(MAX_TOWNS).fill(NO_TEAM),
+    townCapturer: new Uint8Array(MAX_TOWNS).fill(NO_TEAM),
+    townProgress: new Int16Array(MAX_TOWNS),
+    credits: new Int32Array(MAX_TEAMS),
     fieldGoal: new Int32Array(MAX_FIELDS).fill(-1),
     fieldClass: new Uint8Array(MAX_FIELDS),
     fieldDist: new Array<Uint16Array | null>(MAX_FIELDS).fill(null),
@@ -137,8 +180,18 @@ export function hashWorld(w: World): number {
   mix(w.fieldsFullTick);
   for (let f = 0; f < MAX_FIELDS; f++) mix(w.fieldGoal[f] ^ (w.fieldClass[f] << 24));
   for (let f = 0; f < CHASE_FIELDS; f++) mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
+  for (let s = 0; s < w.map.structCount; s++) {
+    mix(w.sHp[s]);
+    mix(w.sRepair[s] ^ (w.sOcc[s] << 20) ^ (w.sOccTeam[s] << 28));
+  }
+  for (let t = 0; t < w.map.townCount; t++) {
+    mix(w.townOwner[t] | (w.townCapturer[t] << 8) | (w.townProgress[t] << 16));
+  }
+  for (let t = 0; t < MAX_TEAMS; t++) mix(w.credits[t]);
   const n = w.count;
   for (let i = 0; i < n; i++) {
+    mix(w.inside[i] ^ (w.orderStruct[i] << 12) ^ (w.los[i] << 28));
+    mix(w.reveal[i]);
     mix(w.posX[i]);
     mix(w.posY[i]);
     mix(w.velX[i]);

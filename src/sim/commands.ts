@@ -6,6 +6,8 @@ export const CMD_MOVE = 1;
 export const CMD_STOP = 2;
 export const CMD_SPAWN = 3;
 export const CMD_ATTACK_MOVE = 4;
+export const CMD_GARRISON = 5;
+export const CMD_ATTACK_STRUCTURE = 6;
 
 export interface MoveCommand {
   type: typeof CMD_MOVE;
@@ -21,6 +23,21 @@ export interface AttackMoveCommand {
   units: number[];
   x: number;
   y: number;
+}
+
+/** Infantry walks to a building and occupies it. Any later move order brings it out. */
+export interface GarrisonCommand {
+  type: typeof CMD_GARRISON;
+  units: number[];
+  /** Structure id (see the map). */
+  structure: number;
+}
+
+/** Shell a building or a bridge until it comes down. Only units with siege damage obey. */
+export interface AttackStructureCommand {
+  type: typeof CMD_ATTACK_STRUCTURE;
+  units: number[];
+  structure: number;
 }
 
 export interface StopCommand {
@@ -44,6 +61,14 @@ export interface SpawnCommand {
   /** If set, the whole block attack-moves by this offset, keeping its shape. */
   advanceX?: number;
   advanceY?: number;
+  /** If set, the units start inside the buildings of this town, as far as there is room. */
+  garrisonTown?: number;
 }
 
-export type Command = MoveCommand | AttackMoveCommand | StopCommand | SpawnCommand;
+export type Command =
+  | MoveCommand
+  | AttackMoveCommand
+  | StopCommand
+  | SpawnCommand
+  | GarrisonCommand
+  | AttackStructureCommand;
