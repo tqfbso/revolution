@@ -4,6 +4,7 @@ import { fx } from './sim/fixed';
 import { generateMap } from './sim/map';
 import { MAP_SIZE, MAX_UNITS } from './sim/world';
 import { RtsCamera } from './client/camera';
+import { CommandCard } from './client/card';
 import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
@@ -57,7 +58,8 @@ async function start(): Promise<void> {
   const unitCount = Math.min(Math.max(Number(params.get('units') ?? 3000) | 0, 0), MAX_UNITS);
   const seed = Number(params.get('seed') ?? 1) | 0;
   const wanted = params.get('scenario');
-  const scenario: Scenario = wanted === 'roam' || wanted === 'clash' ? wanted : 'assault';
+  const scenario: Scenario =
+    wanted === 'roam' || wanted === 'clash' || wanted === 'assault' ? wanted : 'skirmish';
 
   const { renderer, canvas, backend } = await createRenderer(params.get('renderer') === 'webgl');
   // Render scale adapts to load: if frames run slow for a couple of seconds the resolution
@@ -116,14 +118,28 @@ async function start(): Promise<void> {
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
     structures.applySnapshot(e.data, performance.now() / 1000);
     units.applySnapshot(e.data, performance.now());
+    card.applySnapshot(e.data);
     hud.simTick(e.data.simMs);
     hud.stats.alive = e.data.alive;
     if (e.data.hash !== undefined) hud.stats.hash = e.data.hash.toString(16).padStart(8, '0');
   };
-  post({ type: 'init', seed, units: unitCount, scenario });
-
   const lookAt = (x: number, z: number) => rts.moveTo(x, z);
-  const input = new Input(canvas, rts.camera, terrain, units, send, lookAt, structures);
+  const card = new CommandCard(
+    document.getElementById('card') as HTMLElement,
+    document.getElementById('resources') as HTMLElement,
+    document.getElementById('banner') as HTMLElement,
+    map,
+    terrain,
+    units,
+    structures,
+    send,
+  );
+  const input = new Input(canvas, rts.camera, terrain, units, send, lookAt, structures, card);
+  post({ type: 'init', seed, units: unitCount, scenario });
+  // The skirmish opens on your headquarters.
+  if (scenario === 'skirmish' && map.startX[0] >= 0) {
+    rts.look(map.startX[0] * 4 + 14, map.startY[0] * 4 + 10, 95);
+  }
   input.controlAll = params.get('control') === 'all';
   const minimap = new Minimap(
     document.getElementById('minimap') as HTMLCanvasElement,
@@ -145,6 +161,7 @@ async function start(): Promise<void> {
     units.group,
     effects.group,
     input.marker,
+    card.group,
   );
   // Towns: who holds what, and what the held ones have paid so far.
   const townsEl = document.getElementById('towns');
@@ -152,7 +169,7 @@ async function start(): Promise<void> {
   const TEAM_CSS = ['#eb4637', '#468cff', '#f0be3c'];
   setInterval(() => {
     if (!townsEl) return;
-    let html = `<b>Credits ${structures.credits[0] ?? 0}</b> (blue ${structures.credits[1] ?? 0})`;
+    let html = '<b>Towns pay 10 credits a second each</b>';
     for (let t = 0; t < map.townCount; t++) {
       const owner = structures.townOwner[t];
       const taking = structures.townCapturer[t];
@@ -214,9 +231,18 @@ async function start(): Promise<void> {
       }
     }
   });
-  document.getElementById('reset')?.addEventListener('click', () => {
-    post({ type: 'init', seed, units: unitCount, scenario });
+  const helpEl = document.getElementById('help');
+  const toggleHelp = () => {
+    if (helpEl) helpEl.style.display = helpEl.style.display === 'block' ? 'none' : 'block';
+  };
+  document.getElementById('help-toggle')?.addEventListener('click', toggleHelp);
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'F1') return;
+    e.preventDefault();
+    toggleHelp();
   });
+  // Base buildings change this copy of the map too, so a reset starts from a fresh page.
+  document.getElementById('reset')?.addEventListener('click', () => location.reload());
 
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -236,6 +262,7 @@ async function start(): Promise<void> {
     structures.update(now / 1000, dt);
     effects.update(dt, rts.camera);
     input.update(dt);
+    card.update();
     minimap.update(now);
     // The shadow map follows the point the camera looks at and covers only what is close
     // enough to show shadow detail; far units are drawn without shadows.

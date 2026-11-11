@@ -2,12 +2,20 @@
 // never waits on game logic and game logic never waits on rendering.
 import type { Command } from '../sim/commands';
 import { fromFx } from '../sim/fixed';
-import { assaultCommands, battleCommands, stressTestCommands } from '../sim/scenarios';
+import { BUILDINGS, TIER_ITEM, TIER_PRICE, UNIT_PRICE } from '../sim/economy';
+import {
+  assaultCommands,
+  battleCommands,
+  skirmishCommands,
+  stressTestCommands,
+} from '../sim/scenarios';
 import { KINDS } from '../sim/units';
 import { step } from '../sim/sim';
 import {
   MAX_TEAMS,
   NO_TARGET,
+  NO_TEAM,
+  QUEUE_MAX,
   STATE_ALIVE,
   TICK_MS,
   TICK_RATE,
@@ -22,6 +30,7 @@ import {
   INFO_SPOTTED,
   INFO_REVEALED,
   INFO_TEAM_SHIFT,
+  BASE_STRIDE,
   NO_AIM,
   type Snapshot,
   type ToWorker,
@@ -44,7 +53,9 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         ? stressTestCommands(msg.units)
         : msg.scenario === 'clash'
           ? battleCommands(msg.units)
-          : assaultCommands(world.map, msg.units);
+          : msg.scenario === 'assault'
+            ? assaultCommands(world.map, msg.units)
+            : skirmishCommands(world.map, msg.units);
     accumulator = TICK_MS; // run the first tick immediately
     lastTime = performance.now();
     if (timer === undefined) timer = setInterval(pump, 5);
@@ -85,6 +96,7 @@ function postSnapshot(w: World, simMs: number): void {
   const kinds = w.kind.slice(0, n);
   const load = w.load.slice(0, n);
   const heading = new Uint8Array(n);
+  const task = new Uint8Array(n);
   const alive = new Array<number>(MAX_TEAMS).fill(0);
   for (let i = 0; i < n; i++) {
     positions[2 * i] = fromFx(w.posX[i]);
@@ -100,6 +112,9 @@ function postSnapshot(w: World, simMs: number): void {
     hp[i] = Math.ceil((w.hp[i] * 255) / KINDS[kind].hp);
     aim[i] = w.attack[i] === NO_TARGET ? NO_AIM : w.attack[i];
     if (w.jammed[i] !== 0) load[i] = 1;
+    // A truck shows what it carries: 1 supplies, 2 fuel.
+    if (w.cargo[i] > 0) load[i] = 1 + w.cargoKind[i];
+    task[i] = w.job[i] | (w.stance[i] << 3);
     if (KINDS[kind].turn > 0) {
       heading[i] = Math.round((Math.atan2(w.faceX[i], w.faceY[i]) * 128) / Math.PI) & 255;
     }
@@ -114,6 +129,31 @@ function postSnapshot(w: World, simMs: number): void {
   for (let t = 0; t < map.townCount; t++) {
     townProgress[t] = Math.min(100, Math.round((w.townProgress[t] * 100) / CAPTURE_POINTS));
   }
+  const bases: number[] = [];
+  for (let s = 0; s < map.structCount; s++) {
+    if (w.sTeam[s] === NO_TEAM) continue;
+    const b = BUILDINGS[w.sType[s]];
+    const item = w.sQueue[s * QUEUE_MAX];
+    const need =
+      w.sQueueLen[s] === 0
+        ? 1
+        : item === TIER_ITEM
+          ? (TIER_PRICE[w.tier[w.sTeam[s]]]?.ticks ?? 1)
+          : UNIT_PRICE[item].ticks;
+    bases.push(
+      s,
+      w.sType[s],
+      w.sTeam[s],
+      map.sX[s],
+      map.sY[s],
+      Math.floor((w.sBuild[s] * 100) / b.ticks),
+      w.sQueueLen[s],
+      Math.floor((w.sProgress[s] * 100) / need),
+    );
+    for (let q = 0; q < QUEUE_MAX; q++) bases.push(w.sQueue[s * QUEUE_MAX + q]);
+    bases.push(Math.round(fromFx(w.sRallyX[s])), Math.round(fromFx(w.sRallyY[s])));
+  }
+  if (bases.length % BASE_STRIDE !== 0) throw new Error('base record size');
   const events = Int32Array.from(w.events);
   w.events.length = 0;
   const snapshot: Snapshot = {
@@ -134,6 +174,14 @@ function postSnapshot(w: World, simMs: number): void {
     townCapturer: w.townCapturer.slice(0, map.townCount),
     townProgress,
     credits: Array.from(w.credits),
+    supplies: Array.from(w.supplies),
+    fuel: Array.from(w.fuel),
+    tier: Array.from(w.tier),
+    pop: Array.from(w.pop),
+    popCap: Array.from(w.popCap),
+    task,
+    siteStock: w.siteStock.slice(0, map.siteCount),
+    bases: Int32Array.from(bases),
     simMs,
   };
   if (w.tick % TICK_RATE === 0) snapshot.hash = hashWorld(w);
@@ -147,6 +195,7 @@ function postSnapshot(w: World, simMs: number): void {
       hp.buffer,
       aim.buffer,
       events.buffer,
+      task.buffer,
     ],
   });
 }

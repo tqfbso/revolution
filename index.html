@@ -38,21 +38,99 @@
         min-width: 250px;
       }
       #help {
-        bottom: 10px;
+        top: 190px;
         left: 10px;
         color: #b9c4cf;
+        display: none;
+      }
+      #resources {
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        font-size: 13px;
+      }
+      #resources i,
+      #card i {
+        font-style: normal;
+        margin: 0 7px;
+      }
+      .sup {
+        color: #dcc48c;
+      }
+      .fuel {
+        color: #f2a91e;
+      }
+      .cred {
+        color: #8fd0a0;
+      }
+      #card i.short,
+      .short {
+        color: #ff7b6b;
+      }
+      #card {
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        pointer-events: auto;
+        max-width: 46vw;
+      }
+      #card .title {
+        font-size: 13px;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+      #card .title span,
+      #card .hint {
+        color: #9aa7b3;
+        font-weight: normal;
+      }
+      #card .queue {
+        margin-bottom: 6px;
+      }
+      #card .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 4px 0;
+      }
+      #card button {
+        text-align: left;
+        min-width: 104px;
+      }
+      #card button span {
+        display: block;
+        font-size: 11px;
+        color: #9aa7b3;
+      }
+      #card button span i {
+        margin: 0 8px 0 0;
+      }
+      #card button.off {
+        opacity: 0.45;
+        cursor: default;
+      }
+      #banner {
+        position: fixed;
+        top: 30%;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        font-size: 22px;
+        padding: 16px 28px;
       }
       #towns {
-        top: 10px;
+        top: 48px;
         left: 50%;
         transform: translateX(-50%);
         min-width: 190px;
       }
       #selection {
-        bottom: 10px;
-        left: 50%;
-        transform: translateX(-50%);
+        top: 10px;
+        right: 300px;
         display: none;
+        max-width: 26vw;
       }
       #actions {
         position: fixed;
@@ -105,15 +183,23 @@
   <body>
     <canvas id="game"></canvas>
     <pre id="perf" class="panel">starting…</pre>
+    <div id="resources" class="panel"></div>
     <div id="towns" class="panel"></div>
+    <div id="card" class="panel"></div>
+    <div id="banner" class="panel"></div>
     <div id="selection" class="panel"></div>
     <div id="actions">
+      <button id="help-toggle">Help (F1)</button>
       <button id="add-units">+1000 units</button>
       <button id="reset">Reset</button>
     </div>
     <div id="help" class="panel">
+      Economy: select trucks, right click a stockpile (tan marker) or an oil well (amber) to haul;
+      the buttons at the bottom build. Click one of your buildings to produce units.<br />
+      Supplies run out, wells pump slowly (hold more wells), towns pay credits for technology.<br />
       You command red. Drag: select · Double click: all of that type · Shift: add · Ctrl+A: all<br />
-      Right click: attack-move · Alt+right click: move · X: stop · H: hold position · Esc: clear<br />
+      Right click: attack-move · Alt+right click: move · X: stop · H: hold position · G: hold fire ·
+      Esc: clear<br />
       Right click a building: infantry moves in · Ctrl+right click a building or bridge: shell it<br />
       Ctrl+right click the ground: guns shell that spot (X to cease fire) · F: guns lay smoke at the
       pointer, which blinds both sides<br />

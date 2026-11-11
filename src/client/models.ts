@@ -380,6 +380,18 @@ export function buildJammer(): VehicleModel {
 const DRONE_GREY = 0x8b908d;
 
 /** A small fixed-wing reconnaissance drone: long straight wing, twin tail, pusher propeller. */
+/** Logistics truck: a cab, and a covered load bed where other vehicles carry a turret. */
+export function buildTruck(): VehicleModel {
+  return buildVehicle({
+    len: 3.1,
+    wid: 1.15,
+    height: 0.42,
+    wheels: 3,
+    turret: { w: 1.12, h: 0.85, d: 1.9, z: -0.5 },
+    barrels: [],
+  });
+}
+
 export function buildReconDrone(): VehicleModel {
   const g = merge([
     box(0.22, 0.2, 1.3, { at: [0, 0, 0.05], top: [0.7, 0.9], color: DRONE_GREY }),
