@@ -19,6 +19,7 @@ import {
   B_WORKS,
   TIER_PRICE,
   UNIT_PRICE,
+  WELL_RATE,
   WELL_TANK,
 } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
@@ -123,9 +124,9 @@ describe('trucks', () => {
     const before = w.fuel[0];
     run(w, 2000, [{ type: CMD_GATHER, units: unitsOf(w, KIND_TRUCK), site: 1 }]);
     const gained = w.fuel[0] - before;
-    // 100 in the tank plus four a second for 100 seconds, whatever the number of trucks.
+    // 100 in the tank plus what it pumps in 100 seconds, whatever the number of trucks.
     expect(gained).toBeGreaterThan(250);
-    expect(gained).toBeLessThanOrEqual(100 + 4 * 100);
+    expect(gained).toBeLessThanOrEqual(100 + WELL_RATE * 100);
     expect(w.siteStock[1]).toBeLessThanOrEqual(WELL_TANK);
   });
 

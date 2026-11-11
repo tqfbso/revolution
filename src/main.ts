@@ -17,6 +17,7 @@ import { UnitView } from './client/units';
 import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
 import {
   KINDS,
+  TOWN_INCOME,
   KIND_AD,
   KIND_ARTILLERY,
   KIND_ATGM,
@@ -133,6 +134,7 @@ async function start(): Promise<void> {
     units,
     structures,
     send,
+    lookAt,
   );
   const input = new Input(canvas, rts.camera, terrain, units, send, lookAt, structures, card);
   post({ type: 'init', seed, units: unitCount, scenario });
@@ -169,7 +171,7 @@ async function start(): Promise<void> {
   const TEAM_CSS = ['#eb4637', '#468cff', '#f0be3c'];
   setInterval(() => {
     if (!townsEl) return;
-    let html = '<b>Towns pay 10 credits a second each</b>';
+    let html = `<b>Towns pay ${TOWN_INCOME} credits a second each</b>`;
     for (let t = 0; t < map.townCount; t++) {
       const owner = structures.townOwner[t];
       const taking = structures.townCapturer[t];

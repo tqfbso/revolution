@@ -43,6 +43,8 @@ const TEAM_UI = [
 const NEUTRAL_UI = [0.55, 0.55, 0.52];
 const DAMAGED_BELOW = 150; // of 255
 const SMOKE_SECONDS = 90;
+/** How far a base building of yours sees, in cells. */
+const BASE_SIGHT = 7;
 
 function rand(seed: number, k: number): number {
   let h = Math.imul(seed + 1, 0x27d4eb2d) ^ Math.imul(k + 1, 0x165667b1);
@@ -649,6 +651,14 @@ export class StructureView {
       this.baseType[id] = type;
       this.basePct[id] = s.bases[o + 5];
     }
+    // Your standing base buildings keep watch over the ground around them.
+    const posts: number[] = [];
+    for (let o = 0; o < s.bases.length; o += BASE_STRIDE) {
+      const id = s.bases[o];
+      if (s.bases[o + 2] !== 0 || s.structHp[id] === 0) continue;
+      posts.push(map.sX[id] + (map.sW[id] >> 1), map.sY[id] + (map.sH[id] >> 1), BASE_SIGHT);
+    }
+    this.fog.posts = posts;
     const n = Math.min(s.structHp.length, map.structCount);
     for (let k = 0; k < n; k++) {
       const hp = s.structHp[k];

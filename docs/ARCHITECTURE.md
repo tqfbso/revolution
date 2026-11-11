@@ -124,10 +124,32 @@ unit arrays with `carrier` set to the vehicle: it is left out of both grids (so 
 target or bump it), skips targeting, steering and firing, and has its position copied from
 the vehicle after `integrate`.
 
+## Economy (`src/sim/economy.ts`)
+
+Prices and building types are tables of integers next to the unit table. Resource sites
+are points generated with the map (`placeSites`); what is left at each lives in the world.
+A truck is an ordinary unit with a job (`job`, `jobSite`, `jobStruct`, `cargo`): go to the
+site, load for three seconds, drive to the nearest finished depot or headquarters, unload,
+repeat. It moves with the normal move order (`sendTo`), so it paths and collides like
+everything else, and arrival is a distance test against the site or the building's
+footprint. Any other order clears the job.
+
+A base building is a structure of kind `S_BASE`, added to the map during play
+(`addStructure`), with its owner, type, construction progress, queue and rally point in
+the world (`sTeam`, `sType`, `sBuild`, `sQueue`, ...). Placing one changes the terrain, so
+it goes through the same path as a collapsing house: passability rebuilt, flowfields
+dropped, and in addition every unit standing on the plot is moved to the nearest free
+cell. `canPlace` (in the map module, shared with the client's placement preview) demands
+open ground on the plot and one cell around it, which is what guarantees buildings can
+never disconnect the map. Production advances the first queue entry one tick at a time and
+spawns the unit south of the building (`spawnUnit`), unless the army is at its unit limit.
+All of it is covered by the state hash.
+
 ## Commands
 
 `src/sim/commands.ts` defines the only inputs to the sim: move, attack-move, stop, spawn,
-garrison a building, shell a structure, mount carriers, dismount, bombard a point. A
+garrison a building, shell a structure, mount carriers, dismount, bombard a point, hold,
+and for the economy: gather, build, assist, train, cancel, rally, research, stance. A
 command holds integers only; float-to-fixed conversion happens once on the client before
 sending. In single player a command applies on the next tick. In lockstep multiplayer the
 same commands get scheduled a few ticks ahead and broadcast; the sim does not change.
@@ -173,8 +195,11 @@ canvas ten times a second. Selection, control groups and the minimap are client 
 
 ## Current limits, on purpose
 
-- Blue does not react beyond shooting what it sees: no AI until M7.
-- Credits accumulate but buy nothing until M6.
+- Blue does not react beyond shooting what it sees, and does not build: no AI until M7.
+- Your base buildings lift the fog for 28 units around them, on the client only: in the
+  sim a building spots nothing. Enemy base buildings are drawn from the start.
+- Commands do not say who sent them; the sim takes the army from the units or the building
+  named. Multiplayer will add the sender and check it.
 - Fog of war (client) and the fight (sim) use the same sight rules but separate code; the
   fog is per cell, so they can disagree by a cell at the edges.
 - If all 96 flowfield slots are in use, further units walk straight until one frees up.

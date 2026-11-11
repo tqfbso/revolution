@@ -353,3 +353,92 @@ Hold position (H) is the one stance in M5: the unit shoots what comes into range
 never leaves its spot to chase. It is what missile teams in a wood and tanks behind a
 crest need, and it ends with the next move order. Other stances and a priority UI wait
 for the command card in M6; target priority itself is automatic (decision 032's table).
+
+## 035 Three resources with three different shapes
+
+Fabio's reference for the economy is Age of Empires 2: many workers, and the choice of
+where to put them. A single harvester and one resource would not give that. So there are
+three resources, and each grows in a different way, so that each asks a different question.
+Supplies sit in stockpiles on the map; a truck takes 20 a trip (five seconds to load), so income grows with the
+number of trucks and the shortness of the drive, and a stockpile runs out (8000 by the
+headquarters, 12000 a long drive north and south, 16000 behind each settlement on your
+bank, 88000 a side in all, about one full army). Fuel comes from wells that pump three a
+second into a small tank: more trucks on a well bring nothing once it is drained, so fuel
+grows only with the number of wells held, and tanks cost fuel. Credits come from towns
+(decision 024), and pay for technology and the clever units. The result: trucks decide how
+fast you build, wells decide how much armour, towns decide how modern, and the rich sites
+are where the fighting is. Rejected: one resource (no allocation decision), and four or
+more (bookkeeping without a new question).
+
+First numbers, from a scripted opening on the real map: a truck on a stockpile next to the
+base brings about 1.8 supplies a second, so a rifle squad costs one truck half a minute.
+The first version (40 a trip, three seconds to load) stripped both home stockpiles in
+eight minutes with 14 trucks and left nothing to decide. A town now pays 3 credits a
+second instead of the 10 of decision 024, which was set when credits bought nothing: at
+10, one town paid for the second tier in thirty seconds.
+
+## 036 One truck hauls and builds
+
+The logistics truck is the villager: it hauls from a site to the nearest depot or
+headquarters and back until told otherwise, and it puts up and repairs base buildings.
+One type, so every truck sent to build is a truck not hauling, which is the allocation
+decision in its smallest form. It is unarmed and dies to anything, so raiding the trucks
+is a way to win. A truck whose stockpile runs out drives on to the next one within 160
+units by itself; one with nothing left to do stops, and the resource bar counts idle
+trucks. Up to five trucks work on a building at once.
+
+## 037 Buildings are paid for at once and keep a ring of free ground
+
+Five buildings: headquarters (trucks, technology, unloading), supply depot (unloading,
+room for 40 more units), barracks, motor pool, drone workshop. The price is taken when the
+plot is chosen, as in Age of Empires, so money cannot be spent twice. A plot needs open,
+nearly level ground and one free cell all around it. That ring is a rule with a purpose:
+buildings can never touch each other or the terrain, so they can never close a ford or wall
+the map in two (the pathfinder treats cut-off ground as impassable, which would be a
+disaster), and units always have a way around. It also rules out walls as a defence;
+defence is garrisons, terrain and guns. A unit standing on a new plot is moved off it. A
+destroyed building leaves rubble, like a house (decision 022).
+
+## 038 The unit limit comes from depots, 600 at most
+
+A headquarters lets an army field 60 units, each depot 40 more, up to 600: three times an
+Age of Empires population, which is the size of battle the game is built for. Depots are
+cheap; the point is that they are targets. An army that loses its depots keeps its units
+but cannot replace losses. One unit counts as one, whatever it is: prices already tell a
+tank from a rifle squad.
+
+## 039 Technology is bought with credits, so territory pays for it
+
+Tier 1: rifle squads, recon teams, carriers, trucks. Tier 2 (400 supplies, 300 credits,
+40 seconds): tanks, missile teams, air defence, recon drones, the drone workshop, further
+headquarters. Tier 3 (800 supplies, 200 fuel, 800 credits, 60 seconds): guns, strike
+drones, jammers. Credits only come from towns, so an army that holds no town stays at
+tier 1 however many trucks it has. That ties the technology race to the towns, which is
+where the roadmap wanted the economy to push the fighting.
+
+## 040 Hold fire is a stance; the priority screen is dropped
+
+Hold position (decision 034) stays an order that the next move ends. Hold fire is a
+stance: it stays until lifted (G, or the card), and a unit under it never picks a target
+by itself, though it still obeys an order to shell a point or a building. It is for
+missile teams waiting in ambush and for recon that should not be given away by its
+escort. A screen for target priorities was planned and is dropped: the built-in priorities
+(decision 032) have not been wrong often enough in play to justify a screen per unit type.
+
+## 041 The opening is a skirmish against a fortress
+
+The default scenario gives both armies a base. Red has a headquarters, six trucks, twelve
+rifle squads, four carriers and two recon teams; blue holds its three settlements with a
+fifth of `?units` (600 by default), dug in as in the assault, behind them a small base.
+Blue still has no commander, so it neither builds nor attacks: until the AI milestone the
+game is "build the army that cracks the east bank", with no clock. A headquarters that
+falls ends the game for its owner (a banner, nothing more yet). `?scenario=assault` keeps
+the old opening.
+
+## 042 The client rebuilds base buildings in its own copy of the map
+
+The client has always derived the map from the seed instead of receiving it. Base
+buildings are the first structures that appear during play, so every snapshot lists them
+and the client adds each to its copy in the order the sim created it; ids, picking, the
+fog and the minimap then agree with no second code path. The price: the client's map can
+no longer be rewound, so Reset reloads the page.

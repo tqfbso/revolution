@@ -352,4 +352,4 @@ export const HEIGHT_RANGE_MIN = fx(-2);
 /** Capture points a town needs to change hands; a unit adds one per second, up to ten. */
 export const CAPTURE_POINTS = 60;
 /** Credits a held town pays per second. */
-export const TOWN_INCOME = 10;
+export const TOWN_INCOME = 3;
