@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import {
+  CMD_ATTACK,
   CMD_ATTACK_MOVE,
   CMD_BOMBARD,
   CMD_HOLD,
@@ -26,8 +27,10 @@ const DOUBLE_MS = 350;
 /**
  * Turns mouse and keyboard into selection (client-only state) and commands (sent to the sim).
  * Left drag: box select. Left click: select one. Double click (or Ctrl + click): everything
- * of that type on screen. Shift: add. Right click: attack-move (fight on the way). Alt +
- * right click: plain move (do not stop to fight). Right click a building: infantry moves in.
+ * of that type on screen. Shift: add. Right click the ground: move (units fire on the way
+ * but do not stop, so a fight can always be broken off). Right click an enemy: attack it.
+ * A then left click (or Alt + right click): attack-move, fight whatever is met on the way.
+ * Right click a building: infantry moves in.
  * Ctrl + right click a building or bridge: shell it. Ctrl + right click the ground: guns
  * shell that spot. Right click one of your carriers, or L
  * with squads and carriers selected: mount up. U: dismount. Ctrl/Alt + 1..9: save the selection as a
@@ -71,11 +74,17 @@ export class Input {
         // Placing a building: left click puts it down, anything else calls it off.
         if (e.button === 0) card.confirm(e.shiftKey);
         else card.cancelPlacing();
+      } else if (e.button === 0 && this.attackMoveArmed) {
+        // A, then left click: attack-move to the spot.
+        this.attackMoveArmed = false;
+        this.orderMove(e.clientX, e.clientY, true, false);
       } else if (e.button === 0) {
         this.dragStart = { x: e.clientX, y: e.clientY };
         dom.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
-        this.orderMove(e.clientX, e.clientY, !e.altKey, e.ctrlKey || e.metaKey);
+        const attackMove = e.altKey || this.attackMoveArmed;
+        this.attackMoveArmed = false;
+        this.orderMove(e.clientX, e.clientY, attackMove, e.ctrlKey || e.metaKey);
       }
     });
     dom.addEventListener('pointermove', (e) => {
@@ -109,11 +118,14 @@ export class Input {
         e.preventDefault();
         this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
       } else if (e.code === 'Escape') {
+        this.attackMoveArmed = false;
         if (card.placing >= 0) card.cancelPlacing();
         else {
           units.setSelected([], false);
           card.select(-1);
         }
+      } else if (e.code === 'KeyA' && !e.ctrlKey && !e.metaKey && units.selectedCount > 0) {
+        this.attackMoveArmed = !this.attackMoveArmed;
       } else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
       else if (e.code === 'Period') card.selectIdle();
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
@@ -148,6 +160,8 @@ export class Input {
     });
   }
 
+  /** After pressing A: the next left or right click is an attack-move. */
+  private attackMoveArmed = false;
   private pointerX = 0;
   private pointerY = 0;
 
@@ -316,6 +330,27 @@ export class Input {
         return;
       }
     }
+    // An enemy unit under the pointer: armed units attack it, guns shell where it stands,
+    // the rest just move there.
+    const enemy = this.enemyAt(clientX, clientY);
+    if (enemy >= 0) {
+      const armed = ids.filter((id) => {
+        const k = KINDS[this.units.kindOf(id)];
+        return !k.indirect && k.damage.some((d) => d > 0) && k.damage[this.units.kindOf(enemy)] > 0;
+      });
+      const guns = ids.filter((id) => KINDS[this.units.kindOf(id)].indirect);
+      if (armed.length > 0) this.send({ type: CMD_ATTACK, units: armed, target: enemy });
+      const p = this.units.renderPos;
+      const ex = p[3 * enemy];
+      const ez = p[3 * enemy + 2];
+      if (guns.length > 0) {
+        this.send({ type: CMD_BOMBARD, units: guns, x: fx(ex), y: fx(ez) });
+      }
+      const rest = ids.filter((id) => !armed.includes(id) && !guns.includes(id));
+      if (rest.length > 0) this.send({ type: CMD_MOVE, units: rest, x: fx(ex), y: fx(ez) });
+      this.mark(ex, p[3 * enemy + 1] + 0.2, ez);
+      return;
+    }
     // On one of your carriers: the selected squads climb aboard.
     const carrier = this.carrierAt(clientX, clientY);
     const squads = ids.filter((id) => KINDS[this.units.kindOf(id)].garrison);
@@ -327,6 +362,27 @@ export class Input {
     }
     if (!ground) return;
     this.orderTo(ground.x, ground.z, attack);
+  }
+
+  /** A visible enemy unit under a screen point (the nearest to it), or -1. */
+  private enemyAt(clientX: number, clientY: number): number {
+    const rect = this.dom.getBoundingClientRect();
+    const pos = this.units.renderPos;
+    let best = -1;
+    let bestD = CLICK_PICK_PX * CLICK_PICK_PX;
+    for (let i = 0; i < this.units.count; i++) {
+      if (!this.units.isTargetable(i)) continue;
+      this.v.set(pos[3 * i], pos[3 * i + 1] + 0.5, pos[3 * i + 2]).project(this.camera);
+      if (this.v.z < -1 || this.v.z > 1) continue;
+      const sx = rect.left + (this.v.x * 0.5 + 0.5) * rect.width;
+      const sy = rect.top + (-this.v.y * 0.5 + 0.5) * rect.height;
+      const d = (sx - clientX) * (sx - clientX) + (sy - clientY) * (sy - clientY);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
   }
 
   /** The player's carrier under a screen point, or -1. */

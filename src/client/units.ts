@@ -494,6 +494,16 @@ export class UnitView {
     return this.isAlive(id) && this.teamOf(id) === this.playerTeam;
   }
 
+  /** A living enemy unit that is drawn this frame (so the player can see it), outside buildings. */
+  isTargetable(id: number): boolean {
+    return (
+      this.isAlive(id) &&
+      this.teamOf(id) !== this.playerTeam &&
+      (this.info[id] & INFO_INSIDE) === 0 &&
+      this.lodOf[id] !== LOD_HIDDEN
+    );
+  }
+
   /** Centre of the living units among `ids` (render x, z), or null if none are left. */
   centreOf(ids: readonly number[]): { x: number; z: number } | null {
     let x = 0;

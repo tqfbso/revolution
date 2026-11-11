@@ -74,7 +74,7 @@ export class Minimap {
         canvas.setPointerCapture(e.pointerId);
         lookAt(p.x, p.z);
       } else if (e.button === 2) {
-        order(p.x, p.z, !e.altKey);
+        order(p.x, p.z, e.altKey);
       }
       e.stopPropagation();
     });

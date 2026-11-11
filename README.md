@@ -16,8 +16,9 @@ detail sooner (or `2` to keep it longer), `?renderer=webgl` force the WebGL2 fal
 | ------------ | ----------------------------------------- |
 | Select       | Left drag (box), left click, Shift to add |
 | Select all   | Ctrl+A                                    |
-| Attack-move  | Right click (fight on the way)            |
-| Move         | Alt + right click (do not stop to fight)  |
+| Move         | Right click (breaks off any fight)        |
+| Attack       | Right click an enemy unit                 |
+| Attack-move  | A then click, or Alt + right click        |
 | Stop / clear | X / Esc                                   |
 | Pan          | WASD, arrow keys, or mouse at screen edge |
 | Zoom         | Mouse wheel                               |
