@@ -11,6 +11,7 @@ import {
 } from '../worker/protocol';
 import { Batch } from './batch';
 import type { Effects } from './effects';
+import type { Fog } from './fog';
 import {
   MUZZLE_Y,
   MUZZLE_Z,
@@ -74,6 +75,11 @@ export class UnitView {
   private readonly shotAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private readonly diedAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private snapshotTime = 0;
+  private fogAge = 0;
+  /** Bumped each time a slot gets a new occupant, so stale references can be told apart. */
+  readonly gen = new Uint16Array(MAX_UNITS);
+  /** The army the player commands and sees through. */
+  playerTeam = 0;
   /** Level of detail each unit was last drawn at; LOD_HIDDEN when off-screen. */
   private readonly lodOf = new Uint8Array(MAX_UNITS).fill(LOD_HIDDEN);
 
@@ -88,6 +94,7 @@ export class UnitView {
   constructor(
     private readonly terrain: Terrain,
     private readonly effects: Effects,
+    private readonly fog: Fog,
     shadows: boolean,
   ) {
     const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.82, metalness: 0.08 });
@@ -136,6 +143,7 @@ export class UnitView {
       this.selectedCount = 0;
       this.info.fill(0);
       this.diedAt.fill(-1e9);
+      this.fog.reset();
     }
     const curr = this.curr;
     const prev = this.prev;
@@ -154,6 +162,7 @@ export class UnitView {
       }
       if (!wasAlive) {
         // New unit (or a reused slot): do not interpolate from wherever the slot was before.
+        this.gen[i]++;
         prev[2 * i] = curr[2 * i];
         prev[2 * i + 1] = curr[2 * i + 1];
         // Face the enemy side of the map until it moves.
@@ -173,6 +182,8 @@ export class UnitView {
     this.aim.set(s.aim);
     this.count = n;
     this.snapshotTime = now;
+    // Sight is refreshed every other tick (10 Hz): plenty for units that move this slowly.
+    if (this.fogAge++ % 2 === 0) this.fog.update(this.curr, n, (id) => this.isMine(id));
     this.playEvents(s.events, now / 1000);
   }
 
@@ -221,6 +232,33 @@ export class UnitView {
       }
     }
     fx.thin = 0;
+  }
+
+  teamOf(id: number): number {
+    return this.info[id] >> INFO_TEAM_SHIFT;
+  }
+
+  kindOf(id: number): number {
+    return (this.info[id] >> INFO_KIND_SHIFT) & 3;
+  }
+
+  /** A living unit of the player's army. */
+  isMine(id: number): boolean {
+    return this.isAlive(id) && this.teamOf(id) === this.playerTeam;
+  }
+
+  /** Centre of the living units among `ids` (render x, z), or null if none are left. */
+  centreOf(ids: readonly number[]): { x: number; z: number } | null {
+    let x = 0;
+    let z = 0;
+    let n = 0;
+    for (const id of ids) {
+      if (!this.isAlive(id)) continue;
+      x += this.renderPos[3 * id];
+      z += this.renderPos[3 * id + 2];
+      n++;
+    }
+    return n ? { x: x / n, z: z / n } : null;
   }
 
   isAlive(id: number): boolean {
@@ -285,6 +323,13 @@ export class UnitView {
       pos[3 * i] = x;
       pos[3 * i + 1] = y;
       pos[3 * i + 2] = z;
+      // Fog of war: enemies show only where the player can see, wrecks where they have been.
+      if (info[i] >> INFO_TEAM_SHIFT !== this.playerTeam || !alive) {
+        if (alive ? !this.fog.sees(x, z) : !this.fog.hasExplored(x, z)) {
+          this.lodOf[i] = LOD_HIDDEN;
+          continue;
+        }
+      }
 
       const target = this.aim[i];
       let aimAngle = NaN;

@@ -48,5 +48,8 @@ export const KINDS: readonly UnitKind[] = [
   },
 ];
 
+/** Units standing in forest are only noticed from this close: the ambush distance. */
+export const CONCEAL_RANGE = fx(13);
+
 /** How far a unit notices enemies. Must stay within ACQUIRE_CELLS coarse grid cells. */
 export const ACQUIRE_RANGE = fx(44);

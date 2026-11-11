@@ -48,19 +48,36 @@ never drops a frame and a slow frame never slows the game.
 ...), an entity is an index. A slot is free, alive or a wreck; freed slots are reused by
 later spawns, lowest index first. No per-tick allocation in the hot loops.
 
+## The map (`src/sim/map.ts`)
+
+A 256x256 grid of 4-unit cells: an integer heightfield and a terrain type per cell,
+generated from the seed. Per movement class (vehicle, foot) it holds a cost per cell
+(0 = impassable) and, for every cell, the nearest passable one, used to move spawn points
+and order targets off ground a unit cannot stand on. The collision grid uses the same cells.
+
+## Pathfinding (`src/sim/path.ts`)
+
+Flowfields: `buildField` runs Dijkstra with a bucket queue from one or many goal cells and
+writes the cost-to-goal of every cell; `flowDirection` picks the cheapest neighbour (never
+cutting a blocked corner); `clearLine` tells whether a straight walk is possible. Fields for
+move orders live in the world, shared by goal and class and built on first use.
+
 ## One tick (`src/sim/sim.ts`)
 
-1. Apply commands (move, attack-move, stop, spawn).
+1. Apply commands (move, attack-move, stop, spawn). A move order assigns formation slots and
+   a group pace.
 2. Sort living units into two uniform grids by counting sort: 4-unit cells for collisions,
    16-unit cells for targeting.
-3. Acquire targets: nearest living enemy within 44 units. Units without a target look every
-   4 ticks, everyone re-evaluates every 16, staggered by id.
-4. Steer: units free to fight close to weapon range and hold; plain move orders keep moving.
-5. Separate (soft collisions), fire (hitscan, damage accumulated), integrate, then resolve
-   damage, deaths, and wreck expiry.
+3. Refresh at most one "nearest enemy" chase field, if any unit asked for one last tick.
+4. Acquire targets: nearest living enemy within 44 units that is not concealed by forest.
+   Units without a target look every 4 ticks, everyone re-evaluates every 16, staggered by id.
+5. Steer: units free to fight close to weapon range and hold; plain move orders keep moving.
+   Straight line if walkable, else the flowfield.
+6. Separate (soft collisions), fire (hitscan, damage accumulated), integrate (impassable
+   ground is a hard wall units slide along), then resolve damage, deaths, and wreck expiry.
 
 Unit types live in `src/sim/units.ts` as a table of integers (health, speed, range, reload,
-damage per target type).
+movement class, damage per target type).
 
 ## Commands
 
@@ -90,11 +107,20 @@ Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwis
 Snapshots are transferred (not copied) from the worker as typed arrays: positions, a
 state/kind/team byte, health, attack target, and the tick's combat events.
 
+## Player view
+
+The player commands team 0. `src/client/fog.ts` computes what that army sees (10 Hz, one
+stamp per occupied cell) into a 256x256 texture that every world material multiplies its
+colour by; enemy units outside vision are not drawn and their effects not played.
+`src/client/minimap.ts` draws terrain, fog, units and the camera outline into a 256-pixel
+canvas ten times a second. Selection, control groups and the minimap are client state.
+
 ## Current limits, on purpose
 
-- Terrain height is visual only; the sim is flat. Heightmap moves into the sim (as integers)
-  when terrain starts to affect gameplay.
-- Movement is straight-line with soft separation. Flowfield pathfinding comes with obstacles.
+- Height does not affect the fight yet (no high-ground bonus, no line of sight). Planned
+  with buildings in M4.
+- Weapons fire over water, forest and cliffs: no line-of-fire check yet (M4).
+- If all 96 flowfield slots are in use, further units walk straight until one frees up.
 - A command naming a slot that died and was reused reaches the new occupant. Harmless in
   single player; multiplayer will add a generation counter per slot.
 - Models are untextured procedural geometry (see decision 011).

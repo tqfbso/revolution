@@ -14,7 +14,7 @@ from the old "Battlefield" milestone, removing dead units, was built with it.
 Repo, CI, auto-deploy. Deterministic sim in a worker, instanced rendering, RTS camera,
 selection and move orders, 3000-unit stress test with performance overlay.
 
-## M2 Combat and first real units (done, performance check on real hardware pending)
+## M2 Combat and first real units (done)
 
 - Health, weapons with range and reload, damage by target type, nearest-enemy targeting
 - Attack-move, death, wrecks, reuse of freed unit slots
@@ -23,29 +23,56 @@ selection and move orders, 3000-unit stress test with performance overlay.
 - Three levels of detail and off-screen culling so detail holds at 3000+ units
 - Battle scenario: two armies clash
 
-## M3 Battlefield
+## M3 Battlefield (done)
 
-- Map with obstacles (forest, water, cliffs) stored in the sim
-- Flowfield pathfinding; chasing and attack-move route through it
-- Formations that hold shape while moving
-- Minimap, control groups (Ctrl+1..9), double-click to select type
-- Fog of war and line of sight
+- Map generated from the seed and stored in the sim: a river with five fords, mesas with
+  cliffs and ramps, lakes, forests. Vehicles cannot enter forest, infantry can (slowly)
+- Flowfield pathfinding; move, attack-move and chasing all route around obstacles
+- Formations that face the direction of travel and hold shape (pace of the slowest,
+  vehicles in front)
+- Minimap, control groups, double-click to select a type
+- You command one army (red). Fog of war: unexplored, explored, visible
+- Concealment: infantry in forest is only spotted from close by, so it gets the first shot
+- Frame rate: unseen effects skipped, far ones thinned, render scale adapts under load
+
+Moved to M4: true line of sight (ground, forest and buildings blocking sight and fire). It
+needs buildings to matter and shares its code with garrison fire.
+
+## Design pillar for M4 to M6: modern battle dynamics
+
+Fabio, 2026-11-11: the game should feel like present-day war from the start, not like tanks
+and riflemen with a modern skin. Each milestone below adds a dynamic, not just content:
+chokepoints and urban fighting (M4), the sensor-versus-shooter fight and combined arms (M5),
+and an economy that makes holding ground matter (M6). See decision 020.
 
 ## M4 Cities as fortresses
 
-- Buildings that can be garrisoned by infantry; garrison bonuses
-- Building damage states and destruction by tanks and artillery
+- Towns and villages placed where they matter: at the central crossing, at fords, on roads
+- Bridges: fast crossings that can be destroyed and repaired, next to the slow fords
+- Buildings that can be garrisoned by infantry; garrison bonuses (cover, sight, ambush)
+- Building damage states and destruction by tanks and artillery; rubble still gives cover
+- True line of sight: buildings, forest and high ground block sight and direct fire;
+  high ground sees and shoots further
 - Towns as capturable territory that produces income
 
-## M5 Combat depth
+## M5 Combined arms
 
-- More unit types (artillery, anti-air, transports), armour facing, projectiles with flight time
-- Hold position, target priorities, stances
+- Spotting: a unit can fire at what any friendly unit sees. Recon teams see far and hide
+  well; everything else is half blind without them
+- Anti-tank missile teams: infantry that kills tanks from range and from cover. Armour
+  facing (front, side, rear), so flanking pays
+- Infantry fighting vehicles and carriers: move squads fast, dismount to fight
+- Artillery: shells with flight time, area damage, indirect fire on spotted targets, and
+  counter-battery (firing reveals the battery)
+- Drones: cheap recon eyes and one-way strike drones. Air defence that shoots them down.
+  Electronic warfare vehicles that jam them in a radius
+- Smoke, hold position, target priorities, stances
 - Persistent battlefield scars: craters, scorch marks
 
 ## M6 Economy and base
 
 - Resources, harvesting, construction, production queues, tech tiers
+- Income from held towns, so territory is the economy
 - HUD: command card, production, resources
 
 ## M7 Skirmish AI

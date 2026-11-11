@@ -297,6 +297,32 @@ describe('terrain and pathfinding', () => {
     }
   });
 
+  it('infantry in forest is concealed: it gets the first shot at a tank driving past', () => {
+    // A world that is all forest for x < 500 and open ground beyond.
+    const woods = flatMap();
+    for (let c = 0; c < MAP_CELLS * MAP_CELLS; c++) {
+      if (c % MAP_CELLS < 125) {
+        woods.type[c] = T_FOREST;
+        woods.cost[CLASS_VEHICLE][c] = 0;
+        woods.cost[CLASS_FOOT][c] = 2;
+      }
+    }
+    const w = createWorld(4, woods);
+    step(w, [spawnAt(0, KIND_INFANTRY, 1, 490, 500), spawnAt(1, KIND_TANK, 1, 520, 500)]);
+    // Spawning scatters units, so place the two exactly.
+    w.posX[0] = fx(490);
+    w.posX[1] = fx(508);
+    w.posY[0] = w.posY[1] = fx(500);
+    // 18 apart: well inside the tank's sight and range, but the squad is hidden.
+    for (let t = 0; t < 40; t++) step(w, []);
+    expect(w.attack[1]).toBe(-1);
+    expect(w.attack[0]).toBe(1);
+    // The squad closes to its own range (15) before the tank can spot it (13).
+    for (let t = 0; t < 400 && w.events.length === 0; t++) step(w, []);
+    const first = w.events.indexOf(EV_SHOT);
+    expect(w.events[first + 1]).toBe(0);
+  });
+
   it('nobody ends up on impassable ground during a battle across the river', () => {
     const w = createWorld(1, map);
     step(w, battleCommands(2000));
