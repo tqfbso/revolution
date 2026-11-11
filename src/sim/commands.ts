@@ -107,7 +107,98 @@ export interface SpawnCommand {
   garrisonTown?: number;
 }
 
+export const CMD_GATHER = 11;
+export const CMD_BUILD = 12;
+export const CMD_ASSIST = 13;
+export const CMD_TRAIN = 14;
+export const CMD_CANCEL = 15;
+export const CMD_RALLY = 16;
+export const CMD_RESEARCH = 17;
+export const CMD_STANCE = 18;
+export const CMD_FOUND = 19;
+
+/** Trucks haul from a resource site to the nearest depot, back and forth, until told otherwise. */
+export interface GatherCommand {
+  type: typeof CMD_GATHER;
+  units: number[];
+  site: number;
+}
+
+/**
+ * Start a base building with its north-west corner on cell (x, y) and send the trucks to
+ * work on it. It is paid for at once by the army of the first truck; refused if that army
+ * cannot pay, has not the technology, or the ground will not take it.
+ */
+export interface BuildCommand {
+  type: typeof CMD_BUILD;
+  units: number[];
+  /** Building type (see BUILDINGS in src/sim/economy.ts). */
+  building: number;
+  x: number;
+  y: number;
+}
+
+/** Trucks work on a base building of their own army: finish it, or repair it. */
+export interface AssistCommand {
+  type: typeof CMD_ASSIST;
+  units: number[];
+  structure: number;
+}
+
+/** Put a unit on a building's production queue. Paid for at once. */
+export interface TrainCommand {
+  type: typeof CMD_TRAIN;
+  structure: number;
+  kind: number;
+}
+
+/** Take the last entry off a building's queue again, for a full refund. */
+export interface CancelCommand {
+  type: typeof CMD_CANCEL;
+  structure: number;
+}
+
+/** Where a building's new units go when they roll out. */
+export interface RallyCommand {
+  type: typeof CMD_RALLY;
+  structure: number;
+  x: number;
+  y: number;
+}
+
+/** A headquarters works on the army's next technology tier. */
+export interface ResearchCommand {
+  type: typeof CMD_RESEARCH;
+  structure: number;
+}
+
+/** Set a stance (STANCE_* in the world). It stays until changed. */
+export interface StanceCommand {
+  type: typeof CMD_STANCE;
+  units: number[];
+  stance: number;
+}
+
+/** Scenario command: a finished base building for `team`, free, as near to (x, y) as it fits. */
+export interface FoundCommand {
+  type: typeof CMD_FOUND;
+  team: number;
+  building: number;
+  /** Cell wanted for the north-west corner. */
+  x: number;
+  y: number;
+}
+
 export type Command =
+  | GatherCommand
+  | BuildCommand
+  | AssistCommand
+  | TrainCommand
+  | CancelCommand
+  | RallyCommand
+  | ResearchCommand
+  | StanceCommand
+  | FoundCommand
   | MoveCommand
   | AttackMoveCommand
   | StopCommand
