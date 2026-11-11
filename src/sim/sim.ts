@@ -1,5 +1,6 @@
 import {
   CMD_ATTACK_MOVE,
+  CMD_BOMBARD,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
   CMD_LOAD,
@@ -23,6 +24,7 @@ import {
   S_BRIDGE,
   S_BUILDING,
   T_BRIDGE,
+  T_BUILDING,
   T_FOREST,
   T_RUBBLE,
   cellOfPos,
@@ -40,6 +42,8 @@ import {
   BOARD_DIST,
   CAPTURE_POINTS,
   CONCEAL_RANGE,
+  COUNTER_BATTERY_TICKS,
+  DANGER_CLOSE,
   EYE_HEIGHT,
   FACING_COS,
   GARRISON_MAX,
@@ -51,6 +55,11 @@ import {
   KIND_COUNT,
   KIND_TANK,
   REVEAL_TICKS,
+  SCATTER_MIN,
+  SCATTER_SHIFT,
+  SHELL_BASE_TICKS,
+  SHELL_TICKS_SHIFT,
+  SPOT_TICKS,
   TOWN_INCOME,
 } from './units';
 import {
@@ -58,12 +67,15 @@ import {
   EV_CAPTURE,
   EV_COLLAPSE,
   EV_DEATH,
+  EV_IMPACT,
+  EV_LAUNCH,
   EV_REPAIR,
   EV_SHOT,
   EV_SIEGE,
   EV_UNLOAD,
   FLAG_AMOVE,
   FLAG_BOARD,
+  FLAG_BOMBARD,
   FLAG_DIRECT,
   FLAG_GARRISON,
   FLAG_MOVING,
@@ -72,6 +84,7 @@ import {
   MAP_SIZE,
   MAP_SIZE_FX,
   MAX_FIELDS,
+  MAX_SHELLS,
   MAX_TEAMS,
   MAX_UNITS,
   NO_TARGET,
@@ -79,6 +92,7 @@ import {
   STATE_ALIVE,
   STATE_FREE,
   STATE_WRECK,
+  packPoint,
   type World,
 } from './world';
 
@@ -175,6 +189,7 @@ export function step(w: World, commands: readonly Command[]): void {
   steer(w);
   separate(w);
   fire(w);
+  resolveShells(w);
   integrate(w);
   resolveDamage(w);
   resolveStructures(w);
@@ -229,7 +244,35 @@ function applyCommand(w: World, cmd: Command): void {
       routeUnits(w, units, gx, gy);
       for (let k = 0; k < units.length; k++) {
         const id = units[k];
-        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | (garrison ? FLAG_GARRISON : FLAG_SIEGE);
+        // Guns do not drive up to the wall: they shell it from wherever they can reach it.
+        const how = garrison
+          ? FLAG_GARRISON
+          : KINDS[w.kind[id]].indirect
+            ? FLAG_BOMBARD
+            : FLAG_SIEGE;
+        w.aimX[id] = gx;
+        w.aimY[id] = gy;
+        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | how;
+      }
+      break;
+    }
+    case CMD_BOMBARD: {
+      const units = validUnits(w, cmd.units).filter((id) => KINDS[w.kind[id]].indirect);
+      const x = clampInt(cmd.x | 0, 0, POS_MAX);
+      const y = clampInt(cmd.y | 0, 0, POS_MAX);
+      for (let k = 0; k < units.length; k++) {
+        const id = units[k];
+        w.targetX[id] = x;
+        w.targetY[id] = y;
+        w.orderSpeed[id] = w.speed[id];
+        w.orderStruct[id] = -1;
+        w.aimX[id] = x;
+        w.aimY[id] = y;
+      }
+      routeUnits(w, units, x, y);
+      for (let k = 0; k < units.length; k++) {
+        const id = units[k];
+        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | FLAG_BOMBARD;
       }
       break;
     }
@@ -252,7 +295,8 @@ function applyCommand(w: World, cmd: Command): void {
   }
 }
 
-const ORDER_FLAGS = FLAG_WANDER | FLAG_AMOVE | FLAG_GARRISON | FLAG_SIEGE | FLAG_BOARD;
+const ORDER_FLAGS =
+  FLAG_WANDER | FLAG_AMOVE | FLAG_GARRISON | FLAG_SIEGE | FLAG_BOARD | FLAG_BOMBARD;
 
 /**
  * Send each squad to the nearest carrier of its own army that still has a seat free,
@@ -491,8 +535,10 @@ function updateStructureOrders(w: World): void {
   const n = w.count;
   for (let i = 0; i < n; i++) {
     const flags = w.flags[i];
-    if ((flags & (FLAG_GARRISON | FLAG_SIEGE)) === 0 || w.state[i] !== STATE_ALIVE) continue;
+    if ((flags & (FLAG_GARRISON | FLAG_SIEGE | FLAG_BOMBARD)) === 0) continue;
+    if (w.state[i] !== STATE_ALIVE) continue;
     const s = w.orderStruct[i];
+    if (s < 0) continue; // shelling a point on the ground, not a structure
     if (w.sHp[s] <= 0) {
       w.flags[i] = 0;
     } else if ((flags & FLAG_GARRISON) !== 0) {
@@ -730,6 +776,9 @@ function spawn(w: World, cmd: SpawnCommand): void {
     w.carrier[id] = -1;
     w.load[id] = 0;
     w.orderUnit[id] = -1;
+    w.aimX[id] = 0;
+    w.aimY[id] = 0;
+    w.spotted[id] = 0;
     w.flags[id] = wanderFlag(cmd.wander && !advance);
     if (cmd.garrisonTown !== undefined && kind.garrison) {
       // Spread over the town's buildings: always the emptiest one that still has room.
@@ -815,6 +864,10 @@ function acquireTargets(w: World): void {
     const t = w.attack[i];
     const phase = tick + i;
     const dmgTable = KINDS[w.kind[i]].damage;
+    if (KINDS[w.kind[i]].indirect) {
+      acquireIndirect(w, i);
+      continue;
+    }
     let valid = false;
     let targetD = 0;
     if (
@@ -842,6 +895,7 @@ function acquireTargets(w: World): void {
         )
           ? 1
           : 0;
+        if (w.los[i] === 1) w.spotted[t] = tick + SPOT_TICKS;
       }
     }
     // A unit whose last look found enemies near but none in sight looks again at the slow
@@ -897,9 +951,178 @@ function acquireTargets(w: World): void {
     if (best !== NO_TARGET) {
       w.attack[i] = best;
       w.los[i] = 1;
+      // What one unit sees, the guns behind it can shell.
+      w.spotted[best] = tick + SPOT_TICKS;
     } else if (!keep) {
       w.attack[i] = NO_TARGET;
       w.los[i] = blocked ? SIGHT_NONE : 0;
+    }
+  }
+}
+
+/**
+ * Target for a gun: an enemy the army has spotted, between minimum and maximum range, with
+ * no friendly troops next to it. Other guns come first (counter-battery), then whatever
+ * stands still, then the nearest. Looked for every 16 ticks.
+ */
+function acquireIndirect(w: World, i: number): void {
+  const tick = w.tick;
+  const kind = KINDS[w.kind[i]];
+  const x = w.posX[i];
+  const y = w.posY[i];
+  const team = w.team[i];
+  const max2 = kind.range * kind.range;
+  const min2 = kind.minRange * kind.minRange;
+  const t = w.attack[i];
+  let valid = false;
+  if (
+    t !== NO_TARGET &&
+    w.state[t] === STATE_ALIVE &&
+    w.team[t] !== team &&
+    w.carrier[t] < 0 &&
+    w.spotted[t] > tick
+  ) {
+    const dx = w.posX[t] - x;
+    const dy = w.posY[t] - y;
+    const d2 = dx * dx + dy * dy;
+    valid = d2 <= max2 && d2 >= min2;
+  }
+  if (((tick + i) & SEARCH_ALL_MASK) !== 0) {
+    if (!valid) w.attack[i] = NO_TARGET;
+    return;
+  }
+  const reach = (kind.range >> COARSE_SHIFT) + 1;
+  const cx = x >> COARSE_SHIFT;
+  const cy = y >> COARSE_SHIFT;
+  const y0 = cy > reach ? cy - reach : 0;
+  const y1 = cy + reach < COARSE_DIM ? cy + reach : COARSE_DIM - 1;
+  const x0 = cx > reach ? cx - reach : 0;
+  const x1 = cx + reach < COARSE_DIM ? cx + reach : COARSE_DIM - 1;
+  let best = NO_TARGET;
+  let bestKey = 4 * max2;
+  let checks = MAX_SIGHT_TESTS;
+  for (let gy = y0; gy <= y1; gy++) {
+    const from = coarseStart[gy * COARSE_DIM + x0];
+    const to = coarseStart[gy * COARSE_DIM + x1 + 1];
+    for (let s = from; s < to; s++) {
+      const j = coarseSorted[s];
+      if (w.team[j] === team || w.spotted[j] <= tick || kind.damage[w.kind[j]] === 0) continue;
+      const dx = w.posX[j] - x;
+      const dy = w.posY[j] - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > max2 || d2 < min2) continue;
+      const key =
+        d2 +
+        (KINDS[w.kind[j]].indirect ? 0 : 2 * max2) +
+        ((w.flags[j] & FLAG_MOVING) !== 0 ? max2 : 0);
+      if (key >= bestKey && (key > bestKey || j >= best)) continue;
+      if (checks-- <= 0 || dangerClose(w, w.posX[j], w.posY[j], team)) continue;
+      bestKey = key;
+      best = j;
+    }
+  }
+  w.attack[i] = best;
+  w.los[i] = best === NO_TARGET ? 0 : 1;
+}
+
+/** Are troops of `team` within DANGER_CLOSE of a point? */
+function dangerClose(w: World, x: number, y: number, team: number): boolean {
+  const r = (DANGER_CLOSE >> CELL_SHIFT) + 1;
+  const cx = x >> CELL_SHIFT;
+  const cy = y >> CELL_SHIFT;
+  const y0 = cy > r ? cy - r : 0;
+  const y1 = cy + r < GRID_DIM ? cy + r : GRID_DIM - 1;
+  const x0 = cx > r ? cx - r : 0;
+  const x1 = cx + r < GRID_DIM ? cx + r : GRID_DIM - 1;
+  for (let gy = y0; gy <= y1; gy++) {
+    const to = cellStart[gy * GRID_DIM + x1 + 1];
+    for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
+      const j = sorted[s];
+      if (w.team[j] !== team) continue;
+      const dx = w.posX[j] - x;
+      const dy = w.posY[j] - y;
+      if (dx * dx + dy * dy < DANGER_CLOSE * DANGER_CLOSE) return true;
+    }
+  }
+  return false;
+}
+
+const ARMOUR_BLAST = (r: number) => Math.trunc(r / 3);
+
+/** Fire a shell from gun `i` at a point `dist` away. It lands later, and not exactly there. */
+function launch(w: World, i: number, tx: number, ty: number, dist: number): void {
+  const scatter = SCATTER_MIN + (dist >> SCATTER_SHIFT);
+  const x = clampInt(tx - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
+  const y = clampInt(ty - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
+  w.cooldown[i] = KINDS[w.kind[i]].reload;
+  w.spotted[i] = w.tick + COUNTER_BATTERY_TICKS;
+  if (w.shellCount >= MAX_SHELLS) return;
+  const k = w.shellCount++;
+  w.shX[k] = x;
+  w.shY[k] = y;
+  w.shTick[k] = w.tick + SHELL_BASE_TICKS + (dist >> SHELL_TICKS_SHIFT);
+  w.shOwner[k] = i;
+  w.shKind[k] = w.kind[i];
+  w.events.push(EV_LAUNCH, i, packPoint(x, y));
+}
+
+/**
+ * Shells that land this tick. Everything within the blast is hurt, friend or foe, less
+ * toward the edge (half at the rim); walls keep three quarters of it off a garrison. A
+ * shell that lands on a building or a bridge damages it.
+ */
+function resolveShells(w: World): void {
+  const map = w.map;
+  for (let k = 0; k < w.shellCount;) {
+    if (w.shTick[k] > w.tick) {
+      k++;
+      continue;
+    }
+    const x = w.shX[k];
+    const y = w.shY[k];
+    const kind = KINDS[w.shKind[k]];
+    const owner = w.shOwner[k];
+    const last = --w.shellCount;
+    w.shX[k] = w.shX[last];
+    w.shY[k] = w.shY[last];
+    w.shTick[k] = w.shTick[last];
+    w.shOwner[k] = w.shOwner[last];
+    w.shKind[k] = w.shKind[last];
+    w.events.push(EV_IMPACT, packPoint(x, y), 0);
+    const cell = cellOfPos(x, y);
+    const type = map.type[cell];
+    if ((type === T_BUILDING || type === T_BRIDGE) && w.sHp[map.structAt[cell]] > 0) {
+      structDamage[map.structAt[cell]] += kind.siege;
+    }
+    const R = kind.blast;
+    const r = (R >> CELL_SHIFT) + 1;
+    const cx = x >> CELL_SHIFT;
+    const cy = y >> CELL_SHIFT;
+    const y0 = cy > r ? cy - r : 0;
+    const y1 = cy + r < GRID_DIM ? cy + r : GRID_DIM - 1;
+    const x0 = cx > r ? cx - r : 0;
+    const x1 = cx + r < GRID_DIM ? cx + r : GRID_DIM - 1;
+    for (let gy = y0; gy <= y1; gy++) {
+      const to = cellStart[gy * GRID_DIM + x1 + 1];
+      for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
+        const j = sorted[s];
+        const dx = w.posX[j] - x;
+        const dy = w.posY[j] - y;
+        const d2 = dx * dx + dy * dy;
+        // Splinters do nothing to armour: a tank is only hurt by a shell that all but hits it.
+        const reach = KINDS[w.kind[j]].armour === null ? R : ARMOUR_BLAST(R);
+        if (d2 >= reach * reach) continue;
+        let dmg = Math.trunc((kind.damage[w.kind[j]] * (2 * reach - isqrt(d2))) / (2 * reach));
+        if (w.inside[j] >= 0) dmg >>= 2;
+        else if (
+          KIND_CLASS[w.kind[j]] === CLASS_FOOT &&
+          map.type[cellOfPos(w.posX[j], w.posY[j])] === T_RUBBLE
+        ) {
+          dmg >>= 1;
+        }
+        damage[j] += dmg || 1;
+        killer[j] = owner;
+      }
     }
   }
 }
@@ -927,6 +1150,25 @@ function fire(w: World): void {
       continue;
     }
     const kind = KINDS[w.kind[i]];
+    if (kind.indirect) {
+      // A gun fires standing still: at the point it was given, or at its spotted target.
+      const flags = w.flags[i];
+      if ((flags & FLAG_MOVING) !== 0) continue;
+      let tx = w.aimX[i];
+      let ty = w.aimY[i];
+      if ((flags & FLAG_BOMBARD) === 0) {
+        const t = w.attack[i];
+        if (t === NO_TARGET) continue;
+        tx = w.posX[t];
+        ty = w.posY[t];
+      }
+      const dx = tx - w.posX[i];
+      const dy = ty - w.posY[i];
+      const d2 = dx * dx + dy * dy;
+      if (d2 > kind.range * kind.range || d2 < kind.minRange * kind.minRange) continue;
+      launch(w, i, tx, ty, isqrt(d2));
+      continue;
+    }
     if ((w.flags[i] & FLAG_SIEGE) !== 0) {
       // Ordered to bring a structure down: that comes before targets of opportunity.
       const s = w.orderStruct[i];
@@ -1176,9 +1418,20 @@ function steer(w: World): void {
         continue;
       }
     }
+    if ((flags & (FLAG_BOMBARD | FLAG_MOVING)) === (FLAG_BOMBARD | FLAG_MOVING)) {
+      // Driving up to shell a point: close enough is where the gun can reach it from.
+      const dx = w.aimX[i] - x;
+      const dy = w.aimY[i] - y;
+      const reach = KINDS[w.kind[i]].range - fx(4);
+      if (dx * dx + dy * dy <= reach * reach) {
+        flags &= ~(FLAG_MOVING | FLAG_DIRECT);
+        w.flags[i] = flags;
+      }
+    }
     const t = w.attack[i];
     if (
       t !== NO_TARGET &&
+      !KINDS[w.kind[i]].indirect &&
       ((flags & FLAG_MOVING) === 0 || (flags & (FLAG_AMOVE | FLAG_WANDER)) !== 0)
     ) {
       const dx = w.posX[t] - x;

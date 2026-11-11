@@ -300,6 +300,18 @@ export function buildVehicle(v: VehicleSpec): VehicleModel {
   };
 }
 
+/** A tracked gun carriage: a tall slab-sided turret far back, a very long barrel held high. */
+export function buildArtillery(): VehicleModel {
+  return buildVehicle({
+    len: 2.7,
+    wid: 1.3,
+    height: 0.5,
+    wheels: 0,
+    turret: { w: 1.05, h: 0.6, d: 1.3, z: -0.45 },
+    barrels: [{ x: 0, len: 2.6, r: 0.06, pitch: 0.45 }],
+  });
+}
+
 /** Eight wheels, a boat-shaped hull, a small turret with a long thin autocannon. */
 export function buildIfv(): VehicleModel {
   return buildVehicle({

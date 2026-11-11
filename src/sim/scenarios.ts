@@ -1,7 +1,7 @@
 import { CMD_SPAWN, type Command } from './commands';
 import { fx } from './fixed';
 import type { GameMap } from './map';
-import { KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from './units';
+import { KIND_ARTILLERY, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from './units';
 import { MAP_SIZE, MAX_TEAMS } from './world';
 
 /** Opening commands for the roaming test: `total` wandering units split across three teams. */
@@ -77,11 +77,12 @@ export function battleCommands(total: number, gap = 110): Command[] {
 export function assaultCommands(map: GameMap, total: number): Command[] {
   if (map.townCount < 6) return battleCommands(total);
   const perSide = Math.floor(total / 2);
-  // A battlegroup: 35% tanks, 15% carriers, 10% missile teams, the rest rifle squads.
+  // A battlegroup: 35% tanks, 15% carriers, 10% missile teams, 4% guns, the rest rifle squads.
   const tanks = Math.floor((perSide * 35) / 100);
   const ifvs = Math.floor((perSide * 15) / 100);
   const atgms = Math.floor(perSide / 10);
-  const infantry = perSide - tanks - ifvs - atgms;
+  const guns = Math.floor(perSide / 25);
+  const infantry = perSide - tanks - ifvs - atgms - guns;
   const cmds: Command[] = [];
   const add = (team: number, kind: number, count: number, x: number, y: number, r: number) => {
     if (count > 0)
@@ -93,6 +94,7 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
   add(0, KIND_IFV, ifvs, map.townX[0] - fx(100), map.townY[0], 40);
   add(0, KIND_INFANTRY, infantry, map.townX[0] - fx(120), map.townY[0], 40);
   add(0, KIND_ATGM, atgms, map.townX[0] - fx(135), map.townY[0], 40);
+  add(0, KIND_ARTILLERY, guns, map.townX[0] - fx(170), map.townY[0], 25);
   // Blue: half the force at the central town, a quarter at each village. Missile teams
   // get the first pick of the houses, riflemen the rest; armour waits behind.
   const share = [2, 1, 1];
@@ -118,6 +120,7 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
     }
     add(1, KIND_TANK, Math.floor((tanks * share[k]) / 4), x + fx(70), y, 30);
     add(1, KIND_IFV, Math.floor((ifvs * share[k]) / 4), x + fx(85), y, 30);
+    add(1, KIND_ARTILLERY, Math.floor((guns * share[k]) / 4), x + fx(120), y, 20);
   }
   return cmds;
 }

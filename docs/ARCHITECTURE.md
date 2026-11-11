@@ -86,13 +86,19 @@ move orders live in the world, shared by goal and class and built on first use.
 5. Steer: units free to fight close to weapon range and hold; plain move orders keep moving.
    Straight line if walkable, else the flowfield.
 6. Separate (soft collisions), fire (hitscan, damage accumulated, for units and for
-   structures), integrate (impassable ground is a hard wall units slide along), then resolve
+   structures; guns launch shells), land the shells due this tick, integrate (impassable ground is a hard wall units slide along), then resolve
    damage, deaths, wreck expiry and collapsing structures.
 7. Once a second: town capture, income, bridge repair.
 
 Garrisoned units stay in the unit arrays (they keep targeting and firing through the normal
 path) with `inside` set to their building; they do not move or collide. Range is the
 weapon's plus a bonus for height difference (and for firing from a building).
+
+Indirect fire: guns skip the normal target search and pick among enemies whose `spotted`
+tick is in the future (set by any enemy unit that has them as a target in sight, and by
+their own firing). `launch` puts a shell into a small pool in the world (where and when it
+lands, who fired it); `resolveShells` applies area damage through the collision grid on
+the tick it lands. Shells are sim state and part of the hash.
 
 Unit types live in `src/sim/units.ts` as a table of integers (health, speed, range, reload,
 movement class, damage per target type, armour by facing, seats). A damage of zero against
@@ -108,7 +114,7 @@ the vehicle after `integrate`.
 ## Commands
 
 `src/sim/commands.ts` defines the only inputs to the sim: move, attack-move, stop, spawn,
-garrison a building, shell a structure, mount carriers, dismount. A
+garrison a building, shell a structure, mount carriers, dismount, bombard a point. A
 command holds integers only; float-to-fixed conversion happens once on the client before
 sending. In single player a command applies on the next tick. In lockstep multiplayer the
 same commands get scheduled a few ticks ahead and broadcast; the sim does not change.
@@ -130,6 +136,7 @@ Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwis
   thin out as the squad loses health.
 - **Effects** (`src/client/effects.ts`): pooled camera-facing sprites (additive fire, blended
   smoke) and stretched tracer quads, three draw calls in all, fed by sim events.
+- **Scars** (`src/client/scars.ts`): craters and burn marks, permanent, one draw call.
 - **Light**: hemisphere sky light plus one sun with a shadow map that follows the camera
   focus. ACES tone mapping.
 

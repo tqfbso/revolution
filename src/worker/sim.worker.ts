@@ -19,6 +19,7 @@ import { CAPTURE_POINTS } from '../sim/units';
 import {
   INFO_CARRIED,
   INFO_INSIDE,
+  INFO_SPOTTED,
   INFO_REVEALED,
   INFO_TEAM_SHIFT,
   NO_AIM,
@@ -94,6 +95,7 @@ function postSnapshot(w: World, simMs: number): void {
       (w.team[i] << INFO_TEAM_SHIFT) |
       (w.inside[i] >= 0 ? INFO_INSIDE : 0) |
       (w.carrier[i] >= 0 ? INFO_CARRIED : 0) |
+      (w.spotted[i] > w.tick ? INFO_SPOTTED : 0) |
       (w.reveal[i] > w.tick ? INFO_REVEALED : 0);
     hp[i] = Math.ceil((w.hp[i] * 255) / KINDS[kind].hp);
     aim[i] = w.attack[i] === NO_TARGET ? NO_AIM : w.attack[i];

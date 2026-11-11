@@ -330,6 +330,74 @@ export class Effects {
     );
   }
 
+  /** A howitzer firing: a big flash, a rolling cloud of smoke and dust, the shell going up. */
+  howitzer(x: number, y: number, z: number, ux: number, uz: number): void {
+    this.emit(ADDITIVE, x, y, z, ux * 3, 2, uz * 3, 0.14, 2.6, 4.6, 1, 0.8, 0.45, 1);
+    for (let k = 0; k < 6; k++) {
+      const v = 3 + k * 2;
+      this.emit(
+        SMOKE,
+        x,
+        y,
+        z,
+        ux * v + rnd(1),
+        1.5 + rnd(0.6),
+        uz * v + rnd(1),
+        2.6 + Math.random(),
+        1.2,
+        4.6,
+        0.62,
+        0.6,
+        0.56,
+        0.42,
+      );
+    }
+    this.emit(SMOKE, x - ux * 2, y - 1, z - uz * 2, 0, 0.3, 0, 2.4, 2.5, 8, 0.5, 0.46, 0.38, 0.2);
+    this.tracer(x, y, z, x + ux * 60, y + 34, z + uz * 60, 0.3, 0.2, 0.8);
+  }
+
+  /** A shell landing: a flash, a fountain of earth, splinters, a slow cloud of dust. */
+  shellImpact(x: number, y: number, z: number): void {
+    this.emit(ADDITIVE, x, y + 0.6, z, 0, 0, 0, 0.13, 2.4, 5.5, 1, 0.82, 0.5, 1);
+    for (let k = 0; k < 7; k++) {
+      this.emit(
+        SMOKE,
+        x + rnd(0.8),
+        y + 0.4,
+        z + rnd(0.8),
+        rnd(2.5),
+        5 + Math.random() * 7,
+        rnd(2.5),
+        1.6 + Math.random(),
+        1.1,
+        4.2,
+        0.25,
+        0.2,
+        0.15,
+        0.7,
+      );
+    }
+    for (let k = 0; k < 10; k++) {
+      this.emit(
+        ADDITIVE,
+        x,
+        y + 0.5,
+        z,
+        rnd(14),
+        5 + Math.random() * 9,
+        rnd(14),
+        0.5,
+        0.16,
+        0.04,
+        1,
+        0.7,
+        0.4,
+        1,
+      );
+    }
+    this.emit(SMOKE, x, y + 0.3, z, 0, 0.5, 0, 3, 2.5, 9, 0.4, 0.35, 0.28, 0.16);
+  }
+
   /** A burst from an autocannon: three fat tracers and small bursts where they land. */
   autocannon(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): void {
     this.emit(ADDITIVE, x0, y0, z0, 0, 0, 0, 0.06, 0.6, 1.0, 1, 0.8, 0.45, 1);

@@ -10,10 +10,11 @@ import { Terrain } from './client/terrain';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
+import { Scars } from './client/scars';
 import { StructureView } from './client/structures';
 import { UnitView } from './client/units';
 import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
-import { KINDS, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from './sim/units';
+import { KINDS, KIND_ARTILLERY, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from './sim/units';
 
 const SKY = 0x9db4c4;
 
@@ -87,7 +88,8 @@ async function start(): Promise<void> {
   const terrain = new Terrain(map, fog, shadows);
   const effects = new Effects();
   const structures = new StructureView(map, terrain, fog, effects, shadows);
-  const units = new UnitView(terrain, effects, fog, shadows, structures);
+  const scars = new Scars(fog, terrain);
+  const units = new UnitView(terrain, effects, fog, shadows, structures, scars);
   units.lodNear *= lodScale;
   units.lodFar *= lodScale;
   const rts = new RtsCamera(canvas, terrain);
@@ -127,6 +129,7 @@ async function start(): Promise<void> {
     terrain.water,
     terrain.trees,
     structures.group,
+    scars.mesh,
     units.group,
     effects.group,
     input.marker,
@@ -172,10 +175,11 @@ async function start(): Promise<void> {
     for (let team = 0; team < 2; team++) {
       const dir = team === 0 ? -1 : 1;
       const mix: [number, number, number][] = [
-        [KIND_TANK, 200, 150],
+        [KIND_TANK, 190, 150],
         [KIND_IFV, 80, 165],
-        [KIND_INFANTRY, 160, 180],
-        [KIND_ATGM, 60, 190],
+        [KIND_INFANTRY, 150, 180],
+        [KIND_ATGM, 55, 190],
+        [KIND_ARTILLERY, 25, 230],
       ];
       for (const [kind, count, back] of mix) {
         send({

@@ -256,3 +256,41 @@ carrier keeps its squads aboard and drives through. If the carrier is killed loa
 squad aboard loses half its strength. Two squads per vehicle is a game number, not a real
 one: with one squad per vehicle a mechanised army would need as many carriers as squads
 and the screen would be all vehicles.
+
+## 029 Artillery kills what stands still and is soft; it only suppresses armour
+
+The self-propelled gun reaches 110 units (a tank gun 26), cannot hit anything closer than
+25, and fires a shell every six seconds. A shell flies for 1.5 seconds plus one per 40
+units, lands within 1.5 units plus 1/32 of the range of where it was aimed, and hurts
+everything within 5 units, friend or foe, half as much at the rim as in the middle. Against
+armour the radius is a third of that: splinters do nothing to a tank, a near-direct hit
+does 50. The first balance run had shells doing blast damage to tanks and a battery wiped
+out a tank regiment queuing at a crossing in a minute; real artillery does not do that and
+it made every other weapon pointless. Walls keep three quarters off a garrison, but a
+shell landing on a building does twice the damage of a tank round to the building itself,
+so guns are the second answer to a held town (decision 022) and they can cut bridges.
+Guns fire standing still, never chase, and have two modes: by themselves at spotted
+targets (other guns first, then what is not moving, then the nearest; never at a target
+with friendly troops within 9 units), or on order at a point on the ground or a building
+(Ctrl + right click), seen or not, until told to stop. On order there is no safety check:
+shelling your own men is possible. Shells in flight are part of the sim state.
+
+## 030 Being seen is a state of the unit, and firing a gun sets it
+
+Indirect fire needed the sim to know what an army has located, not just what each unit is
+aiming at. Every unit carries `spotted`: the tick until which its enemies know where it
+is. It is set for 1.5 seconds whenever an enemy unit has it as a target in sight, and for
+12 seconds on a gun each time it fires (sound ranging and radar, abstracted). That second
+rule is counter-battery: a battery that fires is shelled by every enemy gun in range
+within seconds unless it moves, and one that moved is lost again after 12 seconds. The
+client draws spotted enemies through the fog. One value per unit, not one per pair of
+armies: in a three-way game what one enemy spots the other also knows. Accepted for now;
+a per-army bit mask is the fix if three-way games become real. Recon units and drones
+(next part) only have to set the same state.
+
+## 031 Craters and burn marks stay for the whole game, on the client only
+
+Each shell leaves a crater and each destroyed vehicle a scorched patch: soft-edged discs
+in one instanced draw call, 4000 of them, oldest reused. They are presentation: no cover
+and no movement cost in the sim. Shell holes as infantry cover would be right for the
+setting but costs a terrain rewrite per shell; it can come back with the polish milestone.

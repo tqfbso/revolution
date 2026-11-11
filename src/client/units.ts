@@ -1,10 +1,20 @@
 import * as THREE from 'three/webgpu';
 import { attribute, mix, vec3 } from 'three/tsl';
-import { KINDS, KIND_ATGM, KIND_COUNT, KIND_IFV, KIND_INFANTRY, KIND_TANK } from '../sim/units';
+import {
+  KINDS,
+  KIND_ARTILLERY,
+  KIND_ATGM,
+  KIND_COUNT,
+  KIND_IFV,
+  KIND_INFANTRY,
+  KIND_TANK,
+} from '../sim/units';
 import { CLASS_VEHICLE } from '../sim/map';
 import {
   EV_COLLAPSE,
   EV_DEATH,
+  EV_IMPACT,
+  EV_LAUNCH,
   EV_SHOT,
   EV_SIEGE,
   EV_UNLOAD,
@@ -12,11 +22,14 @@ import {
   STATE_ALIVE,
   STATE_FREE,
   TICK_MS,
+  unpackX,
+  unpackY,
 } from '../sim/world';
 import {
   INFO_CARRIED,
   INFO_INSIDE,
   INFO_REVEALED,
+  INFO_SPOTTED,
   INFO_STATE_MASK,
   INFO_TEAM_MASK,
   INFO_TEAM_SHIFT,
@@ -29,6 +42,7 @@ import type { Fog } from './fog';
 import {
   SQUAD_OFFSETS,
   TEAM_OFFSETS,
+  buildArtillery,
   buildIfv,
   buildInfantry,
   buildLauncher,
@@ -36,6 +50,7 @@ import {
   type VehicleModel,
 } from './models';
 import type { StructureView } from './structures';
+import type { Scars } from './scars';
 import type { Terrain } from './terrain';
 
 // Marking colours (linear RGB): red, blue, gold. Hulls stay in service paint.
@@ -126,6 +141,7 @@ export class UnitView {
     private readonly fog: Fog,
     shadows: boolean,
     private readonly structures: StructureView,
+    private readonly scars: Scars,
   ) {
     const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.82, metalness: 0.08 });
     const tint = attribute('aTint', 'vec4');
@@ -150,6 +166,7 @@ export class UnitView {
     });
     this.vehicles[KIND_TANK] = vehicle(buildTank(), MAX_UNITS);
     this.vehicles[KIND_IFV] = vehicle(buildIfv(), MAX_UNITS >> 1);
+    this.vehicles[KIND_ARTILLERY] = vehicle(buildArtillery(), MAX_UNITS >> 2);
     const infantry = buildInfantry();
     const soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * 5, lod));
     this.squads[KIND_INFANTRY] = {
@@ -191,6 +208,7 @@ export class UnitView {
       this.info.fill(0);
       this.diedAt.fill(-1e9);
       this.fog.reset();
+      this.scars.clear();
     }
     const curr = this.curr;
     const prev = this.prev;
@@ -254,6 +272,32 @@ export class UnitView {
         continue;
       }
       if (ev[e] === EV_UNLOAD) continue;
+      if (ev[e] === EV_IMPACT) {
+        // A shell lands. The crater stays whether or not anyone saw it fall.
+        const x = unpackX(a);
+        const z = unpackY(a);
+        this.scars.add(x, z, 1.2 + Math.random() * 0.9, false);
+        if (this.fog.sees(x, z)) fx.shellImpact(x, this.terrain.heightAt(x, z), z);
+        continue;
+      }
+      if (ev[e] === EV_LAUNCH) {
+        this.shotAt[a] = seconds;
+        if (this.lodOf[a] === LOD_HIDDEN) continue;
+        const m = this.vehicles[this.kind[a]]?.model;
+        const d = Math.hypot(unpackX(b) - pos[3 * a], unpackY(b) - pos[3 * a + 2]) || 1;
+        const ux = (unpackX(b) - pos[3 * a]) / d;
+        const uz = (unpackY(b) - pos[3 * a + 2]) / d;
+        this.turret[a] = Math.atan2(ux, uz);
+        fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
+        fx.howitzer(
+          pos[3 * a] + ux * (m?.muzzleZ ?? 2),
+          pos[3 * a + 1] + (m ? m.turretY + m.muzzleY : 1.5),
+          pos[3 * a + 2] + uz * (m?.muzzleZ ?? 2),
+          ux,
+          uz,
+        );
+        continue;
+      }
       const veh = this.vehicles[this.kind[a]];
       const ax = pos[3 * a];
       const ay = pos[3 * a + 1];
@@ -280,6 +324,7 @@ export class UnitView {
         this.shoot(a, ax, ay, az, pos[3 * b], by, pos[3 * b + 2]);
       } else if (ev[e] === EV_DEATH) {
         this.diedAt[a] = seconds;
+        if (veh) this.scars.add(ax, az, 2.3, true);
         if (near === LOD_HIDDEN) continue;
         if (veh) fx.explosion(ax, ay, az);
         else fx.squadHit(ax, ay, az);
@@ -437,7 +482,9 @@ export class UnitView {
       }
       // Fog of war: enemies show only where the player can see, wrecks where they have been.
       if (teamId !== this.playerTeam || !alive) {
-        if (alive ? !this.fog.sees(x, z) : !this.fog.hasExplored(x, z)) {
+        // A unit the army has located (a gun that fired, say) shows through the fog.
+        const located = (info[i] & INFO_SPOTTED) !== 0;
+        if (alive ? !located && !this.fog.sees(x, z) : !this.fog.hasExplored(x, z)) {
           this.lodOf[i] = LOD_HIDDEN;
           continue;
         }
