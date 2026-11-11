@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
+import { generateMap } from './sim/map';
 import { MAP_SIZE, MAX_UNITS } from './sim/world';
 import { RtsCamera } from './client/camera';
 import { Hud } from './client/hud';
@@ -42,7 +43,17 @@ async function start(): Promise<void> {
   const scenario: Scenario = params.get('scenario') === 'roam' ? 'roam' : 'battle';
 
   const { renderer, canvas, backend } = await createRenderer(params.get('renderer') === 'webgl');
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Render scale adapts to load: if frames run slow for a couple of seconds the resolution
+  // steps down, and it steps back up after a long smooth stretch. `?scale=fixed` pins it.
+  const maxRatio = Math.min(window.devicePixelRatio, 2);
+  const minRatio = Math.max(0.75, maxRatio / 2);
+  const adaptScale = params.get('scale') !== 'fixed' && maxRatio > minRatio;
+  let ratio = maxRatio;
+  let slowSeconds = 0;
+  let smoothSeconds = 0;
+  let windowMs = 0;
+  let windowFrames = 0;
+  renderer.setPixelRatio(ratio);
 
   const shadows = params.get('shadows') !== '0';
   const lodScale = Math.min(Math.max(Number(params.get('lod') ?? 1) || 1, 0.25), 4);
@@ -63,8 +74,8 @@ async function start(): Promise<void> {
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
 
-  const terrain = new Terrain();
-  terrain.mesh.receiveShadow = shadows;
+  // The same generator the sim worker runs: both derive the map from the seed.
+  const terrain = new Terrain(generateMap(seed), shadows);
   const effects = new Effects();
   const units = new UnitView(terrain, effects, shadows);
   units.lodNear *= lodScale;
@@ -87,7 +98,7 @@ async function start(): Promise<void> {
   post({ type: 'init', seed, units: unitCount, scenario });
 
   const input = new Input(canvas, rts.camera, terrain, units, send);
-  scene.add(terrain.mesh, units.group, effects.group, input.marker);
+  scene.add(terrain.mesh, terrain.water, terrain.trees, units.group, effects.group, input.marker);
 
   // Reinforcements: 250 tanks and 250 infantry squads per side, attacking toward the centre.
   document.getElementById('add-units')?.addEventListener('click', () => {
@@ -153,6 +164,23 @@ async function start(): Promise<void> {
     hud.stats.culled = units.stats.culled;
     hud.stats.particles = effects.count;
     hud.frame(dtMs);
+    windowMs += dtMs;
+    windowFrames++;
+    if (adaptScale && windowMs >= 1000) {
+      const avg = windowMs / windowFrames;
+      windowMs = windowFrames = 0;
+      slowSeconds = avg > 19.5 ? slowSeconds + 1 : 0;
+      smoothSeconds = avg < 17.5 ? smoothSeconds + 1 : 0;
+      let next = ratio;
+      if (slowSeconds >= 2) next = Math.max(minRatio, ratio - 0.25);
+      else if (smoothSeconds >= 12) next = Math.min(maxRatio, ratio + 0.25);
+      if (next !== ratio) {
+        ratio = next;
+        slowSeconds = smoothSeconds = 0;
+        renderer.setPixelRatio(ratio);
+        hud.stats.scale = ratio / maxRatio;
+      }
+    }
   });
 
   // Read by automated performance checks.

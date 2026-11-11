@@ -17,6 +17,8 @@ export interface PerfStats {
   culled: number;
   particles: number;
   backend: string;
+  /** Render resolution as a fraction of full (lowered automatically under load). */
+  scale: number;
   drawCalls: number;
   triangles: number;
   hash: string;
@@ -37,6 +39,7 @@ export class Hud {
     culled: 0,
     particles: 0,
     backend: '',
+    scale: 1,
     drawCalls: 0,
     triangles: 0,
     hash: '',
@@ -76,7 +79,7 @@ export class Hud {
       `Units      ${s.alive.reduce((a, b) => a + b, 0)} alive   selected ${s.selected}\n` +
       `Armies     red ${s.alive[0] ?? 0}   blue ${s.alive[1] ?? 0}   gold ${s.alive[2] ?? 0}\n` +
       `Detail     near ${s.lod[0]}  mid ${s.lod[1]}  far ${s.lod[2]}  off-screen ${s.culled}  fx ${s.particles}\n` +
-      `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris\n` +
+      `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris, scale ${(s.scale * 100).toFixed(0)}%\n` +
       `State hash ${s.hash}   build ${__BUILD__}`;
   }
 
