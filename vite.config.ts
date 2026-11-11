@@ -7,5 +7,6 @@ export default defineConfig({
   define: { __BUILD__: JSON.stringify((process.env.GITHUB_SHA ?? 'dev').slice(0, 7)) },
   build: { target: 'es2022', chunkSizeWarningLimit: 2000 },
   worker: { format: 'es' },
-  test: { include: ['tests/**/*.test.ts'] },
+  // Whole games are simulated in the tests; a shared CI runner needs more than the 5 s default.
+  test: { include: ['tests/**/*.test.ts'], testTimeout: 60000 },
 });
