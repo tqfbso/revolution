@@ -443,7 +443,24 @@ and the client adds each to its copy in the order the sim created it; ids, picki
 fog and the minimap then agree with no second code path. The price: the client's map can
 no longer be rewound, so Reset reloads the page.
 
-## 043 The AI is a player outside the simulation
+## 043 Right click moves or attacks; attack-move is A then click
+
+Fabio, 2026-11-11: units could not be told to attack a unit, and once they met the enemy
+they could not be pulled out, because the default right click was an attack-move that
+stops to fight whatever it meets. Now a right click on the ground is a plain move (units
+still fire on the way, they just keep going, so a fight can always be broken off), and a
+right click on a visible enemy unit is a new attack order: the units chase that unit,
+shoot it, and the order ends when it dies or is lost (followed up to three times further
+than the nearest enemy is looked for; the click itself tells the army where it is). Guns
+shell the spot the enemy stands on instead, units that cannot hurt it just move there.
+Attack-move is A then left click, or Alt + right click. Same for the minimap: right click
+moves, Alt + right click attack-moves.
+
+River check, same day: ground units cannot end up on water, cliff or buildings in any
+scenario we run (tests/orders.test.ts keeps watch); the only ways across are the fords and
+the bridges. Drones fly over by design.
+
+## 044 The AI is a player outside the simulation
 
 The opponent lives in `src/sim/ai.ts` but is not part of `step()`. Once a tick the worker
 asks it for commands and puts them on the same list as the player's; the sim cannot tell
@@ -455,7 +472,7 @@ runs it and gets the same commands. And it can be swapped, run twice (`?demo=1`)
 out (`?ai=off`) without touching the sim. Supersedes the "nobody commands blue" part of
 decision 041.
 
-## 044 The AI sees what its units see
+## 045 The AI sees what its units see
 
 It knows the map, including where both armies set up (so does anyone who has played
 once). Of the enemy it knows only units the sim marks as spotted, and units standing
@@ -467,7 +484,7 @@ empty is attacked early, one it has not seen is treated with respect. Difficulty
 tempo and judgement (how many trucks, how sure it wants to be before it attacks, whether
 it raids, whether it builds against what it saw), never its information or its income.
 
-## 045 The AI's army thinks in objectives, crossings and strong points
+## 046 The AI's army thinks in objectives, crossings and strong points
 
 Military units belong to town garrisons, scouts, a reserve, or one of two forces (the
 field army and a raiding party). A force has an objective (a town, an outlying depot, the
@@ -481,7 +498,7 @@ stays as the garrison. A beaten force remembers the strength that was not enough
 does not try that objective again with less. The strong-point list is the hook for
 fortifications (M8): walls and trenches go on the same list and the rest already works.
 
-## 046 An even start replaces the fortress opening
+## 047 An even start replaces the fortress opening
 
 Both armies now start with a headquarters, six trucks, twelve rifle squads, four carriers
 and two recon teams, and no town belongs to anyone. The fortress of decision 041 was a
@@ -490,7 +507,7 @@ economy would decide the game before it starts. The AI builds its fortress itsel
 its first infantry goes into the houses of its three settlements, which also takes them.
 `?scenario=assault` keeps the attack on a held bank.
 
-## 047 Units shell enemy base buildings unasked
+## 048 Units shell enemy base buildings unasked
 
 A unit with siege damage and no enemy unit to shoot at fires on the nearest enemy base
 building it can reach and see. Before this a base was only shelled on an explicit order,

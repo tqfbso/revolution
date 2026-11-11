@@ -26,6 +26,8 @@ export const FLAG_BOMBARD = 128;
 export const FLAG_SMOKE = 256;
 /** Hold position: shoot what comes into range, never leave the spot to chase. */
 export const FLAG_HOLD = 512;
+/** Ordered to attack the unit `orderUnit`: chase it and shoot it until it is gone. */
+export const FLAG_FOCUS = 1024;
 /** Cells that can hold smoke at once. */
 export const MAX_SMOKE = 4096;
 

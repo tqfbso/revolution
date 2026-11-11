@@ -147,7 +147,7 @@ All of it is covered by the state hash.
 
 ## The AI (`src/sim/ai.ts`)
 
-A player made of code (decision 043): `aiThink(ai, world, out)` appends commands, the
+A player made of code (decision 044): `aiThink(ai, world, out)` appends commands, the
 worker calls it before every `step()`. Its work is spread over the second: on one tick it
 looks (`perceive`) and runs `economy` and `production`, half a period later it looks
 again and runs `military`. A think costs about 0.02 ms per tick on average.

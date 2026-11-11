@@ -107,7 +107,7 @@ Done:
 
 - An opponent that plays the economy: trucks on sites, depots at new sites, production,
   technology. It is a player, not a script: it gives the same commands you do and sees
-  only what its units see (`src/sim/ai.ts`, decisions 043 to 047)
+  only what its units see (`src/sim/ai.ts`, decisions 044 to 048)
 - Scouting, an army built against what it has seen of yours, town garrisons in the houses
   that face the crossing, a reserve that answers alarms, raids on trucks
 - A field army that picks an objective and the crossing to reach it by (it goes round a

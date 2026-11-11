@@ -1,4 +1,5 @@
 import {
+  CMD_ATTACK,
   CMD_ATTACK_MOVE,
   CMD_BOMBARD,
   CMD_ATTACK_STRUCTURE,
@@ -89,6 +90,7 @@ import {
   FLAG_BOMBARD,
   FLAG_DIRECT,
   FLAG_GARRISON,
+  FLAG_FOCUS,
   FLAG_HOLD,
   FLAG_MOVING,
   FLAG_SIEGE,
@@ -139,6 +141,8 @@ const COARSE_DIM = MAP_SIZE >> 4;
 const COARSE_CELLS = COARSE_DIM * COARSE_DIM;
 const ACQUIRE_CELLS = 3;
 const ACQUIRE_RANGE_SQ = ACQUIRE_RANGE * ACQUIRE_RANGE;
+/** An ordered target is followed much further than the nearest enemy is looked for. */
+const FOCUS_RANGE_SQ = ACQUIRE_RANGE_SQ * 9;
 const CONCEAL_RANGE_SQ = CONCEAL_RANGE * CONCEAL_RANGE;
 // Units without a target look for one every 4 ticks; everyone re-evaluates every 16 so a
 // closer threat replaces a distant one. Staggered by id so the work is spread evenly.
@@ -347,6 +351,27 @@ function applyCommand(w: World, cmd: Command): void {
       }
       break;
     }
+    case CMD_ATTACK: {
+      const t = cmd.target;
+      if (!Number.isInteger(t) || t < 0 || t >= w.count || w.state[t] !== STATE_ALIVE) break;
+      if (w.inside[t] >= 0 || w.carrier[t] >= 0) break;
+      const units = validUnits(w, cmd.units);
+      for (let k = 0; k < units.length; k++) {
+        const id = units[k];
+        const kind = w.kind[id];
+        if (w.team[id] === w.team[t] || !ARMED[kind] || KINDS[kind].indirect) continue;
+        if (KINDS[kind].damage[w.kind[t]] === 0) continue;
+        leaveBuilding(w, id);
+        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS & ~(FLAG_MOVING | FLAG_DIRECT)) | FLAG_FOCUS;
+        w.orderUnit[id] = t;
+        w.attack[id] = t;
+        w.los[id] = 0;
+        w.path[id] = -1;
+        // The player saw it to click it: the army knows where it is, even beyond its own sight.
+        w.spotted[t] = w.tick + SPOT_TICKS;
+      }
+      break;
+    }
     case CMD_HOLD: {
       const units = validUnits(w, cmd.units);
       for (let k = 0; k < units.length; k++) w.flags[units[k]] = FLAG_HOLD;
@@ -379,7 +404,8 @@ const ORDER_FLAGS =
   FLAG_BOARD |
   FLAG_BOMBARD |
   FLAG_SMOKE |
-  FLAG_HOLD;
+  FLAG_HOLD |
+  FLAG_FOCUS;
 
 /**
  * Send each squad to the nearest carrier of its own army that still has a seat free,
@@ -1008,6 +1034,8 @@ function acquireTargets(w: World): void {
     }
     const x = w.posX[i];
     const y = w.posY[i];
+    const focus = (w.flags[i] & FLAG_FOCUS) !== 0;
+    if (focus) w.attack[i] = w.orderUnit[i];
     const t = w.attack[i];
     const phase = tick + i;
     const dmgTable = KINDS[ki].damage;
@@ -1029,7 +1057,7 @@ function acquireTargets(w: World): void {
       targetKey = d2 + PRIORITY[ki * KIND_COUNT + w.kind[t]];
       // Seen with its own eyes, or known because someone else has it in sight.
       const mine = d2 <= sight2 && (d2 <= CONCEAL_RANGE_SQ || !concealed(w, t));
-      valid = d2 <= ACQUIRE_RANGE_SQ && (mine || w.spotted[t] > tick);
+      valid = d2 <= (focus ? FOCUS_RANGE_SQ : ACQUIRE_RANGE_SQ) && (mine || w.spotted[t] > tick);
       if (valid && (phase & SIGHT_RECHECK_MASK) === 0) {
         const tz = eyeZ[t];
         w.los[i] =
@@ -1040,6 +1068,14 @@ function acquireTargets(w: World): void {
             : 0;
         if (mine && w.los[i] === 1) w.spotted[t] = tick + SPOT_TICKS;
       }
+    }
+    if (focus) {
+      // An ordered target is kept while it lives and is known; lose it and the order ends.
+      if (valid) continue;
+      w.flags[i] &= ~FLAG_FOCUS;
+      w.orderUnit[i] = -1;
+      w.attack[i] = NO_TARGET;
+      w.los[i] = 0;
     }
     // A unit whose last look found enemies near but none in sight looks again at the slow
     // rate: scanning a crowd it cannot see four times as often would buy nothing.
@@ -1493,7 +1529,7 @@ function fire(w: World): void {
     }
     const t = w.attack[i];
     if (t === NO_TARGET || w.los[i] === 0) {
-      // Nothing to shoot at: an enemy base building in range will do (see decision 044).
+      // Nothing to shoot at: an enemy base building in range will do (see decision 048).
       if (kind.siege > 0 && ((w.tick + i) & 7) === 0 && w.stance[i] !== STANCE_HOLD_FIRE) {
         const s = baseInRange(w, i, kind.range);
         if (s >= 0) {

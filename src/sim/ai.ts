@@ -1,5 +1,5 @@
 // The skirmish opponent. It is a player, not a part of the simulation: it reads the world
-// and answers with the same commands a human gives (see decision 043), so everything it
+// and answers with the same commands a human gives (see decision 044), so everything it
 // does a human could do, and in multiplayer every client can run it and stay in step.
 //
 // It knows what a player knows: the map, its own army, and of the enemy only what its
