@@ -59,6 +59,12 @@ export class Fog {
     return texture(this.texture, positionWorld.xz.div(MAP_SIZE)).r;
   }
 
+  /** Seconds, set by whoever calls update: smoke is timed against it. */
+  clock = 0;
+  /** Per cell, the time until which smoke stands there. */
+  private smoke = new Float32Array(CELLS);
+  private smokeEnd = 0;
+
   /** Take the lie of the land from the map: heights, forest. Buildings come via setWall. */
   setMap(map: GameMap): void {
     let sum = 0;
@@ -73,12 +79,31 @@ export class Fog {
     this.plain = sum / CELLS;
   }
 
+  /** Smoke stands around world point (x, z), `cells` cells wide each way, until `until`. */
+  addSmoke(x: number, z: number, cells: number, until: number): void {
+    const N = MAP_CELLS;
+    const cx = x >> 2;
+    const cy = z >> 2;
+    for (let dy = -cells; dy <= cells; dy++) {
+      for (let dx = -cells; dx <= cells; dx++) {
+        if (dx * dx + dy * dy > cells * cells + 1) continue;
+        const gx = cx + dx;
+        const gy = cy + dy;
+        if (gx < 0 || gy < 0 || gx >= N || gy >= N) continue;
+        this.smoke[gy * N + gx] = until;
+      }
+    }
+    if (until > this.smokeEnd) this.smokeEnd = until;
+  }
+
   /** A building went up or came down in this cell. */
   setWall(cell: number, standing: boolean): void {
     this.block[cell] = standing ? SEE_WALL : 0;
   }
 
   reset(): void {
+    this.smoke.fill(0);
+    this.smokeEnd = 0;
     if (this.enabled) this.explored.fill(0);
   }
 
@@ -165,7 +190,13 @@ export class Fog {
     const y1 = Math.min(N - 1, cy + r);
     for (let y = y0; y <= y1; y++) {
       const half = Math.floor(Math.sqrt(r * r - (y - cy) * (y - cy)));
-      this.visible.fill(1, y * N + Math.max(0, cx - half), y * N + Math.min(N - 1, cx + half) + 1);
+      const a = y * N + Math.max(0, cx - half);
+      const b = y * N + Math.min(N - 1, cx + half) + 1;
+      this.visible.fill(1, a, b);
+      // Smoke hides what is under it, from above too.
+      if (this.smokeEnd > this.clock) {
+        for (let c = a; c < b; c++) if (this.smoke[c] > this.clock) this.visible[c] = 0;
+      }
     }
   }
 
@@ -175,6 +206,8 @@ export class Fog {
     const block = this.block;
     const ground = this.ground;
     const from = cy * N + cx;
+    const smoke = this.smoke;
+    const clock = this.clock;
     visible[from] = 1;
     // On a roof when looking out of a building; a longer view from high ground.
     const eye = ground[from] + EYE + (block[from] === SEE_WALL ? 2 : 0);
@@ -185,6 +218,7 @@ export class Fog {
       const dy = this.rayY[r];
       let slope = -1e9;
       let forest = block[from] === SEE_FOREST ? 1 : 0;
+      let haze = 0;
       for (let d = 1; d <= reach; d++) {
         const x = Math.floor(cx + 0.5 + dx * d);
         const y = Math.floor(cy + 0.5 + dy * d);
@@ -197,6 +231,7 @@ export class Fog {
         const what = block[c];
         if (what === SEE_WALL) break;
         if (what === SEE_FOREST && ++forest > FOREST_SIGHT) break;
+        if (smoke[c] > clock && ++haze > 1) break;
       }
     }
   }

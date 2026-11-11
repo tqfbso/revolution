@@ -333,3 +333,23 @@ seconds each time (it becomes spotted), so guns can shell it. The loop this make
 find and kill; air defence and jammers stop drones; the jammer shows itself by working;
 guns kill the jammer; firing shows the guns. Rejected: jamming as a toggle the player
 manages (one more button, and the trade-off is already there in where the vehicle stands).
+
+## 034 Smoke belongs to the guns, and blinds both sides
+
+Smoke is how an attacker crosses open ground under missile teams, and without it the
+ford and the town are a shooting gallery for whoever sits still. It is a shell type for
+the artillery (F: one smoke shell per selected gun at the pointer), not a button on every
+tank: that keeps it a planned act with a flight time, gives the guns a second job, and a
+battery lays a wall while a single gun lays a puff. A shell fills the cells within two
+cells of where it lands for 30 seconds. More than one cell of smoke stops every line of
+sight, for both sides, and whatever stands in smoke cannot be seen from outside it at
+all, drones overhead included, so it is also the cheap answer to being watched from the
+air. Shells and jamming ignore it. Smoke cells are sim state (in the map, with a list in
+the world for the hash). Rejected: smoke that only hides its owner (not how smoke works,
+and no decision in it), and vehicle smoke launchers (a panic button per unit, for M9 if
+at all).
+
+Hold position (H) is the one stance in M5: the unit shoots what comes into range and
+never leaves its spot to chase. It is what missile teams in a wood and tanks behind a
+crest need, and it ends with the next move order. Other stances and a priority UI wait
+for the command card in M6; target priority itself is automatic (decision 032's table).

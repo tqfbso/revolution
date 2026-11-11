@@ -108,7 +108,10 @@ Indirect fire: guns skip the normal target search and pick among enemies whose `
 tick is in the future (set by any enemy unit that has them as a target in sight, and by
 their own firing). `launch` puts a shell into a small pool in the world (where and when it
 lands, who fired it); `resolveShells` applies area damage through the collision grid on
-the tick it lands. Shells are sim state and part of the hash.
+the tick it lands. Shells are sim state and part of the hash. A smoke shell instead stamps
+`map.smoke` (per cell, the tick until which smoke stands there) around its impact;
+`lineOfSight` gives up after two half-cell steps of smoke and `concealed` hides whatever
+stands in it. The world keeps the list of smoked cells for the hash.
 
 Unit types live in `src/sim/units.ts` as a table of integers (health, speed, range, reload,
 movement class, damage per target type, armour by facing, seats). A damage of zero against

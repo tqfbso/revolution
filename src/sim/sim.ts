@@ -3,6 +3,7 @@ import {
   CMD_BOMBARD,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
+  CMD_HOLD,
   CMD_LOAD,
   CMD_MOVE,
   CMD_SPAWN,
@@ -64,6 +65,8 @@ import {
   SCATTER_SHIFT,
   SHELL_BASE_TICKS,
   SHELL_TICKS_SHIFT,
+  SMOKE_CELLS,
+  SMOKE_TICKS,
   SPOT_TICKS,
   TOWN_INCOME,
 } from './units';
@@ -77,19 +80,23 @@ import {
   EV_REPAIR,
   EV_SHOT,
   EV_SIEGE,
+  EV_SMOKE,
   EV_UNLOAD,
   FLAG_AMOVE,
   FLAG_BOARD,
   FLAG_BOMBARD,
   FLAG_DIRECT,
   FLAG_GARRISON,
+  FLAG_HOLD,
   FLAG_MOVING,
   FLAG_SIEGE,
+  FLAG_SMOKE,
   FLAG_WANDER,
   MAP_SIZE,
   MAP_SIZE_FX,
   MAX_FIELDS,
   MAX_SHELLS,
+  MAX_SMOKE,
   MAX_TEAMS,
   MAX_UNITS,
   NO_TARGET,
@@ -201,6 +208,7 @@ const CHASE_LIMIT = 300;
 
 /** Advance the world by exactly one tick, applying `commands` first, in order. */
 export function step(w: World, commands: readonly Command[]): void {
+  w.map.now = w.tick;
   for (let c = 0; c < commands.length; c++) applyCommand(w, commands[c]);
   updateWander(w);
   bucket(w, CELL_SHIFT, GRID_DIM, cellStart, sorted);
@@ -219,7 +227,10 @@ export function step(w: World, commands: readonly Command[]): void {
   integrate(w);
   resolveDamage(w);
   resolveStructures(w);
-  if (w.tick % TOWN_PERIOD === 0) updateTowns(w);
+  if (w.tick % TOWN_PERIOD === 0) {
+    updateTowns(w);
+    clearSmoke(w);
+  }
   if (topologyChanged) {
     // The ground changed: every route computed so far may run through a wall or off a bridge.
     topologyChanged = false;
@@ -298,8 +309,13 @@ function applyCommand(w: World, cmd: Command): void {
       routeUnits(w, units, x, y);
       for (let k = 0; k < units.length; k++) {
         const id = units[k];
-        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | FLAG_BOMBARD;
+        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | FLAG_BOMBARD | (cmd.smoke ? FLAG_SMOKE : 0);
       }
+      break;
+    }
+    case CMD_HOLD: {
+      const units = validUnits(w, cmd.units);
+      for (let k = 0; k < units.length; k++) w.flags[units[k]] = FLAG_HOLD;
       break;
     }
     case CMD_STOP: {
@@ -322,7 +338,14 @@ function applyCommand(w: World, cmd: Command): void {
 }
 
 const ORDER_FLAGS =
-  FLAG_WANDER | FLAG_AMOVE | FLAG_GARRISON | FLAG_SIEGE | FLAG_BOARD | FLAG_BOMBARD;
+  FLAG_WANDER |
+  FLAG_AMOVE |
+  FLAG_GARRISON |
+  FLAG_SIEGE |
+  FLAG_BOARD |
+  FLAG_BOMBARD |
+  FLAG_SMOKE |
+  FLAG_HOLD;
 
 /**
  * Send each squad to the nearest carrier of its own army that still has a seat free,
@@ -1186,7 +1209,7 @@ function dangerClose(w: World, x: number, y: number, team: number): boolean {
 const ARMOUR_BLAST = (r: number) => Math.trunc(r / 3);
 
 /** Fire a shell from gun `i` at a point `dist` away. It lands later, and not exactly there. */
-function launch(w: World, i: number, tx: number, ty: number, dist: number): void {
+function launch(w: World, i: number, tx: number, ty: number, dist: number, smoke: boolean): void {
   const scatter = SCATTER_MIN + (dist >> SCATTER_SHIFT);
   const x = clampInt(tx - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
   const y = clampInt(ty - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
@@ -1199,7 +1222,42 @@ function launch(w: World, i: number, tx: number, ty: number, dist: number): void
   w.shTick[k] = w.tick + SHELL_BASE_TICKS + (dist >> SHELL_TICKS_SHIFT);
   w.shOwner[k] = i;
   w.shKind[k] = w.kind[i];
+  w.shSmoke[k] = smoke ? 1 : 0;
   w.events.push(EV_LAUNCH, i, packPoint(x, y));
+}
+
+/** A smoke shell bursts: the cells around the point are filled for SMOKE_TICKS. */
+function layGroundSmoke(w: World, x: number, y: number): void {
+  const smoke = w.map.smoke;
+  const cx = x >> CELL_SHIFT;
+  const cy = y >> CELL_SHIFT;
+  const until = w.tick + SMOKE_TICKS;
+  for (let dy = -SMOKE_CELLS; dy <= SMOKE_CELLS; dy++) {
+    for (let dx = -SMOKE_CELLS; dx <= SMOKE_CELLS; dx++) {
+      const gx = cx + dx;
+      const gy = cy + dy;
+      if (dx * dx + dy * dy > SMOKE_CELLS * SMOKE_CELLS + 1) continue;
+      if (gx < 0 || gy < 0 || gx >= GRID_DIM || gy >= GRID_DIM) continue;
+      const c = gy * GRID_DIM + gx;
+      if (smoke[c] <= w.tick) {
+        if (w.smokeCount >= MAX_SMOKE) continue;
+        w.smokeCells[w.smokeCount++] = c;
+      }
+      smoke[c] = until;
+    }
+  }
+  w.events.push(EV_SMOKE, packPoint(x, y), SMOKE_TICKS);
+}
+
+/** Forget the cells whose smoke has blown away. */
+function clearSmoke(w: World): void {
+  const smoke = w.map.smoke;
+  let n = 0;
+  for (let k = 0; k < w.smokeCount; k++) {
+    const c = w.smokeCells[k];
+    if (smoke[c] > w.tick) w.smokeCells[n++] = c;
+  }
+  w.smokeCount = n;
 }
 
 /**
@@ -1224,6 +1282,13 @@ function resolveShells(w: World): void {
     w.shTick[k] = w.shTick[last];
     w.shOwner[k] = w.shOwner[last];
     w.shKind[k] = w.shKind[last];
+    if (w.shSmoke[k] !== 0) {
+      // (This is the smoke flag of the shell just landed: slot k is only overwritten below.)
+      w.shSmoke[k] = w.shSmoke[last];
+      layGroundSmoke(w, x, y);
+      continue;
+    }
+    w.shSmoke[k] = w.shSmoke[last];
     w.events.push(EV_IMPACT, packPoint(x, y), 0);
     const cell = cellOfPos(x, y);
     const type = map.type[cell];
@@ -1271,6 +1336,7 @@ function concealed(w: World, j: number): boolean {
   if (w.inside[j] >= 0) return w.reveal[j] <= w.tick;
   if (IS_AIR[w.kind[j]]) return false;
   if (KINDS[w.kind[j]].stealth) return true;
+  if (w.map.smoke[cellOfPos(w.posX[j], w.posY[j])] > w.tick) return true;
   const t = w.map.type[cellOfPos(w.posX[j], w.posY[j])];
   return t === T_FOREST || (t === T_RUBBLE && KIND_CLASS[w.kind[j]] === CLASS_FOOT);
 }
@@ -1305,7 +1371,9 @@ function fire(w: World): void {
       const dy = ty - w.posY[i];
       const d2 = dx * dx + dy * dy;
       if (d2 > kind.range * kind.range || d2 < kind.minRange * kind.minRange) continue;
-      launch(w, i, tx, ty, isqrt(d2));
+      launch(w, i, tx, ty, isqrt(d2), (flags & FLAG_SMOKE) !== 0);
+      // A smoke mission is one shell per gun.
+      if ((flags & FLAG_SMOKE) !== 0) w.flags[i] = 0;
       continue;
     }
     if ((w.flags[i] & FLAG_SIEGE) !== 0) {
@@ -1584,7 +1652,7 @@ function steer(w: World): void {
       const dy = w.posY[t] - y;
       const d2 = dx * dx + dy * dy;
       const range = rangeTo(w, i, t);
-      if (d2 <= range * range && w.los[i] !== 0) {
+      if ((d2 <= range * range && w.los[i] !== 0) || (flags & FLAG_HOLD) !== 0) {
         busy = true;
       } else if (clearLine(map, cls, x, y, w.posX[t], w.posY[t])) {
         const dist = isqrt(d2);

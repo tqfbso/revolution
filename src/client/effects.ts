@@ -356,6 +356,27 @@ export class Effects {
     this.tracer(x, y, z, x + ux * 60, y + 34, z + uz * 60, 0.3, 0.2, 0.8);
   }
 
+  /** One billow of a standing smoke screen. Call it a few times a second while it stands. */
+  smokeScreen(x: number, y: number, z: number): void {
+    const g = 0.5 + Math.random() * 0.12;
+    this.emit(
+      SMOKE,
+      x + rnd(7),
+      y + 1.5 + Math.random() * 2,
+      z + rnd(7),
+      rnd(0.5),
+      0.35 + Math.random() * 0.4,
+      rnd(0.5),
+      5 + Math.random() * 2,
+      6,
+      11,
+      g,
+      g,
+      g * 0.98,
+      0.6,
+    );
+  }
+
   /** A shell landing: a flash, a fountain of earth, splinters, a slow cloud of dust. */
   shellImpact(x: number, y: number, z: number): void {
     this.emit(ADDITIVE, x, y + 0.6, z, 0, 0, 0, 0.13, 2.4, 5.5, 1, 0.82, 0.5, 1);

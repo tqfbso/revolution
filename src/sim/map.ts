@@ -88,6 +88,12 @@ export interface GameMap {
   cost: Uint8Array[];
   /** Per class and cell: the nearest passable cell (itself when passable). */
   snap: Int32Array[];
+  /**
+   * Smoke: per cell, the tick until which it stands there, and the current tick (kept here
+   * by the sim so that lineOfSight can tell). Smoke more than a cell deep stops the eye.
+   */
+  smoke: Int32Array;
+  now: number;
   hash: number;
 }
 
@@ -251,6 +257,8 @@ function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     townName: [],
     cost: [],
     snap: [],
+    smoke: new Int32Array(CELL_COUNT),
+    now: 0,
     hash: 0,
   };
 }
@@ -490,6 +498,8 @@ export function heightAt(map: GameMap, x: number, y: number): number {
   return top + (((bottom - top) * fyq) >> CELL_SHIFT);
 }
 
+/** How many half-cell steps of smoke a line of sight can pass through. */
+const SMOKE_SIGHT_STEPS = 2;
 /** How many half-cell steps of forest a line of sight can pass through. */
 const FOREST_SIGHT_STEPS = 6;
 
@@ -518,6 +528,9 @@ export function lineOfSight(
   const h = map.heights;
   const dz = z1 - z0;
   let forest = 0;
+  let haze = 0;
+  const smoke = map.smoke;
+  const now = map.now;
   for (let k = 1; k < steps; k++) {
     const x = x0 + Math.trunc((dx * k) / steps);
     const y = y0 + Math.trunc((dy * k) / steps);
@@ -531,6 +544,7 @@ export function lineOfSight(
       continue;
     }
     if (t === T_FOREST && ++forest > FOREST_SIGHT_STEPS) return false;
+    if (smoke[c] > now && ++haze > SMOKE_SIGHT_STEPS) return false;
     // Ground is checked once per cell (every other step); walls and trees every step.
     if ((k & 1) !== 0 || t === T_BRIDGE) continue;
     const v = cy * MAP_VERTS + cx;

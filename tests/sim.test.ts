@@ -4,6 +4,7 @@ import {
   CMD_ATTACK_STRUCTURE,
   CMD_BOMBARD,
   CMD_GARRISON,
+  CMD_HOLD,
   CMD_LOAD,
   CMD_MOVE,
   CMD_SPAWN,
@@ -55,6 +56,8 @@ import {
   EV_REPAIR,
   EV_SHOT,
   EV_SIEGE,
+  EV_SMOKE,
+  FLAG_HOLD,
   FLAG_MOVING,
   MAP_SIZE_FX,
   MAX_UNITS,
@@ -62,6 +65,8 @@ import {
   STATE_FREE,
   STATE_WRECK,
   createWorld,
+  unpackX,
+  unpackY,
   hashWorld,
   type World,
 } from '../src/sim/world';
@@ -125,6 +130,8 @@ function script(tick: number): Command[] {
       return [
         { type: CMD_LOAD, units, carriers: units },
         { type: CMD_BOMBARD, units: units.slice(300, 360), x: fx(520), y: fx(500) },
+        { type: CMD_BOMBARD, units: units.slice(360, 420), x: fx(500), y: fx(470), smoke: true },
+        { type: CMD_HOLD, units: units.slice(700, 800) },
       ];
     }
     if (tick === 330) return [{ type: CMD_ATTACK_MOVE, units, x: fx(600), y: fx(430) }];
@@ -193,7 +200,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 1981250771;
+const GOLDEN = 3239546112;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -975,5 +982,91 @@ describe('combined arms', () => {
     expect(Math.abs(w.posY[drone] - y0)).toBeLessThan(fx(40));
     for (let t = 0; t < 200; t++) step(w, []);
     expect(w.townOwner[1]).not.toBe(0);
+  });
+});
+
+describe('smoke and hold position', () => {
+  const flat = () => createWorld(1, flatMap());
+  const lone = (w: World, team: number, kind: number, x: number, y: number) => {
+    const id = w.count;
+    step(w, [
+      { type: CMD_SPAWN, count: 1, team, kind, x: fx(x), y: fx(y), radius: 1, wander: false },
+    ]);
+    w.posX[id] = fx(x);
+    w.posY[id] = fx(y);
+    return id;
+  };
+
+  it('a smoke shell blinds both sides until it blows away, and is one shell per gun', () => {
+    const w = flat();
+    const gun = lone(w, 0, KIND_ARTILLERY, 400, 500);
+    step(w, [{ type: CMD_BOMBARD, units: [gun], x: fx(500), y: fx(500), smoke: true }]);
+    let at = -1;
+    for (let t = 0; t < 400 && at < 0; t++) {
+      step(w, []);
+      for (let e = 0; e < w.events.length; e += 3) {
+        if (w.events[e] === EV_SMOKE) at = w.events[e + 1];
+        expect(w.events[e]).not.toBe(EV_IMPACT);
+      }
+    }
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(w.smokeCount).toBeGreaterThan(8);
+    expect(w.flags[gun]).toBe(0);
+    const x = Math.round(unpackX(at));
+    const y = Math.round(unpackY(at));
+    // Two tanks well within range of each other, the smoke between them.
+    const red = lone(w, 0, KIND_TANK, x - 12, y);
+    const blue = lone(w, 1, KIND_TANK, x + 12, y);
+    for (let t = 0; t < 100; t++) step(w, []);
+    expect(w.attack[red]).toBe(-1);
+    expect(w.attack[blue]).toBe(-1);
+    expect(w.hp[red]).toBe(KINDS[KIND_TANK].hp);
+    expect(w.shellCount).toBe(0);
+    for (let t = 0; t < 700; t++) step(w, []);
+    expect(w.smokeCount).toBe(0);
+    expect(w.hp[red] < KINDS[KIND_TANK].hp || w.hp[blue] < KINDS[KIND_TANK].hp).toBe(true);
+  });
+
+  it('smoke hides what stands in it from a drone overhead', () => {
+    const w = flat();
+    const gun = lone(w, 0, KIND_ARTILLERY, 400, 500);
+    step(w, [{ type: CMD_BOMBARD, units: [gun], x: fx(500), y: fx(500), smoke: true }]);
+    let at = -1;
+    for (let t = 0; t < 400 && at < 0; t++) {
+      step(w, []);
+      for (let e = 0; e < w.events.length; e += 3) {
+        if (w.events[e] === EV_SMOKE) at = w.events[e + 1];
+      }
+    }
+    const x = Math.round(unpackX(at));
+    const y = Math.round(unpackY(at));
+    const hidden = lone(w, 0, KIND_TANK, x, y);
+    lone(w, 1, KIND_STRIKE, x + 20, y);
+    for (let t = 0; t < 60; t++) step(w, []);
+    expect(w.hp[hidden]).toBe(KINDS[KIND_TANK].hp);
+  });
+
+  it('a unit told to hold does not leave its spot to chase, and still shoots what comes', () => {
+    const run = (hold: boolean) => {
+      const w = flat();
+      const red = lone(w, 0, KIND_TANK, 400, 500);
+      const blue = lone(w, 1, KIND_TANK, 429, 500);
+      if (hold) step(w, [{ type: CMD_HOLD, units: [red, blue] }]);
+      for (let t = 0; t < 100; t++) step(w, []);
+      return { w, red, blue };
+    };
+    const held = run(true);
+    expect(held.w.flags[held.red] & FLAG_HOLD).toBe(FLAG_HOLD);
+    expect(held.w.posX[held.red]).toBe(fx(400));
+    expect(held.w.posX[held.blue]).toBe(fx(429));
+    expect(held.w.hp[held.blue]).toBe(KINDS[KIND_TANK].hp);
+    const free = run(false);
+    expect(free.w.posX[free.red]).not.toBe(fx(400));
+    // An enemy that walks into range is shot from the spot.
+    const w = held.w;
+    step(w, [{ type: CMD_MOVE, units: [held.blue], x: fx(410), y: fx(500) }]);
+    for (let t = 0; t < 200; t++) step(w, []);
+    expect(w.posX[held.red]).toBe(fx(400));
+    expect(w.state[held.blue] !== 1 || w.hp[held.blue] < KINDS[KIND_TANK].hp).toBe(true);
   });
 });
