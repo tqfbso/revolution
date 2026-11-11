@@ -145,6 +145,29 @@ never disconnect the map. Production advances the first queue entry one tick at 
 spawns the unit south of the building (`spawnUnit`), unless the army is at its unit limit.
 All of it is covered by the state hash.
 
+## The AI (`src/sim/ai.ts`)
+
+A player made of code (decision 044): `aiThink(ai, world, out)` appends commands, the
+worker calls it before every `step()`. Its work is spread over the second: on one tick it
+looks (`perceive`) and runs `economy` and `production`, half a period later it looks
+again and runs `military`. A think costs about 0.02 ms per tick on average.
+
+- `perceive`: sorts its own units by job; marks which 16-unit squares it has eyes on;
+  lists the enemies in sight; updates the threat memory, the houses known to be held and
+  the enemy base buildings found
+- `economy`: trucks to sites (wells first, a cap per site, off sites under fire), a depot
+  at the next stockpile and well when the ones in reach are full, the next building from
+  a short priority list, technology, repairs. It saves for the next building or tier
+  (`resS`, `resF`, `resC`) except under attack
+- `production`: the wanted army as weights per unit type, from the tier and from the
+  enemy types seen; each idle building gets the type furthest below its share
+- `military`: `enlist` gives new units a job; `garrisons` puts town troops into houses;
+  `scouting` runs recon posts and drone rounds; `runReserve` answers the worst alarm;
+  `runForce` drives the field army and the raiders through march, assault and retreat
+
+`tools/aimatch.ts` plays AI against AI without a browser and prints a line a minute; it is
+the way to test a change to the AI or to prices (a 40-minute game takes a few seconds).
+
 ## Commands
 
 `src/sim/commands.ts` defines the only inputs to the sim: move, attack-move, stop, spawn,

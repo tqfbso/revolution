@@ -82,7 +82,7 @@ income (M6), and roads as terrain (not needed: the bridges already make the fast
 - Persistent battlefield scars: craters, scorch marks
 
 Moved out of M5: stances beyond hold position and a target-priority UI (M6, with the
-command card), shell holes as cover and missiles with flight time (M9), and nobody
+command card), shell holes as cover and missiles with flight time (M10), and nobody
 commands blue yet, so it uses none of this with intent (M7).
 
 ## M6 Economy and base (done)
@@ -99,24 +99,56 @@ commands blue yet, so it uses none of this with intent (M7).
 
 Moved out of M6: blue's base buildings are visible from the start (M7, with an enemy that
 builds); a target-priority screen (dropped, see
-decision 040); hotkeys for production and a build menu (M9).
+decision 040); hotkeys for production and a build menu (M10).
 
-## M7 Skirmish AI
+## M7 Skirmish AI (in progress)
 
-- An opponent that plays the economy: trucks on sites, depots, production, technology
-- Build orders, scouting, army composition, attack and defence timing; garrisons that
-  react (reinforce a town under attack, counter-attack a lost one)
-- Units that defend themselves and the base without orders (today a base building is only
-  shelled on an explicit order)
+Done:
+
+- An opponent that plays the economy: trucks on sites, depots at new sites, production,
+  technology. It is a player, not a script: it gives the same commands you do and sees
+  only what its units see (`src/sim/ai.ts`, decisions 044 to 048)
+- Scouting, an army built against what it has seen of yours, town garrisons in the houses
+  that face the crossing, a reserve that answers alarms, raids on trucks
+- A field army that picks an objective and the crossing to reach it by (it goes round a
+  held bridge town rather than through it), shells the houses you hold before it goes
+  in, breaks off when beaten and comes back with more
+- Three difficulty levels (`?ai=easy|normal|hard`) that differ in tempo and judgement,
+  not in free resources. `?demo=1` shows the AI playing itself
+- The skirmish starts even: nobody holds a town, blue builds its own fortress
+- Units shell an enemy base building in range without being told to
+
+Still to do:
+
 - Enemy base buildings hidden until scouted
-- Difficulty levels, and a first balance pass on prices now that both sides pay them
+- A choice of difficulty on screen
+- A first balance pass on prices now that both sides pay them
 
-## M8 Factions
+## M8 Fortifications
+
+Fabio, 2026-11-11: "Would be great to be able to build around the city, like walls, barbed
+wire etc." The fortress so far is whatever houses happen to stand at a crossing; this
+milestone lets a player (and the AI) make one.
+
+- Field works built by trucks or infantry on open ground and in the streets of a town:
+  walls and barricades (block movement and sight, must be shelled or breached), barbed
+  wire (stops infantry dead, slows nothing with tracks), trenches and sandbag positions
+  (cover in the open, as a house gives it), tank obstacles (stop vehicles, not men)
+- Gates, so a wall does not shut its builder in; pathfinding that treats a wall as an
+  obstacle a breach can open
+- Breaching: engineers, tank guns and artillery against each kind of obstacle
+- The AI fortifies the towns it holds and the fords it watches, and assaults yours. It
+  was built for this: its assault already works through a list of strong points to reduce
+  before the infantry goes in (`strongPoints` in `src/sim/ai.ts`), which today holds
+  occupied houses and base buildings and will hold field works too
+- Minefields are a candidate; decide when the rest is playable
+
+## M9 Factions
 
 - Three asymmetric factions with distinct units and tech
 - Original names, per-faction equipment and paint, audio
 
-## M9 Polish for v1
+## M10 Polish for v1
 
 - Authored or CC0 models and textures replacing procedural ones, animation, sky and terrain
   materials, sound

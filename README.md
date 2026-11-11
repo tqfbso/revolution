@@ -5,9 +5,11 @@ as fortresses. Work in progress.
 
 **Play the latest build:** https://tqfbso.github.io/revolution/
 
-The page opens on a battle: two armies of tanks and infantry squads attack each other.
-URL options: `?units=6000` army size in total, `?seed=7` a different battle,
-`?scenario=roam` three roaming armies instead, `?shadows=0` no shadows, `?lod=0.5` drop
+The page opens on a skirmish: you (red) and the AI (blue) each start with a headquarters,
+six trucks and a patrol. URL options: `?ai=easy`, `?ai=hard` or `?ai=off` (the default is
+normal), `?demo=1` to watch the AI play both sides, `?speed=4` to run the game faster,
+`?seed=7` a different map, `?scenario=assault` the old attack on a held town (`clash` and
+`roam` are stress tests, sized with `?units=6000`), `?shadows=0` no shadows, `?lod=0.5` drop
 detail sooner (or `2` to keep it longer), `?renderer=webgl` force the WebGL2 fallback.
 
 ## Controls
