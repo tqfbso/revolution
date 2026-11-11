@@ -34,10 +34,15 @@ import { assaultCommands, battleCommands, stressTestCommands } from '../src/sim/
 import {
   COUNTER_BATTERY_TICKS,
   KINDS,
+  KIND_AD,
   KIND_ARTILLERY,
   KIND_ATGM,
+  KIND_DRONE,
+  KIND_EW,
   KIND_IFV,
   KIND_INFANTRY,
+  KIND_RECON,
+  KIND_STRIKE,
   KIND_TANK,
 } from '../src/sim/units';
 import { step } from '../src/sim/sim';
@@ -108,6 +113,10 @@ function script(tick: number): Command[] {
       at(KIND_ATGM, 30, 1),
       at(KIND_ARTILLERY, 20, 0),
       at(KIND_ARTILLERY, 20, 1),
+      ...[KIND_RECON, KIND_DRONE, KIND_STRIKE, KIND_AD, KIND_EW].flatMap((k) => [
+        at(k, 12, 0),
+        at(k, 12, 1),
+      ]),
     ];
   }
   if (tick === 130 || tick === 330 || tick === 360) {
@@ -184,7 +193,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 1543136662;
+const GOLDEN = 1981250771;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -850,5 +859,121 @@ describe('combined arms', () => {
     for (const g of guns) expect(w.posX[g]).toBeLessThan(fx(415));
     for (let t = 0; t < 40; t++) step(w, []);
     expect(w.flags[guns[0]]).toBe(0);
+  });
+
+  it('a hidden missile team is safe from a tank until a recon team finds it for the tank', () => {
+    const setup = (withRecon: boolean) => {
+      const m = flatMap();
+      m.type[cellOfPos(fx(522), fx(502))] = T_FOREST;
+      refreshPassability(m);
+      const w = createWorld(1, m);
+      const tank = lone(w, 0, KIND_TANK, 500, 502);
+      const team = lone(w, 1, KIND_ATGM, 522, 502);
+      if (withRecon) lone(w, 0, KIND_RECON, 502, 510);
+      for (let t = 0; t < 200; t++) {
+        w.cooldown[team] = 9999;
+        step(w, []);
+      }
+      return { w, tank, team };
+    };
+    const blind = setup(false);
+    expect(blind.w.attack[blind.tank]).toBe(-1);
+    expect(blind.w.hp[blind.team]).toBe(KINDS[KIND_ATGM].hp);
+    const seen = setup(true);
+    expect(seen.w.state[seen.team]).not.toBe(STATE_ALIVE);
+  });
+
+  it('a recon team is unarmed, sees far, and is itself only noticed from close by', () => {
+    const w = flat();
+    const recon = lone(w, 0, KIND_RECON, 500, 500);
+    const squad = lone(w, 1, KIND_INFANTRY, 560, 500);
+    step(w, [{ type: CMD_STOP, units: [squad] }]);
+    for (let t = 0; t < 40; t++) step(w, []);
+    // Sixty units away, on open ground: the team has the squad, the squad has nothing.
+    expect(w.spotted[squad]).toBeGreaterThan(w.tick);
+    expect(w.spotted[recon]).toBeLessThanOrEqual(w.tick);
+    expect(w.attack[recon]).toBe(-1);
+    w.posX[squad] = fx(520);
+    for (let t = 0; t < 60; t++) step(w, []);
+    expect(w.attack[squad]).toBe(-1);
+    w.posX[squad] = fx(510);
+    for (let t = 0; t < 300 && w.state[recon] === STATE_ALIVE; t++) step(w, []);
+    expect(w.state[recon]).not.toBe(STATE_ALIVE);
+  });
+
+  it('a drone sees over a town for the guns; under a jammer it is blind and the jammer is found', () => {
+    const setup = (jammer: boolean) => {
+      const m = flatMap();
+      addTown(m, fx(508), fx(500), fx(30), 'Test');
+      // A wall of houses between the gun line and the target.
+      for (let k = 0; k < 8; k++) addStructure(m, S_BUILDING, 120, 116 + 2 * k, 2, 2, 0, 3);
+      refreshPassability(m);
+      const w = createWorld(1, m);
+      const gun = lone(w, 0, KIND_ARTILLERY, 420, 500);
+      lone(w, 0, KIND_RECON, 470, 500);
+      const drone = lone(w, 0, KIND_DRONE, 470, 496);
+      const target = lone(w, 1, KIND_ATGM, 510, 500);
+      const ew = jammer ? lone(w, 1, KIND_EW, 505, 515) : -1;
+      for (let t = 0; t < 60; t++) step(w, []);
+      return { w, gun, drone, target, ew };
+    };
+    const clear = setup(false);
+    expect(clear.w.jammed[clear.drone]).toBe(0);
+    expect(clear.w.spotted[clear.target]).toBeGreaterThan(clear.w.tick);
+    expect(clear.w.attack[clear.gun]).toBe(clear.target);
+    const jam = setup(true);
+    expect(jam.w.jammed[jam.drone]).toBe(1);
+    expect(jam.w.spotted[jam.target]).toBeLessThanOrEqual(jam.w.tick);
+    // The jammer shows itself by jamming, and the gun turns on it.
+    expect(jam.w.spotted[jam.ew]).toBeGreaterThan(jam.w.tick);
+    expect(jam.w.attack[jam.gun]).toBe(jam.ew);
+  });
+
+  it('strike drones kill a tank that cannot shoot back, and die doing it', () => {
+    const w = flat();
+    const tank = lone(w, 1, KIND_TANK, 500, 500);
+    const a = lone(w, 0, KIND_STRIKE, 472, 500);
+    const b = lone(w, 0, KIND_STRIKE, 472, 506);
+    for (let t = 0; t < 200 && w.state[tank] === STATE_ALIVE; t++) step(w, []);
+    expect(w.state[tank]).toBe(STATE_WRECK);
+    expect(w.attack[tank]).toBe(-1);
+    step(w, []);
+    expect(w.state[a]).toBe(STATE_FREE);
+    expect(w.state[b]).toBe(STATE_FREE);
+  });
+
+  const swarm = (defender: number) => {
+    const w = flat();
+    const tank = lone(w, 1, KIND_TANK, 600, 500);
+    if (defender >= 0) lone(w, 1, defender, 596, 506);
+    lone(w, 0, KIND_RECON, 540, 500);
+    const drones: number[] = [];
+    for (let k = 0; k < 3; k++) drones.push(lone(w, 0, KIND_STRIKE, 500, 494 + 6 * k));
+    step(w, [{ type: CMD_ATTACK_MOVE, units: drones, x: fx(600), y: fx(500) }]);
+    for (let t = 0; t < 400; t++) step(w, []);
+    return { w, tank, lost: drones.filter((d) => w.state[d] !== STATE_ALIVE).length };
+  };
+
+  it('air defence shoots a small swarm down; a jammer drops it out of the sky', () => {
+    const open = swarm(-1);
+    expect(open.w.state[open.tank]).toBe(STATE_WRECK);
+    const guarded = swarm(KIND_AD);
+    expect(guarded.lost).toBe(3);
+    expect(guarded.w.hp[guarded.tank]).toBe(KINDS[KIND_TANK].hp);
+    const jammed = swarm(KIND_EW);
+    expect(jammed.lost).toBe(3);
+    expect(jammed.w.hp[jammed.tank]).toBe(KINDS[KIND_TANK].hp);
+  });
+
+  it('drones cross water and forest in a straight line and do not hold or contest ground', () => {
+    const w = createWorld(1);
+    const drone = lone(w, 0, KIND_DRONE, 300, 512);
+    step(w, [{ type: CMD_MOVE, units: [drone], x: w.map.townX[1], y: w.map.townY[1] }]);
+    const y0 = w.posY[drone];
+    for (let t = 0; t < 2000 && (w.flags[drone] & FLAG_MOVING) !== 0; t++) step(w, []);
+    expect(Math.abs(w.posX[drone] - w.map.townX[1])).toBeLessThan(fx(2));
+    expect(Math.abs(w.posY[drone] - y0)).toBeLessThan(fx(40));
+    for (let t = 0; t < 200; t++) step(w, []);
+    expect(w.townOwner[1]).not.toBe(0);
   });
 });

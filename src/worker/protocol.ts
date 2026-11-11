@@ -35,7 +35,7 @@ export interface Snapshot {
   kind: Uint8Array;
   /** Per unit: where the hull points, 0..255 for a full turn, 0 = +z, 64 = +x. */
   heading: Uint8Array;
-  /** Per unit: squads aboard. */
+  /** Per unit: squads aboard a carrier. For a drone: 1 while it is being jammed. */
   load: Uint8Array;
   /** Per unit: health as 0..255 of its maximum. */
   hp: Uint8Array;

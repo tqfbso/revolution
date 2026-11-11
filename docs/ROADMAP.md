@@ -68,7 +68,8 @@ income (M6), and roads as terrain (not needed: the bridges already make the fast
 ## M5 Combined arms (in progress)
 
 Done so far: armour facing, missile teams, carriers, artillery with counter-battery,
-craters and burn marks.
+craters and burn marks, sight per unit type with recon teams, recon and strike drones, air
+defence and jamming.
 
 - Spotting: a unit can fire at what any friendly unit sees. Recon teams see far and hide
   well; everything else is half blind without them

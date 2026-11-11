@@ -14,7 +14,19 @@ import { Scars } from './client/scars';
 import { StructureView } from './client/structures';
 import { UnitView } from './client/units';
 import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
-import { KINDS, KIND_ARTILLERY, KIND_ATGM, KIND_IFV, KIND_INFANTRY, KIND_TANK } from './sim/units';
+import {
+  KINDS,
+  KIND_AD,
+  KIND_ARTILLERY,
+  KIND_ATGM,
+  KIND_DRONE,
+  KIND_EW,
+  KIND_IFV,
+  KIND_INFANTRY,
+  KIND_RECON,
+  KIND_STRIKE,
+  KIND_TANK,
+} from './sim/units';
 
 const SKY = 0x9db4c4;
 
@@ -160,7 +172,7 @@ async function start(): Promise<void> {
     let aboard = 0;
     for (const id of units.selectedIds()) {
       n[units.kindOf(id)]++;
-      aboard += units.load[id];
+      if (KINDS[units.kindOf(id)].carry > 0) aboard += units.load[id];
     }
     const parts = KINDS.map((k, i) => (n[i] > 0 ? `${n[i]} ${k.name.toLowerCase()}` : '')).filter(
       (p) => p !== '',
@@ -175,11 +187,16 @@ async function start(): Promise<void> {
     for (let team = 0; team < 2; team++) {
       const dir = team === 0 ? -1 : 1;
       const mix: [number, number, number][] = [
-        [KIND_TANK, 190, 150],
+        [KIND_TANK, 180, 150],
         [KIND_IFV, 80, 165],
-        [KIND_INFANTRY, 150, 180],
+        [KIND_INFANTRY, 124, 180],
         [KIND_ATGM, 55, 190],
-        [KIND_ARTILLERY, 25, 230],
+        [KIND_ARTILLERY, 20, 230],
+        [KIND_RECON, 8, 150],
+        [KIND_DRONE, 8, 200],
+        [KIND_STRIKE, 24, 215],
+        [KIND_AD, 8, 170],
+        [KIND_EW, 3, 185],
       ];
       for (const [kind, count, back] of mix) {
         send({

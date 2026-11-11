@@ -294,3 +294,42 @@ Each shell leaves a crater and each destroyed vehicle a scorched patch: soft-edg
 in one instanced draw call, 4000 of them, oldest reused. They are presentation: no cover
 and no movement cost in the sim. Shell holes as infantry cover would be right for the
 setting but costs a terrain rewrite per shell; it can come back with the polish milestone.
+
+## 032 Units see less than they can shoot at; recon is what closes the gap
+
+Until now every unit noticed enemies at 44 units. Now each type has its own sight: tank
+30, carrier 32, rifle squad 36, missile team 38, gun 26, air defence 44, recon team 75,
+recon drone 55. A unit engages what it sees itself, or what the army has spotted (decision 030) within 44 units and in its line of fire. Concealment used to be absolute beyond 13
+units; now a concealed unit that someone has spotted can be shot by everyone who has a
+line to it. That is the job of the recon team: two unarmed men who see 75 units, find
+hidden troops from 24 instead of 13, and are themselves concealed everywhere, as if always
+in cover. A missile team in a wood is safe from a tank at 20 units until a recon team
+looks at it. Sensors (recon teams and drones) report everything in view twice a second;
+other units only report their own target, and only if they see it with their own eyes, so
+a unit kept alive in the reports only by other shooters drops out when the spotter dies.
+The fog of war on the client now uses the same sight per type. Cost: the scan has two
+more rejections per candidate; the battle tick went from 15.7 to 16.9 ms at 10000 units.
+
+## 033 Drones, and the two things that stop them
+
+Drones are units of a third movement class, air: they fly straight over water, forest
+and houses, are seen by and see everything in range without a line of sight (forest and
+buildings still conceal what is in them), do not collide with ground units, do not hold
+towns and are not hurt by shells. The recon drone (sight 55, unarmed) is the eye the guns
+need behind a town. The strike drone flies into the nearest vehicle or gun it knows about
+(men only if there is nothing else), does 170 to a tank regardless of facing, and is gone.
+Tanks, missile teams and guns cannot touch a drone; rifle squads and carriers do a little;
+the air-defence vehicle (range 40, a hit every 0.6 seconds, a strike drone dies to one) is
+the real answer and is useless against everything else. A swarm bigger than what the air
+defence can shoot on the way in gets through: that is intended.
+
+The jammer is the second answer and the signature piece. Every enemy drone within 45
+units of it has no link: a recon drone reports nothing (and on the client lifts no fog), a
+strike drone loses its target and one of its 12 health every 0.15 seconds, so it crashes
+after about 29 units of flight, short of the middle of the bubble. The bubble is drawn on
+the ground, amber for yours and red for the enemy's, and jammed drones flicker. The price:
+a jammer that is actually jamming something is located by its own emissions for five
+seconds each time (it becomes spotted), so guns can shell it. The loop this makes: drones
+find and kill; air defence and jammers stop drones; the jammer shows itself by working;
+guns kill the jammer; firing shows the guns. Rejected: jamming as a toggle the player
+manages (one more button, and the trade-off is already there in where the vehicle stands).
