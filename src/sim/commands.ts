@@ -43,6 +43,18 @@ export interface BombardCommand {
   smoke?: boolean;
 }
 
+export const CMD_ATTACK = 20;
+
+/**
+ * Units go after one enemy unit and keep shooting it until it dies or is lost to sight.
+ * A move order (or stop) ends it. Guns with indirect fire ignore it; use bombard.
+ */
+export interface AttackCommand {
+  type: typeof CMD_ATTACK;
+  units: number[];
+  target: number;
+}
+
 export const CMD_HOLD = 10;
 
 /** Stop and hold position: fight what comes into range, do not chase. A move order ends it. */
@@ -208,4 +220,5 @@ export type Command =
   | LoadCommand
   | UnloadCommand
   | BombardCommand
-  | HoldCommand;
+  | HoldCommand
+  | AttackCommand;
