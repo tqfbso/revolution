@@ -184,9 +184,9 @@ const price = (
 export const UNIT_PRICE: readonly UnitPrice[] = (() => {
   const t = new Array<UnitPrice>(KIND_COUNT);
   t[KIND_TRUCK] = price(B_HQ, 1, 60, 0, 0, 10);
-  t[KIND_INFANTRY] = price(B_BARRACKS, 1, 60, 0, 0, 10);
+  t[KIND_INFANTRY] = price(B_BARRACKS, 1, 80, 0, 0, 10);
   t[KIND_RECON] = price(B_BARRACKS, 1, 50, 0, 30, 12);
-  t[KIND_ATGM] = price(B_BARRACKS, 2, 90, 0, 20, 14);
+  t[KIND_ATGM] = price(B_BARRACKS, 2, 110, 0, 20, 14);
   t[KIND_IFV] = price(B_WORKS, 1, 130, 60, 0, 16);
   t[KIND_TANK] = price(B_WORKS, 2, 220, 100, 0, 22);
   t[KIND_AD] = price(B_WORKS, 2, 160, 60, 60, 18);

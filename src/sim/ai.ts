@@ -117,8 +117,12 @@ interface Tuning {
   /** No attack across the river before this tick, and none with less strength than this. */
   firstAttack: number;
   minArmy: number;
-  /** It breaks off when this many percent of the strength it set out with is left. */
+  /**
+   * It breaks off when this many percent of the strength it set out with is left, or when
+   * it is losing against more than `odds` tenths of its own strength.
+   */
   breakOff: number;
+  odds: number;
   /** First tick of raids on trucks and outlying depots (0 = never). */
   raids: number;
   /** Builds against what it has seen of the enemy. */
@@ -140,7 +144,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     ratio: 220,
     firstAttack: 14 * MINUTE,
     minArmy: 260,
-    breakOff: 50,
+    breakOff: 45,
+    odds: 20,
     raids: 0,
     counter: false,
     smoke: false,
@@ -152,10 +157,11 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     queue: 2,
     builders: 2,
     garrison: 4,
-    ratio: 150,
+    ratio: 170,
     firstAttack: 9 * MINUTE,
     minArmy: 240,
-    breakOff: 40,
+    breakOff: 45,
+    odds: 14,
     raids: 11 * MINUTE,
     counter: true,
     smoke: false,
@@ -167,10 +173,11 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     queue: 2,
     builders: 3,
     garrison: 5,
-    ratio: 125,
+    ratio: 150,
     firstAttack: 6 * MINUTE,
     minArmy: 220,
-    breakOff: 35,
+    breakOff: 45,
+    odds: 11,
     raids: 7 * MINUTE,
     counter: true,
     smoke: true,
@@ -195,6 +202,8 @@ const R_RESERVE = 0;
 const R_ARMY = 1;
 const R_RAID = 2;
 const R_SCOUT = 3;
+/** On the way from the reserve to the field army. */
+const R_JOIN = 4;
 /** Garrison of town t: R_TOWN + t. */
 const R_TOWN = 8;
 
@@ -229,6 +238,8 @@ interface Force {
   /** Thinks in a row without an enemy in sight at the objective. */
   quiet: number;
   smoked: boolean;
+  /** It has already changed its route once on this march. */
+  turned: boolean;
   /** Objectives taken on this outing. */
   done: number;
 }
@@ -293,6 +304,7 @@ export interface Ai {
   trucks: number[];
   fresh: number[];
   reserve: number[];
+  joining: number[];
   scouts: number[];
   garr: number[][];
   forces: [Force, Force];
@@ -339,6 +351,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     obj: null,
     quiet: 0,
     smoked: false,
+    turned: false,
     done: 0,
   });
   const ai: Ai = {
@@ -372,6 +385,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     trucks: [],
     fresh: [],
     reserve: [],
+    joining: [],
     scouts: [],
     garr: [],
     forces: [force(R_ARMY), force(R_RAID)],
@@ -627,6 +641,7 @@ function perceive(ai: Ai, w: World): void {
   ai.trucks.length = 0;
   ai.fresh.length = 0;
   ai.reserve.length = 0;
+  ai.joining.length = 0;
   ai.scouts.length = 0;
   ai.members[0].length = 0;
   ai.members[1].length = 0;
@@ -656,6 +671,7 @@ function perceive(ai: Ai, w: World): void {
     else if (role === R_ARMY) ai.members[0].push(i);
     else if (role === R_RAID) ai.members[1].push(i);
     else if (role === R_SCOUT) ai.scouts.push(i);
+    else if (role === R_JOIN) ai.joining.push(i);
     else if (role - R_TOWN < ai.garr.length) ai.garr[role - R_TOWN].push(i);
     else ai.role[i] = R_NONE;
   }
@@ -818,6 +834,7 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   const rising: number[] = [];
   const hurt: number[] = [];
   let researching = false;
+  let risingDepots = 0;
   let queuedTrucks = 0;
   let busy = true;
   for (let s = 0; s < map.structCount; s++) {
@@ -826,6 +843,7 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     count[type]++;
     if (!finished(w, s)) {
       rising.push(s);
+      if (type === B_DEPOT) risingDepots++;
       continue;
     }
     if (BUILDINGS[type].dropOff) drops.push(s);
@@ -980,7 +998,7 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   // Short of fuel with supplies to spare: the next well is worth a depot.
   const dry = count[B_WORKS] > 0 && w.fuel[team] < 150 && w.supplies[team] > 400;
   if (count[B_BARRACKS] === 0) type = B_BARRACKS;
-  else if (w.popCap[team] < POP_MAX && w.pop[team] + 10 >= w.popCap[team]) {
+  else if (w.popCap[team] < POP_MAX && w.pop[team] + 25 >= w.popCap[team] + 40 * risingDepots) {
     type = B_DEPOT;
     if (expand >= 0) atSite(expand);
     else px = hx - ai.fwd * 8;
@@ -999,7 +1017,9 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     type = 2 * count[B_WORKS] <= count[B_BARRACKS] && w.fuel[team] >= 250 ? B_WORKS : B_BARRACKS;
     if (w.tier[team] >= 3 && count[B_DRONES] < 2 && w.credits[team] > 500) type = B_DRONES;
   }
-  if (type >= 0 && rising.length === 0 && BUILDINGS[type].tier <= w.tier[team]) {
+  // One building at a time, except that a depot never waits for another building.
+  const free = type === B_DEPOT ? risingDepots === 0 : rising.length === risingDepots;
+  if (type >= 0 && free && BUILDINGS[type].tier <= w.tier[team]) {
     const b = BUILDINGS[type];
     if (canPay(w, team, b, s0, 0, 0)) {
       const plot = findPlot(w, type, px, py, 30);
@@ -1485,15 +1505,15 @@ function runReserve(ai: Ai, w: World, out: Command[]): void {
 }
 
 /**
- * The way from a point to an objective. On the same bank: straight there. Across the
- * river: by the crossing that costs least, counting the distance, the enemy known to
+ * The way points from a point to an objective. On the same bank there are none. Across
+ * the river: the two banks of the crossing that costs least, counting the distance, the enemy known to
  * stand on its far bank, and an enemy-held settlement in the way. So a defended bridge is
  * turned by a ford, not stormed, unless the bridge town is the objective itself.
  */
 function route(ai: Ai, w: World, x: number, y: number, obj: Objective, raid: boolean): number[] {
   const from = bankOf(ai, x, y);
   const to = bankOf(ai, obj.x, obj.y);
-  if (from === to || ai.crossings.length === 0) return [obj.x, obj.y];
+  if (from === to || ai.crossings.length === 0) return [];
   let best = -1;
   let bestCost = 0;
   for (let k = 0; k < ai.crossings.length; k++) {
@@ -1516,7 +1536,10 @@ function route(ai: Ai, w: World, x: number, y: number, obj: Objective, raid: boo
     }
   }
   const c = ai.crossings[best];
-  return [c.bankX[from], c.bankY[from], c.bankX[to], c.bankY[to], obj.x, obj.y];
+  // The way points end short of the objective: the last leg is the assault itself. A
+  // town that is its own bridgehead is assaulted straight from the near bank.
+  if (dist(c.bankX[to], c.bankY[to], obj.x, obj.y) < fx(60)) return [c.bankX[from], c.bankY[from]];
+  return [c.bankX[from], c.bankY[from], c.bankX[to], c.bankY[to]];
 }
 
 /**
@@ -1549,8 +1572,12 @@ function chooseObjective(ai: Ai, w: World, x: number, y: number, power: number):
     if (owner === ai.enemy) foeTowns++;
     if (owner === ai.team) continue;
     const mine = bankOf(ai, map.townX[t], map.townY[t]) === ai.side;
+    // A town the enemy holds has a garrison whether or not it has shown itself: troops in
+    // houses are seen only when they fire.
+    const hidden = owner === ai.enemy ? Math.min(260, 50 + 8 * minute) : 0;
     const need = Math.max(
       ai.grudge[t],
+      hidden,
       expect(ai, w, map.townX[t], map.townY[t], 3, mine ? 0 : Math.min(160, 8 * minute)),
     );
     let value = 100;
@@ -1607,13 +1634,18 @@ function raidTarget(ai: Ai, w: World): Objective | null {
 
 function setOut(ai: Ai, w: World, f: Force, units: number[], obj: Objective): void {
   const [cx, cy] = centre(w, units);
+  if (f.role === R_ARMY) {
+    const what = ['', 'the base', 'a depot'][obj.kind];
+    ai.plan = `attack ${obj.kind === OBJ_TOWN ? w.map.townName[obj.id] : what}`;
+  }
   f.obj = obj;
   f.wps = route(ai, w, cx, cy, obj, f.role === R_RAID);
   f.wp = 0;
-  f.state = F_MARCH;
+  f.state = f.wps.length > 0 ? F_MARCH : F_ASSAULT;
   f.since = w.tick;
   f.quiet = 0;
   f.smoked = false;
+  f.turned = false;
 }
 
 /** Break off. A beaten army remembers what it was beaten with, and comes back with more. */
@@ -1635,8 +1667,12 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
   const units = ai.members[which];
   const raid = which === 1;
   const tick = w.tick;
-  const map = w.map;
   const tune = ai.tune;
+  if (!raid && (f.state === F_IDLE || f.state === F_RETREAT) && ai.joining.length > 0) {
+    for (const i of ai.joining) ai.role[i] = R_RESERVE;
+    ai.reserve.push(...ai.joining);
+    ai.joining.length = 0;
+  }
   if (f.state === F_IDLE) {
     // Not while the base is under attack or the reserve has its hands full with an intruder.
     const al = ai.alarm;
@@ -1674,9 +1710,8 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
       f.done = 0;
       ai.lastAttack = tick;
       setOut(ai, w, f, units, obj);
-      ai.plan = `attack ${obj.kind === OBJ_TOWN ? map.townName[obj.id] : obj.kind === OBJ_BASE ? 'base' : 'depot'}`;
     }
-    marchOrders(ai, w, out, f, units, true);
+    if (f.wps.length > 0) marchOrders(ai, w, out, f, units, true);
     return;
   }
   if (units.length === 0) {
@@ -1708,6 +1743,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
   if (
     power * 100 < f.launch * tune.breakOff ||
     local > 2 * power + 40 ||
+    (local * 10 > power * tune.odds && power * 10 < f.launch * 9) ||
     (a !== null && a.base && a.threat * 2 > 3 * strength(w, ai.reserve) + 20)
   ) {
     retreat(ai, f, w, true);
@@ -1715,15 +1751,26 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
     ai.plan = raid ? 'raid breaks off' : 'army falls back';
     return;
   }
-  if (!raid && a === null) {
-    // Reinforcements: a reserve that has grown to a third of the army goes after it.
+  if (!raid) {
+    // Reinforcements: a reserve that has grown to a third of the army goes after it, once
+    // the army is where it is going (on the march they would only string it out). They
+    // count as part of it when they have caught up.
     const more = strength(w, ai.reserve);
-    if (more >= Math.max(100, Math.trunc(f.launch / 3))) {
-      for (const i of ai.reserve) ai.role[i] = R_ARMY;
-      units.push(...ai.reserve);
+    if (a === null && f.state === F_ASSAULT && more >= Math.max(100, Math.trunc(f.launch / 3))) {
+      for (const i of ai.reserve) ai.role[i] = R_JOIN;
+      order(out, CMD_ATTACK_MOVE, ai.reserve.slice(), cx, cy);
+      ai.joining.push(...ai.reserve);
       ai.reserve.length = 0;
-      f.launch += more;
     }
+    const lagging: number[] = [];
+    for (const i of ai.joining) {
+      if (dist(w.posX[i], w.posY[i], cx, cy) < fx(50)) {
+        ai.role[i] = R_ARMY;
+        units.push(i);
+        f.launch += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / KINDS[w.kind[i]].hp);
+      } else if ((w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET) lagging.push(i);
+    }
+    order(out, CMD_ATTACK_MOVE, lagging, cx, cy);
   }
   if (f.state === F_MARCH) {
     const tx = f.wps[2 * f.wp];
@@ -1735,15 +1782,32 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
       line++;
       if (dist(w.posX[i], w.posY[i], tx, ty) < fx(38)) there++;
     }
-    // Move on when most of the line has closed up: an army that arrives in a trickle
-    // is beaten in a trickle.
-    if (there * 10 >= line * 6 || tick - f.since > 90 * TICK_RATE) {
+    // Move on when half the line has closed up: an army that arrives in a trickle is
+    // beaten in a trickle.
+    if (there * 2 >= line || tick - f.since > 75 * TICK_RATE) {
       f.since = tick;
       if (2 * (f.wp + 1) >= f.wps.length) {
         f.state = F_ASSAULT;
         f.quiet = 0;
       } else {
-        f.wp++;
+        // On the near bank, about to cross. Look again: if the enemy now stands on the far
+        // bank in strength, take another crossing (once), or do not cross at all.
+        const nx = f.wps[2 * f.wp + 2];
+        const ny = f.wps[2 * f.wp + 3];
+        if (!raid && expect(ai, w, nx, ny, 2, 0) * 10 > power * 6) {
+          const again = f.turned ? f.wps : route(ai, w, cx, cy, f.obj!, false);
+          if (!f.turned && (again[0] !== f.wps[0] || again[1] !== f.wps[1])) {
+            f.turned = true;
+            f.wps = again;
+            f.wp = 0;
+            ai.plan = 'army takes another crossing';
+          } else {
+            retreat(ai, f, w, true);
+            order(out, CMD_MOVE, units, ai.stageX, ai.stageY);
+            ai.plan = 'army will not cross';
+            return;
+          }
+        } else f.wp++;
         marchOrders(ai, w, out, f, units, true);
         return;
       }
@@ -1925,7 +1989,7 @@ function assault(
     }
     f.launch = power;
     setOut(ai, w, f, units, next);
-    marchOrders(ai, w, out, f, units, true);
+    if (f.wps.length > 0) marchOrders(ai, w, out, f, units, true);
     return;
   }
   // Smoke in front of a defended town, once, before the line closes with it.

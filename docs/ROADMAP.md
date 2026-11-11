@@ -101,28 +101,29 @@ Moved out of M6: blue's base buildings are visible from the start (M7, with an e
 builds); a target-priority screen (dropped, see
 decision 040); hotkeys for production and a build menu (M10).
 
-## M7 Skirmish AI (in progress)
-
-Done:
+## M7 Skirmish AI (done)
 
 - An opponent that plays the economy: trucks on sites, depots at new sites, production,
   technology. It is a player, not a script: it gives the same commands you do and sees
-  only what its units see (`src/sim/ai.ts`, decisions 044 to 048)
+  only what its units see (`src/sim/ai.ts`, decisions 044 to 051)
 - Scouting, an army built against what it has seen of yours, town garrisons in the houses
   that face the crossing, a reserve that answers alarms, raids on trucks
 - A field army that picks an objective and the crossing to reach it by (it goes round a
-  held bridge town rather than through it), shells the houses you hold before it goes
-  in, breaks off when beaten and comes back with more
-- Three difficulty levels (`?ai=easy|normal|hard`) that differ in tempo and judgement,
-  not in free resources. `?demo=1` shows the AI playing itself
+  held bridge town rather than through it), looks at the far bank before it crosses,
+  shells the houses you hold before it goes in, feeds new units into a fight, breaks off
+  when beaten and comes back with more
+- Three difficulty levels, chosen on screen (or `?ai=easy|normal|hard|off`), that differ
+  in tempo and judgement, not in free resources. `?demo=1` shows the AI playing itself
 - The skirmish starts even: nobody holds a town, blue builds its own fortress
 - Units shell an enemy base building in range without being told to
+- Enemy base buildings are unknown until one of your units sees them
+- A first balance pass: each unit beats something and fears something for equal money
+  (`tools/matchups.ts`)
 
-Still to do:
-
-- Enemy base buildings hidden until scouted
-- A choice of difficulty on screen
-- A first balance pass on prices now that both sides pay them
+Known weak spots, to revisit with play feedback: which side of the map you start on
+matters more than it should in AI against AI games; the AI does not yet use carriers to
+move infantry or smoke to cover an assault on easy and normal; game length is untested
+by a human.
 
 ## M8 Fortifications
 

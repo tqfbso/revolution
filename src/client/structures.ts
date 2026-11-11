@@ -498,6 +498,10 @@ export class StructureView {
   readonly baseType = new Uint8Array(MAX_STRUCTS);
   readonly basePct = new Uint8Array(MAX_STRUCTS);
   bases: Int32Array = new Int32Array(0);
+  /** Enemy base buildings stay off the map until one of your units has laid eyes on them. */
+  private readonly found = new Uint8Array(MAX_STRUCTS);
+  /** Show every base building from the start (spectating, commanding both armies). */
+  revealAll = false;
   /** What is left at each resource site. */
   readonly siteStock = new Int32Array(MAX_SITES).fill(1);
   private readonly siteMeshes: THREE.Mesh[] = [];
@@ -664,6 +668,7 @@ export class StructureView {
       const hp = s.structHp[k];
       if (hp === 0 && this.hp[k] !== 0) this.fellAt[k] = seconds;
       this.hp[k] = hp;
+      if (this.hidden(k) && !this.spot(k)) continue;
       const rising = this.baseTeam[k] >= 0 && this.basePct[k] < 100;
       this.show(
         k,
@@ -687,6 +692,25 @@ export class StructureView {
     this.townCapturer = s.townCapturer;
     this.townProgress = s.townProgress;
     this.credits = s.credits;
+  }
+
+  /** An enemy base building the player has not seen yet: not drawn, not on the minimap. */
+  hidden(s: number): boolean {
+    return this.baseTeam[s] > 0 && this.found[s] === 0 && !this.revealAll;
+  }
+
+  /** Has the player a unit looking at any part of this building right now? */
+  private spot(s: number): boolean {
+    const m = this.map;
+    for (let j = m.sY[s]; j < m.sY[s] + m.sH[s]; j++) {
+      for (let i = m.sX[s]; i < m.sX[s] + m.sW[s]; i++) {
+        if (this.fog.sees(i * CELL + CELL / 2, j * CELL + CELL / 2)) {
+          this.found[s] = 1;
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /** A shell hitting a wall, and a structure coming down. */
@@ -722,7 +746,7 @@ export class StructureView {
       const j = Math.floor(z / CELL);
       if (i < 0 || j < 0 || i >= MAP_CELLS || j >= MAP_CELLS) continue;
       const s = m.structAt[j * MAP_CELLS + i];
-      if (s < 0 || this.hp[s] === 0) continue;
+      if (s < 0 || this.hp[s] === 0 || this.hidden(s)) continue;
       if (origin.y + dir.y * t <= this.topOf(s) + 0.2) return s;
     }
     return -1;
@@ -734,6 +758,7 @@ export class StructureView {
     const pips = this.pips;
     pips.n = 0;
     for (let s = 0; s < m.structCount; s++) {
+      if (this.hidden(s)) continue;
       if (this.hp[s] === 0) {
         // Ruins smoulder for a while.
         const age = seconds - this.fellAt[s];
