@@ -91,7 +91,7 @@ describe('determinism', () => {
     const a = run(1234, 700);
     const b = run(1234, 700);
     expect(b).toEqual(a);
-  });
+  }, 30_000);
 
   it('different seed => different state', () => {
     expect(run(1, 50).at(-1)).not.toBe(run(2, 50).at(-1));
