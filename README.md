@@ -5,8 +5,10 @@ as fortresses. Work in progress.
 
 **Play the latest build:** https://tqfbso.github.io/revolution/
 
-Add `?units=6000` to the URL to change the stress-test size, `?seed=7` for a different
-world, `?renderer=webgl` to force the WebGL2 fallback.
+The page opens on a battle: two armies of tanks and infantry squads attack each other.
+URL options: `?units=6000` army size in total, `?seed=7` a different battle,
+`?scenario=roam` three roaming armies instead, `?shadows=0` no shadows, `?lod=0.5` drop
+detail sooner (or `2` to keep it longer), `?renderer=webgl` force the WebGL2 fallback.
 
 ## Controls
 
@@ -14,7 +16,8 @@ world, `?renderer=webgl` to force the WebGL2 fallback.
 | ------------ | ----------------------------------------- |
 | Select       | Left drag (box), left click, Shift to add |
 | Select all   | Ctrl+A                                    |
-| Move         | Right click                               |
+| Attack-move  | Right click (fight on the way)            |
+| Move         | Alt + right click (do not stop to fight)  |
 | Stop / clear | X / Esc                                   |
 | Pan          | WASD, arrow keys, or mouse at screen edge |
 | Zoom         | Mouse wheel                               |

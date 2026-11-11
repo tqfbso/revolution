@@ -62,3 +62,40 @@ Free, zero-ops, and the live link always shows the latest merged work.
 
 Real-world present-day setting and three power blocs as inspiration, but all names, units,
 art and audio are original. Nothing is copied from existing games.
+
+## 011 Art direction: grounded realism
+
+Fabio's call (2026-11-11): the game should look real, uncomfortably so. No sci-fi, no
+cartoon. Concretely: present-day military proportions and silhouettes (original designs, not
+copies of specific real vehicles), muted service paint, physically plausible smoke, fire and
+dust, wrecks that stay and burn. Team colour never floods a hull: it appears on small
+markings (recognition panels, stripes, shoulder patches). Telling armies apart at long range
+is the job of a separate readability layer (the far level of detail today; rings, outlines
+and icons as the UI grows), which is UI, not world.
+
+Known gap: the current models are procedural boxes and cylinders with flat colours. They get
+proportions and lighting right but not surface realism. Closing that gap needs textured
+models (authored or CC0, for example Poly Haven) and a real sky; planned for the polish
+milestone, pulled forward if the look blocks decisions.
+
+## 012 Levels of detail chosen per unit, per frame, on the CPU
+
+Every unit is tested against the view frustum and binned by camera distance into one of
+three instanced batches per model part (full detail, simplified, a few triangles). Draw
+calls stay around a dozen regardless of army size; triangles scale with what is close, not
+with how many units exist. Shadows are cast only by the two nearer levels and the shadow map
+covers only the area near the camera focus. `?lod=` scales the distances, `?shadows=0`
+turns shadows off, for testing on slow machines.
+
+## 013 Hitscan weapons with simultaneous damage
+
+A ready weapon with a target in range hits on that tick. Damage is summed per target from
+start-of-tick state and applied afterwards, so results never depend on unit order and two
+units can kill each other. Shell flight time and misses are presentation for now (tracers);
+real projectiles arrive with artillery, where flight time is the point.
+
+## 014 Effects are client-only
+
+Flashes, tracers, explosions and smoke are driven by the sim's event list (shot, death) but
+simulated on the client with floats and `Math.random`. They can differ between machines
+without affecting the game. The event list is output only and is not part of the state hash.
