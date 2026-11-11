@@ -22,6 +22,12 @@ export const FLAG_SIEGE = 32;
 export const FLAG_BOARD = 64;
 /** Ordered to shell the point (`aimX`, `aimY`) until told otherwise. */
 export const FLAG_BOMBARD = 128;
+/** With FLAG_BOMBARD: fire one smoke shell at the point, and the order is done. */
+export const FLAG_SMOKE = 256;
+/** Hold position: shoot what comes into range, never leave the spot to chase. */
+export const FLAG_HOLD = 512;
+/** Cells that can hold smoke at once. */
+export const MAX_SMOKE = 4096;
 
 /** Shells in the air at once. A gun whose shell finds no room simply misfires. */
 export const MAX_SHELLS = 2048;
@@ -51,6 +57,7 @@ export const EV_REPAIR = 6; // a = structure
 export const EV_UNLOAD = 7; // a = carrier
 export const EV_LAUNCH = 8; // a = gun, b = where the shell will land (see packPoint)
 export const EV_IMPACT = 9; // a = where (see packPoint), b = 0
+export const EV_SMOKE = 10; // a = where (see packPoint), b = how many ticks it will stand
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
 export function packPoint(x: number, y: number): number {
@@ -131,6 +138,10 @@ export interface World {
   shTick: Int32Array;
   shOwner: Int32Array;
   shKind: Uint8Array;
+  shSmoke: Uint8Array;
+  /** Cells with smoke in them (the times are in the map, see GameMap.smoke). */
+  smokeCount: number;
+  smokeCells: Int32Array;
   /**
    * 1 for a drone inside an enemy jammer's bubble. Recomputed from positions at the start
    * of every tick before anything reads it, so it is not part of the hash.
@@ -207,6 +218,9 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     shTick: new Int32Array(MAX_SHELLS),
     shOwner: new Int32Array(MAX_SHELLS),
     shKind: new Uint8Array(MAX_SHELLS),
+    shSmoke: new Uint8Array(MAX_SHELLS),
+    smokeCount: 0,
+    smokeCells: new Int32Array(MAX_SMOKE),
     jammed: new Uint8Array(MAX_UNITS),
     sHp: map.sMaxHp.slice(),
     sRepair: new Int32Array(MAX_STRUCTS),
@@ -259,7 +273,12 @@ export function hashWorld(w: World): number {
     mix(w.shX[k]);
     mix(w.shY[k]);
     mix(w.shTick[k]);
-    mix(w.shOwner[k] ^ (w.shKind[k] << 24));
+    mix(w.shOwner[k] ^ (w.shKind[k] << 24) ^ (w.shSmoke[k] << 30));
+  }
+  mix(w.smokeCount);
+  for (let k = 0; k < w.smokeCount; k++) {
+    mix(w.smokeCells[k]);
+    mix(w.map.smoke[w.smokeCells[k]]);
   }
   const n = w.count;
   for (let i = 0; i < n; i++) {

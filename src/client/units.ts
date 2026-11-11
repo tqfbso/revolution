@@ -14,12 +14,14 @@ import {
   KIND_RECON,
   KIND_STRIKE,
   KIND_TANK,
+  SMOKE_CELLS,
 } from '../sim/units';
 import { CLASS_AIR } from '../sim/map';
 import {
   EV_COLLAPSE,
   EV_DEATH,
   EV_IMPACT,
+  EV_SMOKE,
   EV_LAUNCH,
   EV_SHOT,
   EV_SIEGE,
@@ -263,6 +265,7 @@ export class UnitView {
       this.info.fill(0);
       this.diedAt.fill(-1e9);
       this.fog.reset();
+      this.smokes.length = 0;
       this.scars.clear();
     }
     const curr = this.curr;
@@ -312,6 +315,7 @@ export class UnitView {
     this.snapshotTime = now;
     // Sight is refreshed every other tick (10 Hz): plenty for units that move this slowly.
     if (this.fogAge++ % 2 === 0) {
+      this.fog.clock = now / 1000;
       this.fog.update(
         this.curr,
         n,
@@ -321,6 +325,24 @@ export class UnitView {
       );
     }
     this.playEvents(s.events, now / 1000);
+  }
+
+  /** Smoke screens standing on the field. */
+  private smokes: { x: number; y: number; z: number; until: number }[] = [];
+
+  /** Keep the smoke screens billowing until they blow away. */
+  private billow(seconds: number, dt: number): void {
+    const smokes = this.smokes;
+    for (let k = smokes.length - 1; k >= 0; k--) {
+      const s = smokes[k];
+      if (s.until - 3 < seconds) {
+        smokes[k] = smokes[smokes.length - 1];
+        smokes.pop();
+      } else if (Math.random() < dt * 7) {
+        this.effects.thin = 0;
+        this.effects.smokeScreen(s.x, s.y, s.z);
+      }
+    }
   }
 
   private playEvents(ev: Int32Array, seconds: number): void {
@@ -335,6 +357,17 @@ export class UnitView {
         continue;
       }
       if (ev[e] === EV_UNLOAD) continue;
+      if (ev[e] === EV_SMOKE) {
+        const x = unpackX(a);
+        const z = unpackY(a);
+        const until = seconds + b / 20;
+        this.fog.addSmoke(x, z, SMOKE_CELLS, until);
+        // Shells of one salvo landing together make one cloud, not a white-out.
+        const near = this.smokes.find((s) => Math.abs(s.x - x) + Math.abs(s.z - z) < 7);
+        if (near) near.until = until;
+        else this.smokes.push({ x, y: this.terrain.heightAt(x, z), z, until });
+        continue;
+      }
       if (ev[e] === EV_IMPACT) {
         // A shell lands. The crater stays whether or not anyone saw it fall.
         const x = unpackX(a);
@@ -497,6 +530,7 @@ export class UnitView {
     const curr = this.curr;
     const info = this.info;
     const fx = this.effects;
+    this.billow(seconds, dt);
 
     this.projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projScreen);

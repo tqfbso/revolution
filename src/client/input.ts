@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import {
   CMD_ATTACK_MOVE,
   CMD_BOMBARD,
+  CMD_HOLD,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
   CMD_LOAD,
@@ -72,6 +73,8 @@ export class Input {
       }
     });
     dom.addEventListener('pointermove', (e) => {
+      this.pointerX = e.clientX;
+      this.pointerY = e.clientY;
       if (!this.dragStart) return;
       const s = this.dragStart;
       const w = Math.abs(e.clientX - s.x);
@@ -104,6 +107,16 @@ export class Input {
         );
       } else if (e.code === 'KeyX' && units.selectedCount > 0) {
         send({ type: CMD_STOP, units: units.selectedIds() });
+      } else if (e.code === 'KeyH' && units.selectedCount > 0) {
+        send({ type: CMD_HOLD, units: units.selectedIds() });
+      } else if (e.code === 'KeyF' && units.selectedCount > 0) {
+        // Smoke: each selected gun puts one smoke shell where the pointer is.
+        const guns = units.selectedIds().filter((id) => KINDS[units.kindOf(id)].indirect);
+        const { ground } = this.structureAt(this.pointerX, this.pointerY);
+        if (guns.length > 0 && ground) {
+          send({ type: CMD_BOMBARD, units: guns, x: fx(ground.x), y: fx(ground.z), smoke: true });
+          this.mark(ground.x, ground.y + 0.15, ground.z);
+        }
       } else if (e.code === 'KeyU' && units.selectedCount > 0) {
         send({ type: CMD_UNLOAD, units: units.selectedIds().filter((id) => units.load[id] > 0) });
       } else if (e.code === 'KeyL' && units.selectedCount > 0) {
@@ -117,6 +130,9 @@ export class Input {
       }
     });
   }
+
+  private pointerX = 0;
+  private pointerY = 0;
 
   update(dt: number): void {
     if (!this.marker.visible) return;

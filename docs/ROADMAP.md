@@ -65,11 +65,7 @@ and an economy that makes holding ground matter (M6). See decision 020.
 Moved out of M4: artillery against buildings (M5, with artillery itself), spending the
 income (M6), and roads as terrain (not needed: the bridges already make the fast routes).
 
-## M5 Combined arms (in progress)
-
-Done so far: armour facing, missile teams, carriers, artillery with counter-battery,
-craters and burn marks, sight per unit type with recon teams, recon and strike drones, air
-defence and jamming.
+## M5 Combined arms (done)
 
 - Spotting: a unit can fire at what any friendly unit sees. Recon teams see far and hide
   well; everything else is half blind without them
@@ -80,8 +76,14 @@ defence and jamming.
   counter-battery (firing reveals the battery)
 - Drones: cheap recon eyes and one-way strike drones. Air defence that shoots them down.
   Electronic warfare vehicles that jam them in a radius
-- Smoke, hold position, target priorities, stances
+- Smoke shells from the guns: a screen that blinds both sides for 30 seconds, drones
+  included. Hold position. Target priorities are built in (each weapon picks what it is
+  good against)
 - Persistent battlefield scars: craters, scorch marks
+
+Moved out of M5: stances beyond hold position and a target-priority UI (M6, with the
+command card), shell holes as cover and missiles with flight time (M9), and nobody
+commands blue yet, so it uses none of this with intent (M7).
 
 ## M6 Economy and base
 

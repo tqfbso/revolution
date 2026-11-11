@@ -39,6 +39,16 @@ export interface BombardCommand {
   units: number[];
   x: number;
   y: number;
+  /** One smoke shell per gun instead of high explosive until stopped. */
+  smoke?: boolean;
+}
+
+export const CMD_HOLD = 10;
+
+/** Stop and hold position: fight what comes into range, do not chase. A move order ends it. */
+export interface HoldCommand {
+  type: typeof CMD_HOLD;
+  units: number[];
 }
 
 export interface MoveCommand {
@@ -106,4 +116,5 @@ export type Command =
   | AttackStructureCommand
   | LoadCommand
   | UnloadCommand
-  | BombardCommand;
+  | BombardCommand
+  | HoldCommand;

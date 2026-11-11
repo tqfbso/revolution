@@ -295,6 +295,9 @@ export const SHELL_TICKS_SHIFT = 11;
 /** Shells land within this of the aim point, plus 1/32 of the distance flown. */
 export const SCATTER_MIN = fx(1.5);
 export const SCATTER_SHIFT = 5;
+/** A smoke shell fills the cells within this many cells of where it lands, for this long. */
+export const SMOKE_CELLS = 2;
+export const SMOKE_TICKS = 600;
 /** Guns do not fire by themselves at a target with friendly troops this close to it. */
 export const DANGER_CLOSE = fx(9);
 
