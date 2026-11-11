@@ -169,7 +169,9 @@ export function generateMap(seed: number): GameMap {
       if (f > ford) ford = f;
     }
     const bank = fx(8) + ((fx(26) * ford) >> 10);
-    const bed = fx(-2.6) + ((fx(2.1) * ford) >> 10);
+    // At a ford the bed rises just above the water surface, so it shows as a muddy strip you
+    // can see across, not as river with units swimming in it.
+    const bed = fx(-2.6) + ((fx(2.25) * ford) >> 10);
     for (let vx = 0; vx < MAP_VERTS; vx++) {
       const base =
         (noise(vx, vy, 6, s) * 8 +
@@ -219,7 +221,7 @@ export function generateMap(seed: number): GameMap {
       const lo = Math.min(a, b, c, d);
       const hi = Math.max(a, b, c, d);
       let t = T_OPEN;
-      if (avg < fx(-1)) t = T_WATER;
+      if (avg < fx(-0.6)) t = T_WATER;
       else if (hi - lo > fx(2.6)) t = T_CLIFF;
       else if (avg < fx(-0.25)) t = T_FORD;
       else if (avg > fx(0.4)) {

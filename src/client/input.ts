@@ -29,7 +29,7 @@ const DOUBLE_MS = 350;
  * Left drag: box select. Left click: select one. Double click (or Ctrl + click): everything
  * of that type on screen. Shift: add. Right click the ground: move (units fire on the way
  * but do not stop, so a fight can always be broken off). Right click an enemy: attack it.
- * A then left click (or Alt + right click): attack-move, fight whatever is met on the way.
+ * C then left click (or Alt + right click): attack-move, fight whatever is met on the way.
  * Right click a building: infantry moves in.
  * Ctrl + right click a building or bridge: shell it. Ctrl + right click the ground: guns
  * shell that spot. Right click one of your carriers, or L
@@ -75,15 +75,15 @@ export class Input {
         if (e.button === 0) card.confirm(e.shiftKey);
         else card.cancelPlacing();
       } else if (e.button === 0 && this.attackMoveArmed) {
-        // A, then left click: attack-move to the spot.
-        this.attackMoveArmed = false;
+        // C, then left click: attack-move to the spot.
+        this.armAttackMove(false);
         this.orderMove(e.clientX, e.clientY, true, false);
       } else if (e.button === 0) {
         this.dragStart = { x: e.clientX, y: e.clientY };
         dom.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
         const attackMove = e.altKey || this.attackMoveArmed;
-        this.attackMoveArmed = false;
+        this.armAttackMove(false);
         this.orderMove(e.clientX, e.clientY, attackMove, e.ctrlKey || e.metaKey);
       }
     });
@@ -118,14 +118,14 @@ export class Input {
         e.preventDefault();
         this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
       } else if (e.code === 'Escape') {
-        this.attackMoveArmed = false;
+        this.armAttackMove(false);
         if (card.placing >= 0) card.cancelPlacing();
         else {
           units.setSelected([], false);
           card.select(-1);
         }
-      } else if (e.code === 'KeyA' && !e.ctrlKey && !e.metaKey && units.selectedCount > 0) {
-        this.attackMoveArmed = !this.attackMoveArmed;
+      } else if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && units.selectedCount > 0) {
+        this.armAttackMove(!this.attackMoveArmed);
       } else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
       else if (e.code === 'Period') card.selectIdle();
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
@@ -160,8 +160,13 @@ export class Input {
     });
   }
 
-  /** After pressing A: the next left or right click is an attack-move. */
+  /** After pressing C: the next left or right click is an attack-move. */
   private attackMoveArmed = false;
+  private armAttackMove(on: boolean): void {
+    this.attackMoveArmed = on;
+    this.dom.style.cursor = on ? 'crosshair' : '';
+  }
+
   private pointerX = 0;
   private pointerY = 0;
 

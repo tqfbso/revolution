@@ -200,7 +200,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 1564017901;
+const GOLDEN = 1451419592;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {

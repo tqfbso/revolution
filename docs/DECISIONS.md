@@ -443,7 +443,7 @@ and the client adds each to its copy in the order the sim created it; ids, picki
 fog and the minimap then agree with no second code path. The price: the client's map can
 no longer be rewound, so Reset reloads the page.
 
-## 043 Right click moves or attacks; attack-move is A then click
+## 043 Right click moves or attacks; attack-move is C then click
 
 Fabio, 2026-11-11: units could not be told to attack a unit, and once they met the enemy
 they could not be pulled out, because the default right click was an attack-move that
@@ -453,12 +453,24 @@ right click on a visible enemy unit is a new attack order: the units chase that 
 shoot it, and the order ends when it dies or is lost (followed up to three times further
 than the nearest enemy is looked for; the click itself tells the army where it is). Guns
 shell the spot the enemy stands on instead, units that cannot hurt it just move there.
-Attack-move is A then left click, or Alt + right click. Same for the minimap: right click
+Attack-move is C then left click, or Alt + right click. Same for the minimap: right click
 moves, Alt + right click attack-moves.
 
 River check, same day: ground units cannot end up on water, cliff or buildings in any
 scenario we run (tests/orders.test.ts keeps watch); the only ways across are the fords and
-the bridges. Drones fly over by design.
+the bridges. Drones fly over by design. Fabio's screenshots then showed tanks and recon
+sitting in what looked like deep river: the fords were wide and below the water surface.
+See decision 044.
+
+The attack-move key is C, not A: A pans the camera left, and a stuck armed state turned
+later left clicks into move orders.
+
+## 044 Fords are shallow strips
+
+At a ford the river bed now rises just above the water surface (and cells deeper than
+0.6 units are water), so a ford is a narrower muddy strip that reads as crossable ground,
+not as river with units wading in it. Every seed still has crossings for vehicles and
+foot, with or without the bridges.
 
 ## 044 The AI is a player outside the simulation
 
