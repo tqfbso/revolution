@@ -514,3 +514,32 @@ building it can reach and see. Before this a base was only shelled on an explici
 so an attack-move into an undefended base stood among the buildings and did nothing.
 Town houses and bridges still need an order: they belong to nobody, and levelling them is
 a decision. Hold fire suppresses it like any other fire.
+
+## 049 First balance pass: every unit has something it beats and something it fears
+
+With both sides paying prices, equal money was matched head to head in
+`tools/matchups.ts`. Before the pass rifle squads beat tanks for the same money and
+nothing punished a pure infantry army. Changed: tank shells do more to infantry and
+light vehicles; rifle fire does less to armour; carriers are sturdier and better against
+men on foot; missiles hit harder; a rifle squad costs 80 supplies (was 60), a missile
+team 110 and 20 credits. Result for equal money: tanks beat rifles and carriers,
+missile teams beat tanks and carriers, rifles beat missile teams, carriers beat rifles.
+Houses still turn this over for infantry, which is the point of a town. Pacing of a
+whole game is still a guess until Fabio has played against the AI.
+
+## 050 The AI looks at the far bank before it crosses, and reinforces a fight
+
+The field army checks what it knows of the far side when it reaches a crossing: if the
+enemy there is more than it can take it tries another crossing once, then goes home.
+An enemy-held town is assumed to hide a garrison that grows with the length of the
+game, so the AI stops throwing its first platoon at houses it cannot see into. New units
+join an army that is already fighting instead of waiting for the next attack, and an
+army that is winning its fight does not break off because of losses on the way.
+
+## 051 An enemy base building is unknown until you see it
+
+The client draws an enemy base building, marks it on the minimap and lets you click it
+only once one of your units has seen any part of it; after that you keep seeing what
+happens to it, as with town houses. The sim is unchanged and so is the AI, which was
+already bound to what its units see (decision 045). Scouting now has a purpose for the
+player too. `?control=all` and `?demo=1` show everything.

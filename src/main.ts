@@ -148,6 +148,16 @@ async function start(): Promise<void> {
     rts.look(map.startX[0] * 4 + 14, map.startY[0] * 4 + 10, 95);
   }
   input.controlAll = params.get('control') === 'all';
+  structures.revealAll = input.controlAll || demo;
+  // The opponent is chosen on screen; a new choice starts a new game.
+  const pickAi = document.getElementById('ai-level') as HTMLSelectElement | null;
+  if (pickAi) {
+    pickAi.value = ai;
+    pickAi.addEventListener('change', () => {
+      params.set('ai', pickAi.value);
+      location.search = params.toString();
+    });
+  }
   const minimap = new Minimap(
     document.getElementById('minimap') as HTMLCanvasElement,
     terrain.map,

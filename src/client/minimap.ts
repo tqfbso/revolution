@@ -93,7 +93,7 @@ export class Minimap {
     for (let c = 0; c < N * N; c++) {
       let rgb = TERRAIN_RGB[map.baseType[c]] ?? OPEN_RGB;
       const s = map.structAt[c];
-      if (s >= 0) {
+      if (s >= 0 && !this.structures.hidden(s)) {
         const standing = this.structures.hp[s] > 0;
         if (map.sKind[s] === S_BRIDGE) rgb = standing ? [196, 192, 180] : rgb;
         else if (standing && this.structures.baseTeam[s] >= 0) {
