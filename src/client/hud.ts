@@ -1,5 +1,7 @@
 import { TICK_RATE } from '../sim/world';
 
+declare const __BUILD__: string;
+
 export interface PerfStats {
   fps: number;
   frameMs: number;
@@ -63,7 +65,7 @@ export class Hud {
       `Sim tick   ${s.simMs.toFixed(2)} ms (worst ${s.simMsMax.toFixed(2)}) @ ${TICK_RATE} Hz\n` +
       `Units      ${s.units}   selected ${s.selected}\n` +
       `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris\n` +
-      `State hash ${s.hash}`;
+      `State hash ${s.hash}   build ${__BUILD__}`;
   }
 
   simTick(ms: number): void {
