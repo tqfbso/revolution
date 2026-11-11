@@ -12,6 +12,7 @@ import {
 import { KINDS } from '../sim/units';
 import { step } from '../sim/sim';
 import {
+  FLAG_MOVING,
   MAX_TEAMS,
   NO_TARGET,
   NO_TEAM,
@@ -32,6 +33,7 @@ import {
   INFO_TEAM_SHIFT,
   BASE_STRIDE,
   NO_AIM,
+  TASK_MOVING,
   type Snapshot,
   type ToWorker,
 } from './protocol';
@@ -114,7 +116,7 @@ function postSnapshot(w: World, simMs: number): void {
     if (w.jammed[i] !== 0) load[i] = 1;
     // A truck shows what it carries: 1 supplies, 2 fuel.
     if (w.cargo[i] > 0) load[i] = 1 + w.cargoKind[i];
-    task[i] = w.job[i] | (w.stance[i] << 3);
+    task[i] = w.job[i] | (w.stance[i] << 3) | ((w.flags[i] & FLAG_MOVING) !== 0 ? TASK_MOVING : 0);
     if (KINDS[kind].turn > 0) {
       heading[i] = Math.round((Math.atan2(w.faceX[i], w.faceY[i]) * 128) / Math.PI) & 255;
     }

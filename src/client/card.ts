@@ -25,7 +25,13 @@ import { fx } from '../sim/fixed';
 import { canPlace, type GameMap } from '../sim/map';
 import { KINDS, KIND_TRUCK } from '../sim/units';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
-import { BASE_STRIDE, TASK_HOLD_FIRE, type Snapshot } from '../worker/protocol';
+import {
+  BASE_STRIDE,
+  TASK_HOLD_FIRE,
+  TASK_JOB_MASK,
+  TASK_MOVING,
+  type Snapshot,
+} from '../worker/protocol';
 import type { StructureView } from './structures';
 import type { Terrain } from './terrain';
 import type { UnitView } from './units';
@@ -72,6 +78,7 @@ export class CommandCard {
     private readonly units: UnitView,
     private readonly structures: StructureView,
     private readonly send: (command: Command) => void,
+    private readonly lookAt: (x: number, z: number) => void,
   ) {
     this.ghostMaterial = new THREE.MeshBasicNodeMaterial({
       color: 0x7dff8a,
@@ -96,6 +103,9 @@ export class CommandCard {
       if (!button || button.classList.contains('off')) return;
       e.preventDefault();
       this.act(button.dataset.act ?? '', Number(button.dataset.k ?? 0));
+    });
+    resEl.addEventListener('pointerdown', (e) => {
+      if ((e.target as HTMLElement).closest('button')) this.selectIdle();
     });
     setInterval(() => this.render(), 200);
   }
@@ -139,6 +149,27 @@ export class CommandCard {
       this.fuel >= p.fuel &&
       this.credits >= p.credits
     );
+  }
+
+  /** Your trucks with no job that are standing still. */
+  private idle(): number[] {
+    const u = this.units;
+    const out: number[] = [];
+    for (let i = 0; i < u.count; i++) {
+      if (u.kindOf(i) !== KIND_TRUCK || !u.isMine(i)) continue;
+      if ((u.task[i] & (TASK_JOB_MASK | TASK_MOVING)) === 0) out.push(i);
+    }
+    return out;
+  }
+
+  /** Select the idle trucks and look at them. */
+  selectIdle(): void {
+    const ids = this.idle();
+    if (ids.length === 0) return;
+    this.select(-1);
+    this.units.setSelected(ids, false);
+    const c = this.units.centreOf(ids);
+    if (c) this.lookAt(c.x, c.z);
   }
 
   private trucks(): number[] {
@@ -273,10 +304,12 @@ export class CommandCard {
   }
 
   private render(): void {
-    const res =
+    let res =
       `<i class="sup">Supplies ${this.supplies}</i><i class="fuel">Fuel ${this.fuel}</i>` +
       `<i class="cred">Credits ${this.credits}</i><i>Units ${this.pop}/${this.popCap}</i>` +
       `<i>Tier ${this.tier}</i>`;
+    const idle = this.idle().length;
+    if (idle > 0) res += `<button>Idle trucks ${idle} (.)</button>`;
     if (res !== this.resHtml) this.resEl.innerHTML = this.resHtml = res;
 
     let html = '';

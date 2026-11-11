@@ -66,6 +66,9 @@ export class Fog {
   private smokeEnd = 0;
 
   /** Take the lie of the land from the map: heights, forest. Buildings come via setWall. */
+  /** Fixed lookouts as (cell x, cell y, radius in cells) triples. */
+  posts: number[] = [];
+
   setMap(map: GameMap): void {
     let sum = 0;
     for (let c = 0; c < CELLS; c++) {
@@ -142,6 +145,10 @@ export class Fog {
         stamped[b] = 1 + (cy & 1) * 2 + (cx & 1);
         reach[b] = sight;
       }
+    }
+    // Fixed lookouts (your base buildings): a plain circle each.
+    for (let k = 0; k < this.posts.length; k += 3) {
+      this.lookDown(this.posts[k], this.posts[k + 1], this.posts[k + 2]);
     }
     const H = N >> 1;
     for (let by = 0; by < H; by++) {

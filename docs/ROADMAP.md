@@ -85,16 +85,31 @@ Moved out of M5: stances beyond hold position and a target-priority UI (M6, with
 command card), shell holes as cover and missiles with flight time (M9), and nobody
 commands blue yet, so it uses none of this with intent (M7).
 
-## M6 Economy and base
+## M6 Economy and base (done)
 
-- Resources, harvesting, construction, production queues, tech tiers
-- Income from held towns, so territory is the economy
-- HUD: command card, production, resources
+- Three resources: supplies from stockpiles that run out (more trucks, more income), fuel
+  from wells that pump at a fixed rate (more wells, more fuel), credits from held towns
+- The logistics truck hauls and builds. 26 resource sites, the same on both banks, the
+  richest behind the settlements
+- Five base buildings, production queues with rally points, a unit limit set by depots
+  (600 at most), two technology steps paid for in credits
+- Command card: build, produce, research, stop, hold position, hold fire. Resource bar,
+  idle-truck button, victory and defeat when a headquarters falls
+- New default opening, the skirmish: your base and a patrol against a dug-in east bank
+
+Moved out of M6: blue's base buildings are visible from the start (M7, with an enemy that
+builds); a target-priority screen (dropped, see
+decision 040); hotkeys for production and a build menu (M9).
 
 ## M7 Skirmish AI
 
-- Build orders, scouting, army composition, attack and defence timing
-- Difficulty levels
+- An opponent that plays the economy: trucks on sites, depots, production, technology
+- Build orders, scouting, army composition, attack and defence timing; garrisons that
+  react (reinforce a town under attack, counter-attack a lost one)
+- Units that defend themselves and the base without orders (today a base building is only
+  shelled on an explicit order)
+- Enemy base buildings hidden until scouted
+- Difficulty levels, and a first balance pass on prices now that both sides pay them
 
 ## M8 Factions
 

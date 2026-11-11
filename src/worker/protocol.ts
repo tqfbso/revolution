@@ -9,6 +9,8 @@ export const BASE_STRIDE = 18;
 /** Bits of Snapshot.task: the truck's job (JOB_*), then the stance. */
 export const TASK_JOB_MASK = 7;
 export const TASK_HOLD_FIRE = 8;
+/** Under way on a move order. */
+export const TASK_MOVING = 16;
 
 /**
  * Bits of Snapshot.info: life state (2 bits), team (2 bits), inside a building, (for a
@@ -65,7 +67,7 @@ export interface Snapshot {
   tier: number[];
   pop: number[];
   popCap: number[];
-  /** Per unit: job | stance (see TASK_*). */
+  /** Per unit: job | stance | moving (see TASK_*). */
   task: Uint8Array;
   /** Per resource site: what is left. */
   siteStock: Int32Array;

@@ -115,6 +115,7 @@ export class Input {
           card.select(-1);
         }
       } else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
+      else if (e.code === 'Period') card.selectIdle();
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         units.setSelected(
