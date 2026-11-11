@@ -1,5 +1,6 @@
 // Runs the deterministic simulation at a fixed tick rate, off the main thread, so rendering
 // never waits on game logic and game logic never waits on rendering.
+import { aiThink, createAi, type Ai } from '../sim/ai';
 import type { Command } from '../sim/commands';
 import { fromFx } from '../sim/fixed';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, UNIT_PRICE } from '../sim/economy';
@@ -42,8 +43,12 @@ const MAX_CATCH_UP_TICKS = 4;
 
 let world: World | null = null;
 let pending: Command[] = [];
+/** The computer players. They hand in their commands before each tick, like anyone else. */
+let ais: Ai[] = [];
 let lastTime = 0;
 let accumulator = 0;
+/** Game speed: simulated ticks per real tick interval (`?speed=`). */
+let speed = 1;
 let timer: ReturnType<typeof setInterval> | undefined;
 
 self.onmessage = (e: MessageEvent<ToWorker>) => {
@@ -57,7 +62,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
           ? battleCommands(msg.units)
           : msg.scenario === 'assault'
             ? assaultCommands(world.map, msg.units)
-            : skirmishCommands(world.map, msg.units);
+            : skirmishCommands(world.map);
+    ais = [];
+    if (msg.scenario === 'skirmish' && msg.ai !== 'off') {
+      ais.push(createAi(1, msg.ai, msg.seed));
+      // `?demo=1`: the AI plays red as well, to watch it at work.
+      if (msg.demo) ais.push(createAi(0, msg.ai, msg.seed));
+    }
+    speed = Math.min(Math.max(msg.speed, 1), 16);
     accumulator = TICK_MS; // run the first tick immediately
     lastTime = performance.now();
     if (timer === undefined) timer = setInterval(pump, 5);
@@ -70,14 +82,15 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
 function pump(): void {
   if (!world) return;
   const now = performance.now();
-  accumulator += now - lastTime;
+  accumulator += (now - lastTime) * speed;
   lastTime = now;
   if (accumulator < TICK_MS) return;
 
   let simMs = 0;
   let ticks = 0;
-  while (accumulator >= TICK_MS && ticks < MAX_CATCH_UP_TICKS) {
+  while (accumulator >= TICK_MS && ticks < MAX_CATCH_UP_TICKS * speed) {
     const t0 = performance.now();
+    for (const ai of ais) aiThink(ai, world, pending);
     step(world, pending);
     simMs = performance.now() - t0;
     pending = [];

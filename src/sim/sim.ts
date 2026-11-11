@@ -24,6 +24,7 @@ import {
   MAP_CELLS,
   MAX_STRUCTS,
   MAX_TOWNS,
+  S_BASE,
   S_BRIDGE,
   S_BUILDING,
   T_BRIDGE,
@@ -1414,13 +1415,31 @@ function resolveShells(w: World): void {
 /**
  * Is unit `j` hard to spot? In forest and in rubble always; in a building until it fires.
  */
-function concealed(w: World, j: number): boolean {
+/** Hidden from anyone not close by: in a house, in forest or rubble, in smoke, or a recon team. */
+export function concealed(w: World, j: number): boolean {
   if (w.inside[j] >= 0) return w.reveal[j] <= w.tick;
   if (IS_AIR[w.kind[j]]) return false;
   if (KINDS[w.kind[j]].stealth) return true;
   if (w.map.smoke[cellOfPos(w.posX[j], w.posY[j])] > w.tick) return true;
   const t = w.map.type[cellOfPos(w.posX[j], w.posY[j])];
   return t === T_FOREST || (t === T_RUBBLE && KIND_CLASS[w.kind[j]] === CLASS_FOOT);
+}
+
+/** The nearest standing base building of another army that unit `i` can reach and see, or -1. */
+function baseInRange(w: World, i: number, range: number): number {
+  const map = w.map;
+  const team = w.team[i];
+  let best = -1;
+  let bestD = range * range;
+  for (let s = map.structCount - 1; s >= 0 && map.sKind[s] === S_BASE; s--) {
+    if (w.sTeam[s] === team || w.sHp[s] <= 0) continue;
+    const d = structDist2(w, s, w.posX[i], w.posY[i]);
+    if (d <= bestD && seesStructure(w, i, s)) {
+      best = s;
+      bestD = d;
+    }
+  }
+  return best;
 }
 
 /**
@@ -1473,7 +1492,18 @@ function fire(w: World): void {
       }
     }
     const t = w.attack[i];
-    if (t === NO_TARGET || w.los[i] === 0) continue;
+    if (t === NO_TARGET || w.los[i] === 0) {
+      // Nothing to shoot at: an enemy base building in range will do (see decision 044).
+      if (kind.siege > 0 && ((w.tick + i) & 7) === 0 && w.stance[i] !== STANCE_HOLD_FIRE) {
+        const s = baseInRange(w, i, kind.range);
+        if (s >= 0) {
+          structDamage[s] += kind.siege;
+          w.cooldown[i] = kind.reload;
+          w.events.push(EV_SIEGE, i, s);
+        }
+      }
+      continue;
+    }
     const dx = w.posX[t] - w.posX[i];
     const dy = w.posY[t] - w.posY[i];
     const range = rangeTo(w, i, t);

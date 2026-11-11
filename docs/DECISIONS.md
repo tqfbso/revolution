@@ -442,3 +442,58 @@ buildings are the first structures that appear during play, so every snapshot li
 and the client adds each to its copy in the order the sim created it; ids, picking, the
 fog and the minimap then agree with no second code path. The price: the client's map can
 no longer be rewound, so Reset reloads the page.
+
+## 043 The AI is a player outside the simulation
+
+The opponent lives in `src/sim/ai.ts` but is not part of `step()`. Once a tick the worker
+asks it for commands and puts them on the same list as the player's; the sim cannot tell
+the two apart. Three things follow. It can do nothing a human cannot (no spawning, no
+free resources, no orders to units it does not own: a test checks this). Its state is not
+in the world hash and does not need to be: it is a pure function of the worlds it has
+seen, integer-only with its own random numbers, so in lockstep multiplayer every client
+runs it and gets the same commands. And it can be swapped, run twice (`?demo=1`), or left
+out (`?ai=off`) without touching the sim. Supersedes the "nobody commands blue" part of
+decision 041.
+
+## 044 The AI sees what its units see
+
+It knows the map, including where both armies set up (so does anyone who has played
+once). Of the enemy it knows only units the sim marks as spotted, and units standing
+unconcealed right next to its own; garrisons, troops in forest and recon teams stay
+hidden from it exactly as from the player. What it saw it remembers per 16-unit square,
+fading over minutes, and where it has not looked for three minutes it assumes a defence
+that grows with the clock. So scouting pays for it as for a human: a town it has seen
+empty is attacked early, one it has not seen is treated with respect. Difficulty changes
+tempo and judgement (how many trucks, how sure it wants to be before it attacks, whether
+it raids, whether it builds against what it saw), never its information or its income.
+
+## 045 The AI's army thinks in objectives, crossings and strong points
+
+Military units belong to town garrisons, scouts, a reserve, or one of two forces (the
+field army and a raiding party). A force has an objective (a town, an outlying depot, the
+enemy base) chosen by value against expected resistance, and a route to it: on the far
+bank it weighs every crossing by distance, by the enemy known to stand behind it and by
+whether a held settlement bars it, so a defended bridge town is turned by a ford unless
+the town itself is the objective. It moves from way point to way point and waits for its
+line to close up, so it arrives as an army. At the objective it reduces strong points
+first: tanks and guns shell the houses known to be held, then the infantry goes in and
+stays as the garrison. A beaten force remembers the strength that was not enough and
+does not try that objective again with less. The strong-point list is the hook for
+fortifications (M8): walls and trenches go on the same list and the rest already works.
+
+## 046 An even start replaces the fortress opening
+
+Both armies now start with a headquarters, six trucks, twelve rifle squads, four carriers
+and two recon teams, and no town belongs to anyone. The fortress of decision 041 was a
+stand-in for an opponent; with one, a prebuilt garrison of 600 on top of a growing
+economy would decide the game before it starts. The AI builds its fortress itself:
+its first infantry goes into the houses of its three settlements, which also takes them.
+`?scenario=assault` keeps the attack on a held bank.
+
+## 047 Units shell enemy base buildings unasked
+
+A unit with siege damage and no enemy unit to shoot at fires on the nearest enemy base
+building it can reach and see. Before this a base was only shelled on an explicit order,
+so an attack-move into an undefended base stood among the buildings and did nothing.
+Town houses and bridges still need an order: they belong to nobody, and levelling them is
+a decision. Hold fire suppresses it like any other fire.

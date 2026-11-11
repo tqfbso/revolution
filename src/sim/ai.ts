@@ -1,0 +1,1987 @@
+// The skirmish opponent. It is a player, not a part of the simulation: it reads the world
+// and answers with the same commands a human gives (see decision 043), so everything it
+// does a human could do, and in multiplayer every client can run it and stay in step.
+//
+// It knows what a player knows: the map, its own army, and of the enemy only what its
+// units have in sight (plus a fading memory of what they saw). Integers only, its own
+// random numbers, no clock: the same world always gets the same answer.
+//
+// Three layers, each run about once a second:
+//   economy    trucks on sites, depots at new sites, buildings, technology
+//   production what to build next, from the army it wants and the enemy it has seen
+//   military   town garrisons, scouts, a reserve that answers alarms, and a field army
+//              that picks an objective, picks the crossing to reach it by, and assaults
+import {
+  CMD_ASSIST,
+  CMD_ATTACK_MOVE,
+  CMD_ATTACK_STRUCTURE,
+  CMD_BOMBARD,
+  CMD_BUILD,
+  CMD_GARRISON,
+  CMD_GATHER,
+  CMD_MOVE,
+  CMD_RALLY,
+  CMD_RESEARCH,
+  CMD_TRAIN,
+  type Command,
+} from './commands';
+import {
+  BUILDINGS,
+  B_BARRACKS,
+  B_DEPOT,
+  B_DRONES,
+  B_HQ,
+  B_WORKS,
+  MAX_TIER,
+  POP_MAX,
+  TIER_ITEM,
+  TIER_PRICE,
+  UNIT_PRICE,
+  type Price,
+} from './economy';
+import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
+import {
+  CELL_FX,
+  CELL_SHIFT,
+  CLASS_AIR,
+  CLASS_VEHICLE,
+  MAP_CELLS,
+  MAX_SITES,
+  MAX_STRUCTS,
+  MAX_TOWNS,
+  SITE_FUEL,
+  S_BASE,
+  S_BUILDING,
+  T_BRIDGE,
+  T_FORD,
+  T_FOREST,
+  T_OPEN,
+  T_WATER,
+  canPlace,
+  findCell,
+  type GameMap,
+} from './map';
+import { seedRng, nextInt } from './rng';
+import { concealed, structDist2 } from './sim';
+import {
+  GARRISON_MAX,
+  KINDS,
+  KIND_AD,
+  KIND_ARTILLERY,
+  KIND_ATGM,
+  KIND_COUNT,
+  KIND_DRONE,
+  KIND_EW,
+  KIND_IFV,
+  KIND_INFANTRY,
+  KIND_RECON,
+  KIND_STRIKE,
+  KIND_TANK,
+  KIND_TRUCK,
+} from './units';
+import {
+  FLAG_BOMBARD,
+  FLAG_GARRISON,
+  FLAG_MOVING,
+  FLAG_SIEGE,
+  JOB_BUILD,
+  JOB_NONE,
+  MAP_SIZE,
+  MAP_SIZE_FX,
+  MAX_UNITS,
+  NO_TARGET,
+  NO_TEAM,
+  QUEUE_MAX,
+  STATE_ALIVE,
+  TICK_RATE,
+  type World,
+} from './world';
+
+export type AiLevel = 'easy' | 'normal' | 'hard';
+
+/** What separates the difficulty levels. No level gets free resources or sees through fog. */
+interface Tuning {
+  /** Ticks between two rounds of thinking. */
+  period: number;
+  /** Most trucks it runs, and most production buildings it puts up. */
+  trucks: number;
+  factories: number;
+  /** Entries it keeps on a production queue. */
+  queue: number;
+  /** Trucks it puts on one building site. */
+  builders: number;
+  /** Squads it wants in each of its towns at the start (the central one gets half more). */
+  garrison: number;
+  /** It attacks when its strength is this many percent of what it expects to meet. */
+  ratio: number;
+  /** No attack across the river before this tick, and none with less strength than this. */
+  firstAttack: number;
+  minArmy: number;
+  /** It breaks off when this many percent of the strength it set out with is left. */
+  breakOff: number;
+  /** First tick of raids on trucks and outlying depots (0 = never). */
+  raids: number;
+  /** Builds against what it has seen of the enemy. */
+  counter: boolean;
+  /** Lays smoke in front of a town it storms. */
+  smoke: boolean;
+}
+
+const MINUTE = 60 * TICK_RATE;
+
+export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
+  easy: {
+    period: 40,
+    trucks: 14,
+    factories: 4,
+    queue: 1,
+    builders: 2,
+    garrison: 3,
+    ratio: 220,
+    firstAttack: 14 * MINUTE,
+    minArmy: 260,
+    breakOff: 50,
+    raids: 0,
+    counter: false,
+    smoke: false,
+  },
+  normal: {
+    period: 20,
+    trucks: 26,
+    factories: 10,
+    queue: 2,
+    builders: 2,
+    garrison: 4,
+    ratio: 150,
+    firstAttack: 9 * MINUTE,
+    minArmy: 240,
+    breakOff: 40,
+    raids: 11 * MINUTE,
+    counter: true,
+    smoke: false,
+  },
+  hard: {
+    period: 20,
+    trucks: 36,
+    factories: 14,
+    queue: 2,
+    builders: 3,
+    garrison: 5,
+    ratio: 125,
+    firstAttack: 6 * MINUTE,
+    minArmy: 220,
+    breakOff: 35,
+    raids: 7 * MINUTE,
+    counter: true,
+    smoke: true,
+  },
+};
+
+/** The AI's own map of the battlefield: squares of 16 units. */
+const CS = FP_SHIFT + 4;
+const CD = MAP_SIZE >> 4;
+const CC = CD * CD;
+
+/** What a unit of each type is worth in a fight, roughly. Strength is this times health. */
+const POWER = [30, 8, 12, 16, 20, 2, 1, 10, 4, 2, 0];
+/** Units that form the line of an attack; the rest follow behind it. */
+const LINE = KINDS.map(
+  (k, i) => k.cls !== CLASS_AIR && !k.indirect && k.damage.some((d) => d > 0) && i !== KIND_TRUCK,
+);
+const FOOT = (k: number) => k === KIND_INFANTRY || k === KIND_ATGM;
+
+const R_NONE = -1;
+const R_RESERVE = 0;
+const R_ARMY = 1;
+const R_RAID = 2;
+const R_SCOUT = 3;
+/** Garrison of town t: R_TOWN + t. */
+const R_TOWN = 8;
+
+const F_IDLE = 0;
+const F_MARCH = 1;
+const F_ASSAULT = 2;
+const F_RETREAT = 3;
+
+const OBJ_TOWN = 0;
+const OBJ_BASE = 1;
+const OBJ_POINT = 2;
+
+interface Objective {
+  kind: number;
+  /** Town, for OBJ_TOWN. */
+  id: number;
+  x: number;
+  y: number;
+}
+
+/** A body of troops with one job: the field army, or a raiding party. */
+interface Force {
+  role: number;
+  state: number;
+  /** Way points (x, y pairs) and the one it is heading for. */
+  wps: number[];
+  wp: number;
+  /** Tick it entered its state, strength it set out with. */
+  since: number;
+  launch: number;
+  obj: Objective | null;
+  /** Thinks in a row without an enemy in sight at the objective. */
+  quiet: number;
+  smoked: boolean;
+  /** Objectives taken on this outing. */
+  done: number;
+}
+
+/** A way over the river: a ford, with its bridge if it has one. */
+export interface Crossing {
+  x: number;
+  y: number;
+  /** Where to form up on the west and on the east bank. */
+  bankX: [number, number];
+  bankY: [number, number];
+  /** The settlement on each bank, or -1 for a bare ford. */
+  town: [number, number];
+}
+
+interface Alarm {
+  x: number;
+  y: number;
+  threat: number;
+  base: boolean;
+  town: number;
+}
+
+export interface Ai {
+  team: number;
+  enemy: number;
+  level: AiLevel;
+  tune: Tuning;
+  rng: Uint32Array;
+  ready: boolean;
+  /** 0 = it holds the west bank, 1 = the east. `fwd` is the x direction toward the enemy. */
+  side: number;
+  fwd: number;
+  homeX: number;
+  homeY: number;
+  hq: number;
+  /** Where it believes the enemy headquarters stands. */
+  foeX: number;
+  foeY: number;
+  crossings: Crossing[];
+  /** Per cell row: the cell column of the river, or -1. */
+  riverX: Int16Array;
+  /** Per town: its houses, the ones facing the crossing first. */
+  houses: number[][];
+  role: Int8Array;
+  roleKind: Uint8Array;
+  /** Scouts: the post they watch, and how far along the way there they are. */
+  post: Int8Array;
+  leg: Uint8Array;
+  /** Enemy strength per square as last seen, and when the square was last looked at. */
+  threat: Int32Array;
+  seenAt: Int32Array;
+  /** Enemy base buildings it has found. */
+  known: Uint8Array;
+  /** Per structure: the tick until which it believes the enemy is inside. */
+  occupied: Int32Array;
+  /** Enemy units of each type it remembers seeing at once. */
+  foeMix: Int32Array;
+  /** Enemy units in sight right now. */
+  seen: number[];
+  have: Int32Array;
+  trucks: number[];
+  fresh: number[];
+  reserve: number[];
+  scouts: number[];
+  garr: number[][];
+  forces: [Force, Force];
+  members: [number[], number[]];
+  stageX: number;
+  stageY: number;
+  alarm: Alarm | null;
+  /** Towns it has held (so losing one calls for a counter-attack). */
+  held: Uint8Array;
+  /** Per site: the tick until which it keeps its trucks away. */
+  siteBad: Int32Array;
+  /** Per site: trucks it will put on it (0 = not workable now). */
+  siteCap: Int32Array;
+  /** What it is saving for. */
+  resS: number;
+  resF: number;
+  resC: number;
+  lastAttack: number;
+  lastRaid: number;
+  /** No new attack before this tick (set when one is broken off). */
+  restUntil: number;
+  /** Per town (and, last, the enemy base): the strength that was not enough last time. */
+  grudge: Int32Array;
+  /** One line on what it is up to, for tests and the debug overlay. */
+  plan: string;
+}
+
+const scratch = new Int32Array(CC);
+const eyes = new Uint8Array(CC);
+const watched = new Uint8Array(CC);
+const perSite = new Int32Array(MAX_SITES);
+const pendingIn = new Uint8Array(MAX_STRUCTS);
+const mixNow = new Int32Array(KIND_COUNT);
+const want = new Int32Array(KIND_COUNT);
+
+export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai {
+  const force = (role: number): Force => ({
+    role,
+    state: F_IDLE,
+    wps: [],
+    wp: 0,
+    since: 0,
+    launch: 0,
+    obj: null,
+    quiet: 0,
+    smoked: false,
+    done: 0,
+  });
+  const ai: Ai = {
+    team,
+    enemy: team === 0 ? 1 : 0,
+    level,
+    tune: AI_TUNING[level],
+    rng: new Uint32Array(1),
+    ready: false,
+    side: 0,
+    fwd: 1,
+    homeX: 0,
+    homeY: 0,
+    hq: -1,
+    foeX: 0,
+    foeY: 0,
+    crossings: [],
+    riverX: new Int16Array(MAP_CELLS).fill(-1),
+    houses: [],
+    role: new Int8Array(MAX_UNITS).fill(R_NONE),
+    roleKind: new Uint8Array(MAX_UNITS),
+    post: new Int8Array(MAX_UNITS).fill(-1),
+    leg: new Uint8Array(MAX_UNITS),
+    threat: new Int32Array(CC),
+    seenAt: new Int32Array(CC).fill(-1000000),
+    known: new Uint8Array(MAX_STRUCTS),
+    occupied: new Int32Array(MAX_STRUCTS),
+    foeMix: new Int32Array(KIND_COUNT),
+    seen: [],
+    have: new Int32Array(KIND_COUNT),
+    trucks: [],
+    fresh: [],
+    reserve: [],
+    scouts: [],
+    garr: [],
+    forces: [force(R_ARMY), force(R_RAID)],
+    members: [[], []],
+    stageX: 0,
+    stageY: 0,
+    alarm: null,
+    held: new Uint8Array(MAX_TOWNS),
+    siteBad: new Int32Array(MAX_SITES),
+    siteCap: new Int32Array(MAX_SITES),
+    resS: 0,
+    resF: 0,
+    resC: 0,
+    lastAttack: 0,
+    lastRaid: 0,
+    restUntil: 0,
+    grudge: new Int32Array(MAX_TOWNS + 1),
+    plan: '',
+  };
+  seedRng(ai.rng, (seed ^ Math.imul(team + 1, 0x51ed27)) | 0);
+  return ai;
+}
+
+/** The AI's commands for this tick, appended to `out`. Call once per tick, before step(). */
+export function aiThink(ai: Ai, w: World, out: Command[]): void {
+  if (!ai.ready && !setUp(ai, w)) return;
+  // Without a headquarters the game is lost: nothing more to decide.
+  if (w.sHp[ai.hq] <= 0 || w.sTeam[ai.hq] !== ai.team) return;
+  const period = ai.tune.period;
+  const phase = (w.tick + 3 * ai.team) % period;
+  if (phase === 0) {
+    perceive(ai, w);
+    economy(ai, w, out);
+    production(ai, w, out);
+  } else if (phase === period >> 1) {
+    perceive(ai, w);
+    military(ai, w, out);
+  }
+}
+
+// ---------------------------------------------------------------- geography
+
+const cellX = (c: number) => ((c % MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
+const cellY = (c: number) => (Math.trunc(c / MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
+const cellAt = (x: number, y: number) =>
+  clampInt(y >> CELL_SHIFT, 0, MAP_CELLS - 1) * MAP_CELLS +
+  clampInt(x >> CELL_SHIFT, 0, MAP_CELLS - 1);
+const square = (x: number, y: number) =>
+  clampInt(y >> CS, 0, CD - 1) * CD + clampInt(x >> CS, 0, CD - 1);
+const structX = (map: GameMap, s: number) => ((2 * map.sX[s] + map.sW[s]) << CELL_SHIFT) >> 1;
+const structY = (map: GameMap, s: number) => ((2 * map.sY[s] + map.sH[s]) << CELL_SHIFT) >> 1;
+
+function dist(ax: number, ay: number, bx: number, by: number): number {
+  return isqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
+}
+
+/** The nearest point to (x, y) a vehicle can stand on. */
+function ground(map: GameMap, x: number, y: number): [number, number] {
+  const c =
+    map.snap[CLASS_VEHICLE][
+      cellAt(clampInt(x, 0, MAP_SIZE_FX - 1), clampInt(y, 0, MAP_SIZE_FX - 1))
+    ];
+  return [cellX(c), cellY(c)];
+}
+
+/**
+ * Find the river and the ways over it. The river is the water that runs from the north
+ * edge of the map to the south edge; a row of it without deep water is a crossing, and
+ * rows close together (a ford and the bridge next to it) are one crossing.
+ */
+export function findCrossings(map: GameMap, riverX: Int16Array): Crossing[] {
+  const type = map.type;
+  const wet = (c: number) => type[c] === T_WATER || type[c] === T_FORD || type[c] === T_BRIDGE;
+  const river = new Uint8Array(MAP_CELLS * MAP_CELLS);
+  const stack: number[] = [];
+  for (let x = 0; x < MAP_CELLS; x++) {
+    if (wet(x)) {
+      river[x] = 1;
+      stack.push(x);
+    }
+  }
+  while (stack.length > 0) {
+    const c = stack.pop()!;
+    const x = c % MAP_CELLS;
+    const y = Math.trunc(c / MAP_CELLS);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= MAP_CELLS || ny >= MAP_CELLS) continue;
+        const n = ny * MAP_CELLS + nx;
+        if (river[n] !== 0 || !wet(n)) continue;
+        river[n] = 1;
+        stack.push(n);
+      }
+    }
+  }
+  riverX.fill(-1);
+  const open = new Uint8Array(MAP_CELLS);
+  let rows = 0;
+  for (let y = 0; y < MAP_CELLS; y++) {
+    // The river proper is the widest run of wet cells in the row; a pond that touches it
+    // is not part of it.
+    let bestFrom = -1;
+    let bestLen = 0;
+    let from = -1;
+    for (let x = 0; x <= MAP_CELLS; x++) {
+      const in_ = x < MAP_CELLS && river[y * MAP_CELLS + x] !== 0;
+      if (in_ && from < 0) from = x;
+      if (!in_ && from >= 0) {
+        if (x - from > bestLen) {
+          bestLen = x - from;
+          bestFrom = from;
+        }
+        from = -1;
+      }
+    }
+    if (bestLen === 0) continue;
+    rows++;
+    riverX[y] = bestFrom + (bestLen >> 1);
+    let deep = false;
+    for (let x = bestFrom; x < bestFrom + bestLen; x++) {
+      if (type[y * MAP_CELLS + x] === T_WATER) deep = true;
+    }
+    if (!deep && bestLen >= 3) open[y] = 1;
+  }
+  const crossings: Crossing[] = [];
+  if (rows < MAP_CELLS - 8) {
+    // No river from edge to edge: nothing to cross.
+    riverX.fill(-1);
+    return crossings;
+  }
+  for (let y = 0; y < MAP_CELLS; y++) if (riverX[y] < 0) riverX[y] = y > 0 ? riverX[y - 1] : 0;
+  for (let y = MAP_CELLS - 2; y >= 0; y--) if (riverX[y] < 0) riverX[y] = riverX[y + 1];
+  let y = 0;
+  while (y < MAP_CELLS) {
+    if (open[y] === 0) {
+      y++;
+      continue;
+    }
+    let last = y;
+    for (let k = y + 1; k < MAP_CELLS && k - last <= 12; k++) if (open[k] !== 0) last = k;
+    // The ford itself is the longest run of open rows in the group.
+    let bestAt = y;
+    let bestLen = 0;
+    let run = 0;
+    for (let k = y; k <= last; k++) {
+      run = open[k] !== 0 ? run + 1 : 0;
+      if (run > bestLen) {
+        bestLen = run;
+        bestAt = k - (run >> 1);
+      }
+    }
+    const cx = cellX(riverX[bestAt]);
+    const cy = cellY(bestAt * MAP_CELLS);
+    const c: Crossing = { x: cx, y: cy, bankX: [0, 0], bankY: [0, 0], town: [-1, -1] };
+    for (let side = 0; side < 2; side++) {
+      const [bx, by] = ground(map, cx + (side === 0 ? -fx(44) : fx(44)), cy);
+      c.bankX[side] = bx;
+      c.bankY[side] = by;
+    }
+    crossings.push(c);
+    y = last + 1;
+  }
+  // A settlement belongs to the crossing nearest to it along the river.
+  for (let t = 0; t < map.townCount; t++) {
+    let best: Crossing | null = null;
+    for (const c of crossings) {
+      const d = Math.abs(c.y - map.townY[t]);
+      if (d < fx(110) && (best === null || d < Math.abs(best.y - map.townY[t]))) best = c;
+    }
+    if (best === null) continue;
+    const side = map.townX[t] < best.x ? 0 : 1;
+    if (best.town[side] >= 0) continue;
+    best.town[side] = t;
+    // Form up in the settlement, not in the water meadow in front of it.
+    best.bankX[side] = map.townX[t];
+    best.bankY[side] = map.townY[t];
+  }
+  return crossings;
+}
+
+/** Which bank a point is on: 0 west, 1 east. */
+function bankOf(ai: Ai, x: number, y: number): number {
+  const rx = ai.riverX[clampInt(y >> CELL_SHIFT, 0, MAP_CELLS - 1)];
+  if (rx < 0) {
+    // No river: the half of the map nearer its own headquarters is "its bank".
+    const near = Math.abs(x - ai.homeX) <= Math.abs(x - ai.foeX);
+    return near ? ai.side : 1 - ai.side;
+  }
+  return x >> CELL_SHIFT < rx ? 0 : 1;
+}
+
+/** First think: find the two headquarters and read the map. False if there is no base. */
+function setUp(ai: Ai, w: World): boolean {
+  const map = w.map;
+  let hq = -1;
+  let foe = -1;
+  for (let s = 0; s < map.structCount; s++) {
+    if (map.sKind[s] !== S_BASE || w.sType[s] !== B_HQ || w.sHp[s] <= 0) continue;
+    if (w.sTeam[s] === ai.team && hq < 0) hq = s;
+    else if (w.sTeam[s] !== ai.team && w.sTeam[s] !== NO_TEAM && foe < 0) foe = s;
+  }
+  if (hq < 0 || foe < 0) return false;
+  ai.hq = hq;
+  ai.enemy = w.sTeam[foe];
+  ai.homeX = structX(map, hq);
+  ai.homeY = structY(map, hq);
+  // Both sides know where the other sets up: the map is the same every game.
+  ai.foeX = structX(map, foe);
+  ai.foeY = structY(map, foe);
+  ai.side = ai.homeX < ai.foeX ? 0 : 1;
+  ai.fwd = ai.side === 0 ? 1 : -1;
+  ai.crossings = findCrossings(map, ai.riverX);
+  ai.houses = [];
+  ai.garr = [];
+  for (let t = 0; t < map.townCount; t++) {
+    // The front of a settlement is the side its twin across the river is on.
+    const twin = t ^ 1;
+    const fxp = twin < map.townCount ? map.townX[twin] : ai.foeX;
+    const fyp = twin < map.townCount ? map.townY[twin] : ai.foeY;
+    const list: number[] = [];
+    for (let s = 0; s < map.structCount; s++) {
+      if (map.sKind[s] === S_BUILDING && map.sTown[s] === t) list.push(s);
+    }
+    list.sort(
+      (a, b) =>
+        dist(structX(map, a), structY(map, a), fxp, fyp) -
+          dist(structX(map, b), structY(map, b), fxp, fyp) || a - b,
+    );
+    ai.houses.push(list);
+    ai.garr.push([]);
+  }
+  ai.stageX = ai.homeX + ai.fwd * fx(40);
+  ai.stageY = ai.homeY;
+  ai.ready = true;
+  return true;
+}
+
+// ---------------------------------------------------------------- perception
+
+/**
+ * Look at the world: sort its own units by job, and note which enemies are in sight. An
+ * enemy is in sight if the sim says someone has it spotted, or if it stands in the open
+ * right next to the AI's own troops.
+ */
+function perceive(ai: Ai, w: World): void {
+  const n = w.count;
+  const tick = w.tick;
+  const map = w.map;
+  eyes.fill(0);
+  ai.have.fill(0);
+  ai.trucks.length = 0;
+  ai.fresh.length = 0;
+  ai.reserve.length = 0;
+  ai.scouts.length = 0;
+  ai.members[0].length = 0;
+  ai.members[1].length = 0;
+  for (const g of ai.garr) g.length = 0;
+  for (let i = 0; i < n; i++) {
+    if (w.state[i] !== STATE_ALIVE || w.team[i] !== ai.team) {
+      ai.role[i] = R_NONE;
+      ai.post[i] = -1;
+      continue;
+    }
+    const kind = w.kind[i];
+    ai.have[kind]++;
+    eyes[square(w.posX[i], w.posY[i])] = 1;
+    if (kind === KIND_TRUCK) {
+      ai.trucks.push(i);
+      continue;
+    }
+    if (ai.roleKind[i] !== kind) {
+      ai.role[i] = R_NONE;
+      ai.post[i] = -1;
+      ai.roleKind[i] = kind;
+    }
+    if (w.carrier[i] >= 0) continue;
+    const role = ai.role[i];
+    if (role === R_NONE) ai.fresh.push(i);
+    else if (role === R_RESERVE) ai.reserve.push(i);
+    else if (role === R_ARMY) ai.members[0].push(i);
+    else if (role === R_RAID) ai.members[1].push(i);
+    else if (role === R_SCOUT) ai.scouts.push(i);
+    else if (role - R_TOWN < ai.garr.length) ai.garr[role - R_TOWN].push(i);
+    else ai.role[i] = R_NONE;
+  }
+  for (let s = 0; s < map.structCount; s++) {
+    if (w.sTeam[s] === ai.team && w.sHp[s] > 0) eyes[square(structX(map, s), structY(map, s))] = 1;
+  }
+  // A square is watched if the AI has someone in it or next to it.
+  for (let y = 0; y < CD; y++) {
+    for (let x = 0; x < CD; x++) {
+      let on = 0;
+      for (let dy = -1; dy <= 1 && on === 0; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < CD && ny < CD && eyes[ny * CD + nx] !== 0) on = 1;
+        }
+      }
+      watched[y * CD + x] = on;
+    }
+  }
+  scratch.fill(0);
+  mixNow.fill(0);
+  ai.seen.length = 0;
+  for (let i = 0; i < n; i++) {
+    if (w.state[i] !== STATE_ALIVE || w.team[i] === ai.team || w.carrier[i] >= 0) continue;
+    const c = square(w.posX[i], w.posY[i]);
+    if (w.spotted[i] <= tick && (watched[c] === 0 || concealed(w, i))) continue;
+    const kind = w.kind[i];
+    ai.seen.push(i);
+    mixNow[kind]++;
+    let p = Math.trunc((POWER[kind] * w.hp[i]) / KINDS[kind].hp) + 1;
+    if (w.inside[i] >= 0) {
+      // Troops in a house are worth twice their number to whoever has to get them out.
+      p *= 2;
+      ai.occupied[w.inside[i]] = tick + 3 * MINUTE;
+    }
+    scratch[c] += p;
+    eyes[c] |= 2;
+  }
+  const fade = tick % (20 * TICK_RATE) < ai.tune.period >> 1;
+  for (let c = 0; c < CC; c++) {
+    if (watched[c] !== 0 || (eyes[c] & 2) !== 0) {
+      ai.threat[c] = scratch[c];
+      ai.seenAt[c] = tick;
+    } else if (fade) {
+      ai.threat[c] -= ai.threat[c] >> 3;
+    }
+  }
+  const forget = tick % (10 * TICK_RATE) < ai.tune.period >> 1;
+  for (let k = 0; k < KIND_COUNT; k++) {
+    if (forget && ai.foeMix[k] > 0) ai.foeMix[k]--;
+    if (mixNow[k] > ai.foeMix[k]) ai.foeMix[k] = mixNow[k];
+  }
+  for (let s = 0; s < map.structCount; s++) {
+    if (w.sTeam[s] === NO_TEAM || w.sTeam[s] === ai.team || ai.known[s] !== 0) continue;
+    if (watched[square(structX(map, s), structY(map, s))] !== 0) ai.known[s] = 1;
+  }
+  for (let t = 0; t < map.townCount; t++) if (w.townOwner[t] === ai.team) ai.held[t] = 1;
+  // Old defeats fade: the enemy who stopped it then may be somewhere else by now.
+  if (tick % MINUTE < ai.tune.period >> 1) {
+    for (let k = 0; k <= MAX_TOWNS; k++) ai.grudge[k] -= ai.grudge[k] >> 3;
+  }
+}
+
+/**
+ * Enemy strength the AI expects within `r` squares of a point: what it last saw there, or,
+ * for squares it has not looked at for three minutes, a share of `assumed`.
+ */
+function expect(ai: Ai, w: World, x: number, y: number, r: number, assumed: number): number {
+  const cx = clampInt(x >> CS, 0, CD - 1);
+  const cy = clampInt(y >> CS, 0, CD - 1);
+  let sum = 0;
+  let blind = 0;
+  let cells = 0;
+  for (let j = cy - r; j <= cy + r; j++) {
+    for (let i = cx - r; i <= cx + r; i++) {
+      if (i < 0 || j < 0 || i >= CD || j >= CD) continue;
+      cells++;
+      const c = j * CD + i;
+      if (w.tick - ai.seenAt[c] > 3 * MINUTE) blind++;
+      else sum += ai.threat[c];
+    }
+  }
+  return cells === 0 ? 0 : sum + Math.trunc((assumed * blind) / cells);
+}
+
+function strength(w: World, units: readonly number[]): number {
+  let sum = 0;
+  for (let k = 0; k < units.length; k++) {
+    const i = units[k];
+    sum += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / KINDS[w.kind[i]].hp);
+  }
+  return sum;
+}
+
+/** Where a body of troops is: the middle of its line units (of all of them, if it has none). */
+function centre(w: World, units: readonly number[]): [number, number] {
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let pass = 0; pass < 2 && n === 0; pass++) {
+    for (let k = 0; k < units.length; k++) {
+      const i = units[k];
+      if (pass === 0 && !LINE[w.kind[i]]) continue;
+      sx += w.posX[i];
+      sy += w.posY[i];
+      n++;
+    }
+  }
+  return n === 0 ? [0, 0] : [Math.trunc(sx / n), Math.trunc(sy / n)];
+}
+
+// ---------------------------------------------------------------- economy
+
+const DEPOT_REACH = fx(60);
+
+function canPay(w: World, team: number, p: Price, s: number, f: number, c: number): boolean {
+  return (
+    w.supplies[team] - s >= p.supplies &&
+    w.fuel[team] - f >= p.fuel &&
+    w.credits[team] - c >= p.credits
+  );
+}
+
+function finished(w: World, s: number): boolean {
+  return w.sBuild[s] >= BUILDINGS[w.sType[s]].ticks;
+}
+
+/** A plot for a building near cell (cx, cy) that leaves a lane on every side, or -1. */
+function findPlot(w: World, type: number, cx: number, cy: number, reach: number): number {
+  const b = BUILDINGS[type];
+  const map = w.map;
+  return findCell(cx, cy, reach, (x, y) => {
+    if (x < 5 || y < 5 || x + b.w > MAP_CELLS - 5 || y + b.h > MAP_CELLS - 5) return false;
+    if (!canPlace(map, x, y, b.w, b.h)) return false;
+    for (let j = y - 3; j <= y + b.h + 2; j++) {
+      for (let i = x - 3; i <= x + b.w + 2; i++) {
+        const t = map.type[j * MAP_CELLS + i];
+        if (t !== T_OPEN && t !== T_FOREST) return false;
+      }
+    }
+    return true;
+  });
+}
+
+/** The `n` trucks nearest a point that are not already building something. */
+function nearestTrucks(ai: Ai, w: World, x: number, y: number, n: number): number[] {
+  const free = ai.trucks.filter((i) => w.job[i] !== JOB_BUILD);
+  free.sort((a, b) => dist(w.posX[a], w.posY[a], x, y) - dist(w.posX[b], w.posY[b], x, y) || a - b);
+  return free.slice(0, n);
+}
+
+function economy(ai: Ai, w: World, out: Command[]): void {
+  const map = w.map;
+  const team = ai.team;
+  const tune = ai.tune;
+  const tick = w.tick;
+  const count = new Array<number>(BUILDINGS.length).fill(0);
+  const drops: number[] = [];
+  const rising: number[] = [];
+  const hurt: number[] = [];
+  let researching = false;
+  let queuedTrucks = 0;
+  let busy = true;
+  for (let s = 0; s < map.structCount; s++) {
+    if (w.sTeam[s] !== team || w.sHp[s] <= 0) continue;
+    const type = w.sType[s];
+    count[type]++;
+    if (!finished(w, s)) {
+      rising.push(s);
+      continue;
+    }
+    if (BUILDINGS[type].dropOff) drops.push(s);
+    if (w.sHp[s] * 10 < map.sMaxHp[s] * 6) hurt.push(s);
+    if (type !== B_HQ && type !== B_DEPOT && w.sQueueLen[s] === 0) busy = false;
+    for (let q = 0; q < w.sQueueLen[s]; q++) {
+      const item = w.sQueue[s * QUEUE_MAX + q];
+      if (item === TIER_ITEM) researching = true;
+      else if (item === KIND_TRUCK) queuedTrucks++;
+    }
+  }
+
+  // Sites: which can be worked (a depot in reach, no enemy about) and by how many trucks.
+  perSite.fill(0);
+  let capTotal = 0;
+  let expand = -1;
+  let expandD = 0;
+  for (let k = 0; k < map.siteCount; k++) {
+    const fuel = map.siteKind[k] === SITE_FUEL;
+    const sx = map.siteX[k];
+    const sy = map.siteY[k];
+    let served = false;
+    for (const d of drops) {
+      if (structDist2(w, d, sx, sy) <= DEPOT_REACH * DEPOT_REACH) served = true;
+    }
+    const alive = fuel || w.siteStock[k] > 0;
+    const safe = ai.siteBad[k] <= tick;
+    ai.siteCap[k] = alive && served && safe ? (fuel ? (w.fuel[team] > 900 ? 1 : 3) : 8) : 0;
+    capTotal += ai.siteCap[k];
+    if (served || fuel || !alive || !safe || bankOf(ai, sx, sy) !== ai.side) continue;
+    if (expect(ai, w, sx, sy, 2, 0) > 0) continue;
+    const d = dist(sx, sy, ai.homeX, ai.homeY);
+    if (expand < 0 || d < expandD) {
+      expand = k;
+      expandD = d;
+    }
+  }
+  const idle: number[] = [];
+  for (const i of ai.trucks) {
+    const job = w.job[i];
+    if (job === JOB_BUILD) continue;
+    // Idle, or one too many on its site (a site that has run dry or come under fire takes
+    // none): to be placed again.
+    if (job === JOB_NONE || perSite[w.jobSite[i]] >= ai.siteCap[w.jobSite[i]]) idle.push(i);
+    else perSite[w.jobSite[i]]++;
+  }
+  const wantFuel = count[B_BARRACKS] + count[B_WORKS] > 0 && w.fuel[team] < 500;
+  if (wantFuel && idle.length === 0) {
+    // A well nobody empties is fuel thrown away: take a truck off the busiest stockpile.
+    let well = -1;
+    let from = -1;
+    for (let k = 0; k < map.siteCount; k++) {
+      if (map.siteKind[k] === SITE_FUEL) {
+        if (perSite[k] < ai.siteCap[k] && well < 0) well = k;
+      } else if (perSite[k] > 2 && (from < 0 || perSite[k] > perSite[from])) from = k;
+    }
+    if (well >= 0 && from >= 0) {
+      for (const i of ai.trucks) {
+        if (w.job[i] === JOB_BUILD || w.job[i] === JOB_NONE || w.jobSite[i] !== from) continue;
+        if (w.cargo[i] > 0) continue;
+        idle.push(i);
+        perSite[from]--;
+        break;
+      }
+    }
+  }
+  // Fuel first once there is something to spend it on, then the nearest stockpile.
+  const batches = new Map<number, number[]>();
+  let unplaced = 0;
+  for (const i of idle) {
+    let best = -1;
+    let bestD = 0;
+    for (let pass = wantFuel ? 0 : 1; pass < 3 && best < 0; pass++) {
+      for (let k = 0; k < map.siteCount; k++) {
+        if (perSite[k] >= ai.siteCap[k]) continue;
+        if ((map.siteKind[k] === SITE_FUEL) !== (pass !== 1)) continue;
+        const d = dist(w.posX[i], w.posY[i], map.siteX[k], map.siteY[k]);
+        if (best < 0 || d < bestD) {
+          best = k;
+          bestD = d;
+        }
+      }
+    }
+    if (best < 0) {
+      unplaced++;
+      continue;
+    }
+    perSite[best]++;
+    const list = batches.get(best);
+    if (list) list.push(i);
+    else batches.set(best, [i]);
+  }
+  for (const [site, units] of batches) out.push({ type: CMD_GATHER, units, site });
+
+  let s0 = 0;
+  let f0 = 0;
+  let c0 = 0;
+  const hqDone = finished(w, ai.hq);
+  const trucksAll = ai.trucks.length + queuedTrucks;
+  const truckTarget = clampInt(capTotal + 1, 6, tune.trucks);
+  if (
+    hqDone &&
+    trucksAll < truckTarget &&
+    w.sQueueLen[ai.hq] < 2 &&
+    w.pop[team] < w.popCap[team] &&
+    canPay(w, team, UNIT_PRICE[KIND_TRUCK], 0, 0, 0)
+  ) {
+    out.push({ type: CMD_TRAIN, structure: ai.hq, kind: KIND_TRUCK });
+    s0 += UNIT_PRICE[KIND_TRUCK].supplies;
+  }
+
+  // Building sites and damaged buildings get trucks; nothing new goes up meanwhile.
+  const crew = new Int32Array(map.structCount);
+  for (const i of ai.trucks) if (w.job[i] === JOB_BUILD) crew[w.jobStruct[i]]++;
+  for (const s of rising) {
+    if (crew[s] >= tune.builders) continue;
+    const units = nearestTrucks(ai, w, structX(map, s), structY(map, s), tune.builders - crew[s]);
+    if (units.length > 0) out.push({ type: CMD_ASSIST, units, structure: s });
+  }
+  if (ai.alarm === null) {
+    for (const s of hurt) {
+      if (crew[s] > 0) continue;
+      const units = nearestTrucks(ai, w, structX(map, s), structY(map, s), 1);
+      if (units.length > 0) out.push({ type: CMD_ASSIST, units, structure: s });
+    }
+  }
+
+  ai.resS = 0;
+  ai.resF = 0;
+  ai.resC = 0;
+  const hx = map.sX[ai.hq];
+  const hy = map.sY[ai.hq];
+  const minute = Math.trunc(tick / MINUTE);
+  const factories = count[B_BARRACKS] + count[B_WORKS] + count[B_DRONES];
+  // What to put up next, and where: the first thing on this list that is missing.
+  let type = -1;
+  let px = hx + ai.fwd * 9;
+  let py = hy;
+  const atSite = (k: number) => {
+    // Between the stockpile and the well that goes with it, so one depot serves both.
+    let mx = map.siteX[k] + (ai.homeX > map.siteX[k] ? fx(16) : -fx(16));
+    let my = map.siteY[k];
+    for (let o = 0; o < map.siteCount; o++) {
+      if (map.siteKind[o] !== SITE_FUEL) continue;
+      if (dist(map.siteX[o], map.siteY[o], map.siteX[k], map.siteY[k]) > fx(80)) continue;
+      mx = (map.siteX[o] + map.siteX[k]) >> 1;
+      my = (map.siteY[o] + map.siteY[k]) >> 1;
+    }
+    px = (mx >> CELL_SHIFT) - 1;
+    py = (my >> CELL_SHIFT) - 1;
+  };
+  // Short of fuel with supplies to spare: the next well is worth a depot.
+  const dry = count[B_WORKS] > 0 && w.fuel[team] < 150 && w.supplies[team] > 400;
+  if (count[B_BARRACKS] === 0) type = B_BARRACKS;
+  else if (w.popCap[team] < POP_MAX && w.pop[team] + 10 >= w.popCap[team]) {
+    type = B_DEPOT;
+    if (expand >= 0) atSite(expand);
+    else px = hx - ai.fwd * 8;
+  } else if (
+    expand >= 0 &&
+    (unplaced > 0 || trucksAll >= capTotal || dry) &&
+    ai.trucks.length >= 7
+  ) {
+    type = B_DEPOT;
+    atSite(expand);
+  } else if (count[B_WORKS] === 0 && ai.trucks.length >= 7) type = B_WORKS;
+  else if (w.tier[team] >= 2 && count[B_DRONES] === 0) type = B_DRONES;
+  else if (count[B_BARRACKS] < 2 && minute >= 4) type = B_BARRACKS;
+  else if (factories < tune.factories && busy && w.supplies[team] >= 500) {
+    // More of whatever it can keep fed: a motor pool only where there is fuel for it.
+    type = 2 * count[B_WORKS] <= count[B_BARRACKS] && w.fuel[team] >= 250 ? B_WORKS : B_BARRACKS;
+    if (w.tier[team] >= 3 && count[B_DRONES] < 2 && w.credits[team] > 500) type = B_DRONES;
+  }
+  if (type >= 0 && rising.length === 0 && BUILDINGS[type].tier <= w.tier[team]) {
+    const b = BUILDINGS[type];
+    if (canPay(w, team, b, s0, 0, 0)) {
+      const plot = findPlot(w, type, px, py, 30);
+      if (plot >= 0) {
+        const x = plot % MAP_CELLS;
+        const y = Math.trunc(plot / MAP_CELLS);
+        const units = nearestTrucks(ai, w, cellX(plot), cellY(plot), tune.builders);
+        if (units.length > 0) {
+          out.push({ type: CMD_BUILD, units, building: type, x, y });
+          s0 += b.supplies;
+          f0 += b.fuel;
+          c0 += b.credits;
+          ai.plan = `build ${b.name}`;
+        }
+      }
+    } else {
+      ai.resS = b.supplies;
+      ai.resF = b.fuel;
+      ai.resC = b.credits;
+    }
+  }
+
+  // Technology: as soon as the towns have paid for it and there is an army to use it.
+  if (w.tier[team] < MAX_TIER && hqDone && !researching) {
+    const p = TIER_PRICE[w.tier[team]];
+    const due = w.tier[team] === 1 ? count[B_BARRACKS] > 0 : count[B_WORKS] > 0 && minute >= 6;
+    if (p && due) {
+      if (canPay(w, team, p, s0, f0, c0) && w.sQueueLen[ai.hq] < QUEUE_MAX) {
+        out.push({ type: CMD_RESEARCH, structure: ai.hq });
+        ai.plan = `research tier ${w.tier[team] + 1}`;
+      } else if (w.credits[team] >= p.credits) {
+        if (p.supplies > ai.resS) ai.resS = p.supplies;
+        if (p.fuel > ai.resF) ai.resF = p.fuel;
+        ai.resC += p.credits;
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- production
+
+/** The army it wants, as weights per unit type, from its technology and the enemy seen. */
+function wantedMix(ai: Ai, w: World): void {
+  const tier = w.tier[ai.team];
+  want.fill(0);
+  if (tier === 1) {
+    want[KIND_INFANTRY] = 60;
+    want[KIND_IFV] = 40;
+  } else {
+    want[KIND_INFANTRY] = 32;
+    want[KIND_ATGM] = 14;
+    want[KIND_IFV] = 16;
+    want[KIND_TANK] = 30;
+    want[KIND_AD] = 3;
+    if (tier >= 3) {
+      want[KIND_ARTILLERY] = 9;
+      want[KIND_EW] = 1;
+      want[KIND_STRIKE] = 8;
+    }
+  }
+  if (!ai.tune.counter) return;
+  const foe = ai.foeMix;
+  const armour = 2 * foe[KIND_TANK] + foe[KIND_IFV] + foe[KIND_ARTILLERY] + foe[KIND_AD];
+  const foot = foe[KIND_INFANTRY] + foe[KIND_ATGM];
+  const air = foe[KIND_DRONE] + foe[KIND_STRIKE];
+  let dug = 0;
+  for (let s = 0; s < w.map.structCount; s++) if (ai.occupied[s] > w.tick && w.sHp[s] > 0) dug++;
+  if (armour > foot && armour >= 4) {
+    // Armour: missiles from cover, and drones on its roof.
+    want[KIND_ATGM] += 10;
+    want[KIND_TANK] += 4;
+    want[KIND_STRIKE] += 4;
+    want[KIND_INFANTRY] -= 10;
+  } else if (foot > 2 * armour && foot >= 6) {
+    // Infantry: autocannon and shells.
+    want[KIND_IFV] += 10;
+    want[KIND_ARTILLERY] += 4;
+    want[KIND_TANK] -= 6;
+  }
+  if (air >= 2) {
+    want[KIND_AD] += 5;
+    want[KIND_EW] += 2;
+  }
+  if (dug >= 3) {
+    // A dug-in enemy (houses today, field works later) is a job for guns.
+    want[KIND_ARTILLERY] += 6;
+    want[KIND_TANK] += 4;
+  }
+  for (let k = 0; k < KIND_COUNT; k++) {
+    if (want[k] < 0 || UNIT_PRICE[k].tier > tier) want[k] = 0;
+  }
+}
+
+function production(ai: Ai, w: World, out: Command[]): void {
+  const map = w.map;
+  const team = ai.team;
+  const have = ai.have.slice();
+  const lines: number[] = [];
+  let queued = 0;
+  for (let s = 0; s < map.structCount; s++) {
+    if (w.sTeam[s] !== team || w.sHp[s] <= 0 || !finished(w, s)) continue;
+    for (let q = 0; q < w.sQueueLen[s]; q++) {
+      const item = w.sQueue[s * QUEUE_MAX + q];
+      if (item === TIER_ITEM) continue;
+      have[item]++;
+      queued++;
+    }
+    if (w.sType[s] !== B_HQ && w.sType[s] !== B_DEPOT) lines.push(s);
+  }
+  wantedMix(ai, w);
+  let sumWant = 0;
+  let total = 0;
+  for (let k = 0; k < KIND_COUNT; k++) {
+    sumWant += want[k];
+    if (want[k] > 0) total += have[k];
+  }
+  const tier = w.tier[team];
+  const scouts = 2 + (tier >= 2 ? 1 : 0) + (ai.level === 'hard' ? 1 : 0);
+  const drones = tier >= 2 ? (ai.level === 'hard' ? 3 : 2) : 0;
+  // Under attack, everything goes into units: the plans can wait.
+  const calm = ai.alarm === null;
+  let s0 = calm ? ai.resS : 0;
+  let f0 = calm ? ai.resF : 0;
+  let c0 = calm ? ai.resC : 0;
+  let room = w.popCap[team] - w.pop[team] - queued;
+  for (const s of lines) {
+    if (room <= 0) break;
+    if (w.sQueueLen[s] >= ai.tune.queue) continue;
+    let best = -1;
+    let bestScore = 0;
+    for (let k = 0; k < KIND_COUNT; k++) {
+      const p = UNIT_PRICE[k];
+      if (p.from !== w.sType[s] || p.tier > tier || !canPay(w, team, p, s0, f0, c0)) continue;
+      let score = want[k] * (total + 10) - have[k] * sumWant;
+      if (k === KIND_RECON || k === KIND_DRONE) {
+        // Eyes are bought by the head, not as a share of the army.
+        if (have[k] >= (k === KIND_RECON ? scouts : drones)) continue;
+        score = 1 << 20;
+      } else if (want[k] === 0) continue;
+      if (best < 0 || score > bestScore) {
+        best = k;
+        bestScore = score;
+      }
+    }
+    // Nothing it is short of: still spend a full purse rather than sit on it.
+    if (best < 0 || (bestScore <= 0 && w.supplies[team] - s0 < 700)) continue;
+    out.push({ type: CMD_TRAIN, structure: s, kind: best });
+    const p = UNIT_PRICE[best];
+    s0 += p.supplies;
+    f0 += p.fuel;
+    c0 += p.credits;
+    have[best]++;
+    total++;
+    room--;
+  }
+  // New units report to the staging area.
+  for (const s of lines) {
+    if (dist(w.sRallyX[s], w.sRallyY[s], ai.stageX, ai.stageY) > fx(12)) {
+      out.push({ type: CMD_RALLY, structure: s, x: ai.stageX, y: ai.stageY });
+    }
+  }
+}
+
+// ---------------------------------------------------------------- military
+
+function military(ai: Ai, w: World, out: Command[]): void {
+  const map = w.map;
+  // The staging area: behind the central settlement while it is safe, else at the base.
+  const tc = ai.side;
+  ai.stageX = ai.homeX + ai.fwd * fx(40);
+  ai.stageY = ai.homeY;
+  if (tc < map.townCount && w.townOwner[tc] !== ai.enemy) {
+    const [sx, sy] = ground(map, map.townX[tc] - ai.fwd * (map.townR[tc] + fx(22)), map.townY[tc]);
+    if (expect(ai, w, sx, sy, 2, 0) < 30) {
+      ai.stageX = sx;
+      ai.stageY = sy;
+    }
+  }
+  ai.alarm = findAlarm(ai, w);
+  enlist(ai, w);
+  garrisons(ai, w, out);
+  scouting(ai, w, out);
+  runReserve(ai, w, out);
+  runForce(ai, w, out, 0);
+  runForce(ai, w, out, 1);
+}
+
+function order(out: Command[], type: number, units: number[], x: number, y: number): void {
+  if (units.length === 0) return;
+  if (type === CMD_MOVE) out.push({ type: CMD_MOVE, units, x, y });
+  else out.push({ type: CMD_ATTACK_MOVE, units, x, y });
+}
+
+/** Squads it wants in a town. */
+function wantedIn(ai: Ai, w: World, t: number): number {
+  const map = w.map;
+  const owner = w.townOwner[t];
+  let g = ai.tune.garrison + Math.min(ai.tune.garrison, Math.trunc(w.tick / (4 * MINUTE)));
+  if (t < 2) g += g >> 1;
+  if (bankOf(ai, map.townX[t], map.townY[t]) !== ai.side) {
+    return owner === ai.team ? Math.max(3, g >> 1) : 0;
+  }
+  // Its own bank. A town the enemy has taken is the army's business, not the garrison's.
+  if (owner === ai.enemy && expect(ai, w, map.townX[t], map.townY[t], 2, 0) > 16) return 0;
+  if (ai.alarm !== null && ai.alarm.town === t) g += g >> 1;
+  return g;
+}
+
+/** Give every new unit a job. */
+function enlist(ai: Ai, w: World): void {
+  const map = w.map;
+  let inTowns = 0;
+  const wanted: number[] = [];
+  for (let t = 0; t < map.townCount; t++) {
+    wanted.push(wantedIn(ai, w, t));
+    inTowns += ai.garr[t].length;
+    // Too many in a town (it was lost, or the alarm is over): the surplus joins the reserve.
+    while (ai.garr[t].length > wanted[t] + 2) {
+      const i = ai.garr[t].pop()!;
+      ai.role[i] = R_RESERVE;
+      ai.reserve.push(i);
+      inTowns--;
+    }
+  }
+  const foot = ai.have[KIND_INFANTRY] + ai.have[KIND_ATGM];
+  const cap = Math.max(12, Math.trunc((foot * 6) / 10));
+  let recon = 0;
+  let drones = 0;
+  for (const i of ai.scouts) {
+    if (w.kind[i] === KIND_RECON) recon++;
+    else drones++;
+  }
+  const tier = w.tier[ai.team];
+  const reconPosts = Math.min(2 + (tier >= 2 ? 1 : 0) + (ai.level === 'hard' ? 1 : 0), 4);
+  for (const i of ai.fresh) {
+    const kind = w.kind[i];
+    let role = R_RESERVE;
+    if (kind === KIND_RECON && recon < reconPosts) {
+      role = R_SCOUT;
+      recon++;
+    } else if (kind === KIND_DRONE && drones < 3) {
+      role = R_SCOUT;
+      drones++;
+    } else if (FOOT(kind) || kind === KIND_RECON) {
+      let best = -1;
+      let need = 0;
+      for (let t = 0; t < map.townCount && inTowns < cap; t++) {
+        const d = wanted[t] - ai.garr[t].length;
+        if (d > need) {
+          need = d;
+          best = t;
+        }
+      }
+      if (best >= 0) {
+        role = R_TOWN + best;
+        ai.garr[best].push(i);
+        inTowns++;
+      }
+    }
+    ai.role[i] = role;
+    ai.post[i] = -1;
+    ai.leg[i] = 0;
+    if (role === R_RESERVE) ai.reserve.push(i);
+    else if (role === R_SCOUT) ai.scouts.push(i);
+  }
+  ai.fresh.length = 0;
+}
+
+/**
+ * Town garrisons go into the houses: the ones facing the crossing first, a few squads to a
+ * house so that one collapse does not take the whole garrison, and out of any house that
+ * is about to come down.
+ */
+function garrisons(ai: Ai, w: World, out: Command[]): void {
+  const map = w.map;
+  pendingIn.fill(0, 0, map.structCount);
+  for (let t = 0; t < map.townCount; t++) {
+    for (const i of ai.garr[t]) {
+      if (w.inside[i] < 0 && (w.flags[i] & FLAG_GARRISON) !== 0) pendingIn[w.orderStruct[i]]++;
+    }
+  }
+  for (let t = 0; t < map.townCount; t++) {
+    const batches = new Map<number, number[]>();
+    const loose: number[] = [];
+    for (const i of ai.garr[t]) {
+      const at = w.inside[i];
+      if (at >= 0) {
+        if (w.sHp[at] * 3 >= map.sMaxHp[at]) continue;
+      } else if ((w.flags[i] & FLAG_GARRISON) !== 0) continue;
+      let best = -1;
+      for (let pass = 0; pass < 2 && best < 0; pass++) {
+        for (const s of ai.houses[t]) {
+          if (s === at || w.sHp[s] <= 0 || w.sHp[s] * 3 < map.sMaxHp[s]) continue;
+          if (w.sOcc[s] > 0 && w.sOccTeam[s] !== ai.team) continue;
+          const room = Math.min(map.sW[s] * map.sH[s], GARRISON_MAX, pass === 0 ? 3 : GARRISON_MAX);
+          if (w.sOcc[s] + pendingIn[s] >= room) continue;
+          best = s;
+          break;
+        }
+      }
+      if (best < 0) {
+        if (at < 0 && (w.flags[i] & FLAG_MOVING) === 0) loose.push(i);
+        continue;
+      }
+      pendingIn[best]++;
+      const list = batches.get(best);
+      if (list) list.push(i);
+      else batches.set(best, [i]);
+    }
+    for (const [structure, units] of batches) out.push({ type: CMD_GARRISON, units, structure });
+    // No house left to hold: the rubble of the town is cover too.
+    const far = loose.filter(
+      (i) => dist(w.posX[i], w.posY[i], map.townX[t], map.townY[t]) > map.townR[t] >> 1,
+    );
+    order(out, CMD_ATTACK_MOVE, far, map.townX[t], map.townY[t]);
+  }
+}
+
+/** The outer crossing (a bare ford) with the least enemy on its far bank, or -1. */
+function quietFord(ai: Ai, w: World, x: number, y: number): number {
+  let best = -1;
+  let bestCost = 0;
+  for (let k = 0; k < ai.crossings.length; k++) {
+    const c = ai.crossings[k];
+    if (c.town[0] >= 0 || c.town[1] >= 0) continue;
+    const far = 1 - ai.side;
+    const cost =
+      (dist(x, y, c.x, c.y) >> FP_SHIFT) + 6 * expect(ai, w, c.bankX[far], c.bankY[far], 2, 0);
+    if (best < 0 || cost < bestCost) {
+      best = k;
+      bestCost = cost;
+    }
+  }
+  return best;
+}
+
+/**
+ * Scouts. Recon teams take posts in order: the central crossing, a hide in sight of the
+ * enemy base (reached over a quiet outer ford), then the two outer fords. Drones fly a
+ * round over the enemy base, his towns and whatever the army is attacking.
+ */
+function scouting(ai: Ai, w: World, out: Command[]): void {
+  const map = w.map;
+  const taken = [false, false, false, false];
+  let slot = 0;
+  for (const i of ai.scouts)
+    if (w.kind[i] === KIND_RECON && ai.post[i] >= 0) taken[ai.post[i]] = true;
+  const outer = ai.crossings.filter((c) => c.town[0] < 0 && c.town[1] < 0);
+  const rounds: number[] = [ai.foeX, ai.foeY];
+  for (let t = 0; t < map.townCount; t++) {
+    if (bankOf(ai, map.townX[t], map.townY[t]) !== ai.side) rounds.push(map.townX[t], map.townY[t]);
+  }
+  const obj = ai.forces[0].obj;
+  if (obj !== null && ai.forces[0].state !== F_IDLE) rounds.push(obj.x, obj.y, obj.x, obj.y);
+  const turn = Math.trunc(w.tick / (30 * TICK_RATE));
+  for (const i of ai.scouts) {
+    if ((w.flags[i] & FLAG_MOVING) !== 0) continue;
+    let tx = ai.stageX;
+    let ty = ai.stageY;
+    if (w.kind[i] === KIND_DRONE) {
+      const k = (slot++ + turn) % (rounds.length >> 1);
+      tx = rounds[2 * k];
+      ty = rounds[2 * k + 1];
+    } else {
+      if (ai.post[i] < 0) {
+        const free = taken.indexOf(false);
+        ai.post[i] = free < 0 ? 0 : free;
+        taken[ai.post[i]] = true;
+        ai.leg[i] = 0;
+      }
+      const post = ai.post[i];
+      const mid = ai.crossings.find((c) => c.town[ai.side] === ai.side);
+      if (post === 0 && mid) {
+        tx = mid.bankX[ai.side] + ai.fwd * fx(14);
+        ty = mid.bankY[ai.side];
+      } else if (post === 1) {
+        // Leg 0: over a quiet ford. Leg 1: to a hide short of the enemy base.
+        const ford = quietFord(ai, w, w.posX[i], w.posY[i]);
+        const far = 1 - ai.side;
+        if (ai.leg[i] === 0 && ford >= 0) {
+          tx = ai.crossings[ford].bankX[far];
+          ty = ai.crossings[ford].bankY[far];
+          if (bankOf(ai, w.posX[i], w.posY[i]) === far) ai.leg[i] = 1;
+        }
+        if (ai.leg[i] === 1 || ford < 0) {
+          tx = ai.foeX - ai.fwd * fx(62);
+          ty = ai.foeY + (w.posY[i] < ai.foeY ? -fx(30) : fx(30));
+        }
+      } else if (post >= 2 && post - 2 < outer.length) {
+        tx = outer[post - 2].bankX[ai.side];
+        ty = outer[post - 2].bankY[ai.side];
+      }
+    }
+    if (dist(w.posX[i], w.posY[i], tx, ty) > fx(10)) order(out, CMD_MOVE, [i], tx, ty);
+  }
+}
+
+/** The worst intrusion on what the AI holds: its base, its towns, the sites it works. */
+function findAlarm(ai: Ai, w: World): Alarm | null {
+  if (ai.seen.length === 0) return null;
+  const map = w.map;
+  // x, y, radius, town or -1, site or -1, base flag: six numbers per asset.
+  const assets: number[] = [];
+  for (let s = 0; s < map.structCount; s++) {
+    if (w.sTeam[s] === ai.team && w.sHp[s] > 0) {
+      assets.push(structX(map, s), structY(map, s), fx(55), -1, -1, 1);
+    }
+  }
+  for (let t = 0; t < map.townCount; t++) {
+    if (w.townOwner[t] === ai.team || ai.garr[t].length > 0) {
+      assets.push(map.townX[t], map.townY[t], map.townR[t] + fx(30), t, -1, 0);
+    }
+  }
+  for (let k = 0; k < map.siteCount; k++) {
+    if (ai.siteCap[k] > 0 || ai.siteBad[k] > w.tick) {
+      assets.push(map.siteX[k], map.siteY[k], fx(45), -1, k, 0);
+    }
+  }
+  const count = assets.length / 6;
+  const sum = new Int32Array(count);
+  const sx = new Float64Array(count);
+  const sy = new Float64Array(count);
+  const num = new Int32Array(count);
+  for (const e of ai.seen) {
+    const kind = w.kind[e];
+    if (POWER[kind] <= 2) continue;
+    const x = w.posX[e];
+    const y = w.posY[e];
+    for (let a = 0; a < count; a++) {
+      const r = assets[6 * a + 2];
+      const dx = x - assets[6 * a];
+      const dy = y - assets[6 * a + 1];
+      if (dx * dx + dy * dy > r * r) continue;
+      sum[a] += Math.trunc((POWER[kind] * w.hp[e]) / KINDS[kind].hp) + 1;
+      sx[a] += x;
+      sy[a] += y;
+      num[a]++;
+      if (assets[6 * a + 4] >= 0) ai.siteBad[assets[6 * a + 4]] = w.tick + 30 * TICK_RATE;
+      break;
+    }
+  }
+  let best = -1;
+  for (let a = 0; a < count; a++) {
+    if (sum[a] === 0) continue;
+    // The base outranks everything else.
+    const key = sum[a] + (assets[6 * a + 5] !== 0 ? 1000000 : 0);
+    if (best < 0 || key > sum[best] + (assets[6 * best + 5] !== 0 ? 1000000 : 0)) best = a;
+  }
+  if (best < 0) return null;
+  return {
+    x: Math.trunc(sx[best] / num[best]),
+    y: Math.trunc(sy[best] / num[best]),
+    threat: sum[best],
+    base: assets[6 * best + 5] !== 0,
+    town: assets[6 * best + 3],
+  };
+}
+
+/**
+ * The reserve waits at the staging area and goes for whatever sets off an alarm, if it can
+ * win there (it always fights for the base).
+ */
+function runReserve(ai: Ai, w: World, out: Command[]): void {
+  const a = ai.alarm;
+  const units = ai.reserve.filter((i) => w.kind[i] !== KIND_STRIKE || a !== null);
+  if (a !== null && (a.base || strength(w, ai.reserve) * 100 >= a.threat * 70)) {
+    const go = units.filter(
+      (i) =>
+        w.attack[i] === NO_TARGET &&
+        dist(w.targetX[i], w.targetY[i], a.x, a.y) > fx(24) &&
+        dist(w.posX[i], w.posY[i], a.x, a.y) > fx(12),
+    );
+    order(out, CMD_ATTACK_MOVE, go, a.x, a.y);
+    return;
+  }
+  const back = ai.reserve.filter(
+    (i) =>
+      (w.flags[i] & FLAG_MOVING) === 0 &&
+      w.attack[i] === NO_TARGET &&
+      dist(w.posX[i], w.posY[i], ai.stageX, ai.stageY) > fx(34),
+  );
+  order(out, CMD_ATTACK_MOVE, back, ai.stageX, ai.stageY);
+}
+
+/**
+ * The way from a point to an objective. On the same bank: straight there. Across the
+ * river: by the crossing that costs least, counting the distance, the enemy known to
+ * stand on its far bank, and an enemy-held settlement in the way. So a defended bridge is
+ * turned by a ford, not stormed, unless the bridge town is the objective itself.
+ */
+function route(ai: Ai, w: World, x: number, y: number, obj: Objective, raid: boolean): number[] {
+  const from = bankOf(ai, x, y);
+  const to = bankOf(ai, obj.x, obj.y);
+  if (from === to || ai.crossings.length === 0) return [obj.x, obj.y];
+  let best = -1;
+  let bestCost = 0;
+  for (let k = 0; k < ai.crossings.length; k++) {
+    const c = ai.crossings[k];
+    let cost =
+      (dist(x, y, c.bankX[from], c.bankY[from]) + dist(c.bankX[to], c.bankY[to], obj.x, obj.y)) >>
+      FP_SHIFT;
+    cost += 4 * expect(ai, w, c.bankX[to], c.bankY[to], 2, 0);
+    const town = c.town[to];
+    if (town >= 0 && !(obj.kind === OBJ_TOWN && obj.id === town)) {
+      if (w.townOwner[town] === ai.enemy) cost += 150;
+      else if (w.townOwner[town] !== ai.team) cost += 40;
+    }
+    // Raiders keep clear of settlements altogether; the hard AI varies its line of march.
+    if (raid && town >= 0) cost += 400;
+    if (ai.level === 'hard') cost += nextInt(ai.rng, 40);
+    if (best < 0 || cost < bestCost) {
+      best = k;
+      bestCost = cost;
+    }
+  }
+  const c = ai.crossings[best];
+  return [c.bankX[from], c.bankY[from], c.bankX[to], c.bankY[to], obj.x, obj.y];
+}
+
+/**
+ * What to attack next with `power`, from (x, y): the objective with the best value for
+ * the resistance expected, among those it can expect to take. Null if there is none.
+ */
+function chooseObjective(ai: Ai, w: World, x: number, y: number, power: number): Objective | null {
+  const map = w.map;
+  const minute = Math.trunc(w.tick / MINUTE);
+  const ratio = ai.tune.ratio;
+  let best: Objective | null = null;
+  let bestScore = -1000000;
+  let fallback: Objective | null = null;
+  let fallbackScore = -1000000;
+  const consider = (obj: Objective, value: number, need: number) => {
+    const score = Math.trunc((value * 2000) / (200 + need)) - (dist(x, y, obj.x, obj.y) >> 13);
+    if (power * 100 >= need * ratio) {
+      if (score > bestScore) {
+        best = obj;
+        bestScore = score;
+      }
+    } else if (power >= need && score > fallbackScore) {
+      fallback = obj;
+      fallbackScore = score;
+    }
+  };
+  let foeTowns = 0;
+  for (let t = 0; t < map.townCount; t++) {
+    const owner = w.townOwner[t];
+    if (owner === ai.enemy) foeTowns++;
+    if (owner === ai.team) continue;
+    const mine = bankOf(ai, map.townX[t], map.townY[t]) === ai.side;
+    const need = Math.max(
+      ai.grudge[t],
+      expect(ai, w, map.townX[t], map.townY[t], 3, mine ? 0 : Math.min(160, 8 * minute)),
+    );
+    let value = 100;
+    if (ai.held[t] !== 0) value += 60;
+    if (mine) value += 40;
+    if (owner === ai.enemy) value += 30;
+    consider({ kind: OBJ_TOWN, id: t, x: map.townX[t], y: map.townY[t] }, value, need);
+  }
+  for (let s = 0; s < map.structCount; s++) {
+    if (ai.known[s] === 0 || w.sHp[s] <= 0 || w.sTeam[s] !== ai.enemy) continue;
+    const sx = structX(map, s);
+    const sy = structY(map, s);
+    if (w.sType[s] === B_HQ || dist(sx, sy, ai.foeX, ai.foeY) < fx(110)) continue;
+    // An outlying depot: his income, and usually the softest thing he owns.
+    consider({ kind: OBJ_POINT, id: s, x: sx, y: sy }, 70, expect(ai, w, sx, sy, 2, 4 * minute));
+  }
+  // The base last: it is the furthest, a headquarters takes long to bring down, and an
+  // enemy who still holds towns pays for a new army while it burns.
+  const need = Math.max(
+    ai.grudge[MAX_TOWNS],
+    100 + 40 * foeTowns + expect(ai, w, ai.foeX, ai.foeY, 4, 60 + 10 * minute),
+  );
+  let value = 60;
+  if (foeTowns === 0) value += 150;
+  if (w.pop[ai.team] * 10 >= w.popCap[ai.team] * 9) value += 100;
+  if (power > 700) value += 100;
+  consider({ kind: OBJ_BASE, id: -1, x: ai.foeX, y: ai.foeY }, value, need);
+  if (best !== null) return best;
+  // Nothing it is sure of. An army that has grown large and has sat for four minutes goes
+  // anyway, for the best of what it at least matches: waiting only helps the defender.
+  if (power >= 3 * ai.tune.minArmy && w.tick - ai.lastAttack > 4 * MINUTE) return fallback;
+  return null;
+}
+
+/** A raid target: a resource site on the enemy bank, away from his base and his troops. */
+function raidTarget(ai: Ai, w: World): Objective | null {
+  const map = w.map;
+  let best: Objective | null = null;
+  let bestCost = 0;
+  for (let k = 0; k < map.siteCount; k++) {
+    const x = map.siteX[k];
+    const y = map.siteY[k];
+    if (bankOf(ai, x, y) === ai.side) continue;
+    if (map.siteKind[k] !== SITE_FUEL && w.siteStock[k] <= 0) continue;
+    if (dist(x, y, ai.foeX, ai.foeY) < fx(90)) continue;
+    const cost = 10 * expect(ai, w, x, y, 2, 0) + nextInt(ai.rng, 60);
+    if (best === null || cost < bestCost) {
+      best = { kind: OBJ_POINT, id: -1, x, y };
+      bestCost = cost;
+    }
+  }
+  return best;
+}
+
+function setOut(ai: Ai, w: World, f: Force, units: number[], obj: Objective): void {
+  const [cx, cy] = centre(w, units);
+  f.obj = obj;
+  f.wps = route(ai, w, cx, cy, obj, f.role === R_RAID);
+  f.wp = 0;
+  f.state = F_MARCH;
+  f.since = w.tick;
+  f.quiet = 0;
+  f.smoked = false;
+}
+
+/** Break off. A beaten army remembers what it was beaten with, and comes back with more. */
+function retreat(ai: Ai, f: Force, w: World, beaten: boolean): void {
+  const obj = f.obj;
+  if (beaten && f.role === R_ARMY && obj !== null && obj.kind !== OBJ_POINT) {
+    const k = obj.kind === OBJ_TOWN ? obj.id : MAX_TOWNS;
+    if (f.launch > ai.grudge[k]) ai.grudge[k] = f.launch;
+  }
+  if (f.role === R_ARMY) ai.restUntil = w.tick + 45 * TICK_RATE;
+  f.state = F_RETREAT;
+  f.since = w.tick;
+  f.obj = null;
+}
+
+/** One think of the field army (which = 0) or the raiding party (1). */
+function runForce(ai: Ai, w: World, out: Command[], which: number): void {
+  const f = ai.forces[which];
+  const units = ai.members[which];
+  const raid = which === 1;
+  const tick = w.tick;
+  const map = w.map;
+  const tune = ai.tune;
+  if (f.state === F_IDLE) {
+    // Not while the base is under attack or the reserve has its hands full with an intruder.
+    const al = ai.alarm;
+    if (al !== null && (al.base || al.threat * 3 > strength(w, ai.reserve))) return;
+    if (!raid && tick < ai.restUntil) return;
+    if (raid) {
+      if (tune.raids === 0 || tick < tune.raids || tick - ai.lastRaid < 3 * MINUTE) return;
+      const ifvs = ai.reserve.filter(
+        (i) => w.kind[i] === KIND_IFV && w.hp[i] * 2 > KINDS[KIND_IFV].hp,
+      );
+      if (ifvs.length < 5) return;
+      const obj = raidTarget(ai, w);
+      if (obj === null) return;
+      const party = ifvs.slice(0, 6);
+      for (const i of party) ai.role[i] = R_RAID;
+      ai.reserve = ai.reserve.filter((i) => ai.role[i] === R_RESERVE);
+      f.launch = strength(w, party);
+      f.done = 0;
+      ai.lastRaid = tick;
+      setOut(ai, w, f, party, obj);
+      units.push(...party);
+      ai.plan = 'raid';
+    } else {
+      const power = strength(w, ai.reserve);
+      if (power < tune.minArmy) return;
+      const [cx, cy] = centre(w, ai.reserve);
+      const obj = chooseObjective(ai, w, cx, cy, power);
+      if (obj === null) return;
+      // Across the river only when the time has come; its own bank it clears at once.
+      if (bankOf(ai, obj.x, obj.y) !== ai.side && tick < tune.firstAttack) return;
+      for (const i of ai.reserve) ai.role[i] = R_ARMY;
+      units.push(...ai.reserve);
+      ai.reserve.length = 0;
+      f.launch = power;
+      f.done = 0;
+      ai.lastAttack = tick;
+      setOut(ai, w, f, units, obj);
+      ai.plan = `attack ${obj.kind === OBJ_TOWN ? map.townName[obj.id] : obj.kind === OBJ_BASE ? 'base' : 'depot'}`;
+    }
+    marchOrders(ai, w, out, f, units, true);
+    return;
+  }
+  if (units.length === 0) {
+    f.state = F_IDLE;
+    f.obj = null;
+    return;
+  }
+  const power = strength(w, units);
+  const [cx, cy] = centre(w, units);
+  if (f.state === F_RETREAT) {
+    let home = 0;
+    for (const i of units) if (dist(w.posX[i], w.posY[i], ai.stageX, ai.stageY) < fx(45)) home++;
+    if (home * 10 >= units.length * 6 || tick - f.since > 2 * MINUTE) {
+      for (const i of units) ai.role[i] = R_RESERVE;
+      f.state = F_IDLE;
+      return;
+    }
+    const lost = units.filter(
+      (i) =>
+        (w.flags[i] & FLAG_MOVING) === 0 &&
+        dist(w.posX[i], w.posY[i], ai.stageX, ai.stageY) > fx(40),
+    );
+    order(out, CMD_MOVE, lost, ai.stageX, ai.stageY);
+    return;
+  }
+  // Break off: too little left, the enemy in front too strong, or the base calling.
+  const local = expect(ai, w, cx, cy, 2, 0);
+  const a = ai.alarm;
+  if (
+    power * 100 < f.launch * tune.breakOff ||
+    local > 2 * power + 40 ||
+    (a !== null && a.base && a.threat * 2 > 3 * strength(w, ai.reserve) + 20)
+  ) {
+    retreat(ai, f, w, true);
+    order(out, CMD_MOVE, units, ai.stageX, ai.stageY);
+    ai.plan = raid ? 'raid breaks off' : 'army falls back';
+    return;
+  }
+  if (!raid && a === null) {
+    // Reinforcements: a reserve that has grown to a third of the army goes after it.
+    const more = strength(w, ai.reserve);
+    if (more >= Math.max(100, Math.trunc(f.launch / 3))) {
+      for (const i of ai.reserve) ai.role[i] = R_ARMY;
+      units.push(...ai.reserve);
+      ai.reserve.length = 0;
+      f.launch += more;
+    }
+  }
+  if (f.state === F_MARCH) {
+    const tx = f.wps[2 * f.wp];
+    const ty = f.wps[2 * f.wp + 1];
+    let line = 0;
+    let there = 0;
+    for (const i of units) {
+      if (!LINE[w.kind[i]]) continue;
+      line++;
+      if (dist(w.posX[i], w.posY[i], tx, ty) < fx(38)) there++;
+    }
+    // Move on when most of the line has closed up: an army that arrives in a trickle
+    // is beaten in a trickle.
+    if (there * 10 >= line * 6 || tick - f.since > 90 * TICK_RATE) {
+      f.since = tick;
+      if (2 * (f.wp + 1) >= f.wps.length) {
+        f.state = F_ASSAULT;
+        f.quiet = 0;
+      } else {
+        f.wp++;
+        marchOrders(ai, w, out, f, units, true);
+        return;
+      }
+    } else {
+      marchOrders(ai, w, out, f, units, false);
+      return;
+    }
+  }
+  assault(ai, w, out, f, units, cx, cy, power);
+}
+
+/** Orders for the march: the line attack-moves on the way point, the rest keep behind it. */
+function marchOrders(
+  ai: Ai,
+  w: World,
+  out: Command[],
+  f: Force,
+  units: number[],
+  all: boolean,
+): void {
+  const tx = f.wps[2 * f.wp];
+  const ty = f.wps[2 * f.wp + 1];
+  const line = units.filter(
+    (i) =>
+      LINE[w.kind[i]] &&
+      (all ||
+        ((w.flags[i] & FLAG_MOVING) === 0 &&
+          w.attack[i] === NO_TARGET &&
+          dist(w.posX[i], w.posY[i], tx, ty) > fx(30))),
+  );
+  order(out, CMD_ATTACK_MOVE, line, tx, ty);
+  const [cx, cy] = centre(w, units);
+  follow(ai, w, out, units, cx, cy);
+}
+
+/**
+ * The troops that do not fight in the line. Guns and strike drones wait a little behind
+ * it, jammers and scouts in the middle of it. Strike drones go in when there is a vehicle
+ * worth one: a gun, a jammer, air defence, a tank.
+ */
+function follow(ai: Ai, w: World, out: Command[], units: number[], cx: number, cy: number): void {
+  const d = dist(cx, cy, ai.stageX, ai.stageY);
+  const bx = d < fx(30) ? cx : cx + Math.trunc(((ai.stageX - cx) * fx(24)) / d);
+  const by = d < fx(30) ? cy : cy + Math.trunc(((ai.stageY - cy) * fx(24)) / d);
+  const mid: number[] = [];
+  const rear: number[] = [];
+  const strikes: number[] = [];
+  for (const i of units) {
+    const kind = w.kind[i];
+    if (LINE[kind]) continue;
+    if (kind === KIND_STRIKE) {
+      if (w.attack[i] === NO_TARGET) strikes.push(i);
+    } else if (kind === KIND_ARTILLERY) {
+      if ((w.flags[i] & (FLAG_BOMBARD | FLAG_SIEGE)) !== 0) continue;
+      if (dist(w.posX[i], w.posY[i], bx, by) > fx(22)) rear.push(i);
+    } else if (dist(w.posX[i], w.posY[i], cx, cy) > fx(16)) mid.push(i);
+  }
+  order(out, CMD_MOVE, mid, cx, cy);
+  order(out, CMD_MOVE, rear, bx, by);
+  if (strikes.length === 0) return;
+  const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2];
+  let best = -1;
+  let bestKey = 0;
+  for (const e of ai.seen) {
+    const v = worth[w.kind[e]];
+    if (v === 0) continue;
+    const de = dist(w.posX[e], w.posY[e], cx, cy);
+    if (de > fx(120)) continue;
+    const key = v * fx(40) - de;
+    if (best < 0 || key > bestKey) {
+      best = e;
+      bestKey = key;
+    }
+  }
+  if (best >= 0) order(out, CMD_ATTACK_MOVE, strikes, w.posX[best], w.posY[best]);
+  else {
+    const far = strikes.filter((i) => dist(w.posX[i], w.posY[i], bx, by) > fx(22));
+    order(out, CMD_MOVE, far, bx, by);
+  }
+}
+
+/**
+ * The strong points of an objective: what has to be reduced before the infantry goes in.
+ * Today these are the houses the enemy is known to hold in a town, and his base buildings.
+ * Field fortifications (walls, wire, trenches: the milestone after this one) belong in
+ * this list too; everything downstream of it already treats a strong point as "a
+ * structure the guns and tanks shell until it is gone".
+ */
+function strongPoints(ai: Ai, w: World, obj: Objective): number[] {
+  const map = w.map;
+  const list: number[] = [];
+  if (obj.kind === OBJ_TOWN) {
+    for (const s of ai.houses[obj.id]) {
+      if (
+        w.sHp[s] > 0 &&
+        ai.occupied[s] > w.tick &&
+        (w.sOcc[s] === 0 || w.sOccTeam[s] !== ai.team)
+      ) {
+        list.push(s);
+      }
+    }
+  } else {
+    for (let s = 0; s < map.structCount; s++) {
+      if (ai.known[s] === 0 || w.sHp[s] <= 0 || w.sTeam[s] !== ai.enemy) continue;
+      if (dist(structX(map, s), structY(map, s), obj.x, obj.y) < fx(130)) list.push(s);
+    }
+  }
+  return list;
+}
+
+function assault(
+  ai: Ai,
+  w: World,
+  out: Command[],
+  f: Force,
+  units: number[],
+  cx: number,
+  cy: number,
+  power: number,
+): void {
+  const map = w.map;
+  const obj = f.obj!;
+  const tick = w.tick;
+  const raid = f.role === R_RAID;
+  const reach = obj.kind === OBJ_TOWN ? map.townR[obj.id] + fx(30) : fx(70);
+  let foes = 0;
+  for (const e of ai.seen) {
+    if (KINDS[w.kind[e]].cls !== CLASS_AIR && dist(w.posX[e], w.posY[e], obj.x, obj.y) < reach)
+      foes++;
+  }
+  f.quiet = foes === 0 && dist(cx, cy, obj.x, obj.y) < reach ? f.quiet + 1 : 0;
+  const points = strongPoints(ai, w, obj);
+  // Each strong point in turn, the nearest first (the headquarters, once found, before
+  // anything else: with it the game is won).
+  let point = -1;
+  let pointD = 0;
+  for (const s of points) {
+    const d =
+      structDist2(w, s, cx, cy) - (w.sTeam[s] === ai.enemy && w.sType[s] === B_HQ ? 1e12 : 0);
+    if (point < 0 || d < pointD) {
+      point = s;
+      pointD = d;
+    }
+  }
+  let done = false;
+  if (obj.kind === OBJ_TOWN) {
+    const owner = w.townOwner[obj.id];
+    if (f.quiet >= 6 && points.length === 0) {
+      // The town is quiet: leave a garrison in it, which also takes it.
+      let need = Math.max(3, wantedIn(ai, w, obj.id)) - ai.garr[obj.id].length;
+      for (let k = units.length - 1; k >= 0 && need > 0; k--) {
+        const i = units[k];
+        if (!FOOT(w.kind[i])) continue;
+        ai.role[i] = R_TOWN + obj.id;
+        units.splice(k, 1);
+        need--;
+      }
+      if (owner === ai.team || f.quiet >= 40) done = true;
+    }
+  } else if (obj.kind === OBJ_BASE) {
+    done = f.quiet >= 10 && points.length === 0;
+  } else {
+    done = f.quiet >= (raid ? 12 : 6) && (obj.id < 0 || w.sHp[obj.id] <= 0);
+    if (raid && tick - f.since > 90 * TICK_RATE) done = true;
+  }
+  if (done || tick - f.since > 6 * MINUTE) {
+    f.done++;
+    const next = raid
+      ? f.done < 2
+        ? raidTarget(ai, w)
+        : null
+      : done
+        ? chooseObjective(ai, w, cx, cy, power)
+        : null;
+    if (next === null) {
+      retreat(ai, f, w, !done);
+      order(out, CMD_MOVE, units, ai.stageX, ai.stageY);
+      return;
+    }
+    f.launch = power;
+    setOut(ai, w, f, units, next);
+    marchOrders(ai, w, out, f, units, true);
+    return;
+  }
+  // Smoke in front of a defended town, once, before the line closes with it.
+  if (ai.tune.smoke && !f.smoked && obj.kind === OBJ_TOWN && points.length > 0) {
+    const guns = units.filter((i) => w.kind[i] === KIND_ARTILLERY);
+    if (guns.length >= 2) {
+      const d = dist(cx, cy, obj.x, obj.y) || 1;
+      const edge = map.townR[obj.id] >> 1;
+      out.push({
+        type: CMD_BOMBARD,
+        units: guns.slice(0, guns.length >> 1),
+        x: obj.x + Math.trunc(((cx - obj.x) * edge) / d),
+        y: obj.y + Math.trunc(((cy - obj.y) * edge) / d),
+        smoke: true,
+      });
+      f.smoked = true;
+    }
+  }
+  const tx = point >= 0 ? structX(map, point) : obj.x;
+  const ty = point >= 0 ? structY(map, point) : obj.y;
+  const shell: number[] = [];
+  const line: number[] = [];
+  for (const i of units) {
+    const kind = w.kind[i];
+    const flags = w.flags[i];
+    if (
+      point >= 0 &&
+      (kind === KIND_ARTILLERY || (kind === KIND_TANK && w.attack[i] === NO_TARGET))
+    ) {
+      const busy = (flags & (FLAG_SIEGE | FLAG_BOMBARD)) !== 0 && w.orderStruct[i] === point;
+      if (!busy) shell.push(i);
+      continue;
+    }
+    if (!LINE[kind]) continue;
+    if ((flags & (FLAG_MOVING | FLAG_SIEGE)) !== 0 || w.attack[i] !== NO_TARGET) continue;
+    if (dist(w.posX[i], w.posY[i], tx, ty) > fx(18)) line.push(i);
+  }
+  if (shell.length > 0) out.push({ type: CMD_ATTACK_STRUCTURE, units: shell, structure: point });
+  order(out, CMD_ATTACK_MOVE, line, tx, ty);
+  follow(ai, w, out, units, cx, cy);
+}
+
+/** Numbers for tests and for watching the AI play: what it has and what it is doing. */
+export function aiReport(ai: Ai, w: World): string {
+  const t = ai.team;
+  const f = ai.forces[0];
+  const states = ['idle', 'march', 'assault', 'retreat'];
+  let towns = 0;
+  for (let k = 0; k < w.map.townCount; k++) if (w.townOwner[k] === t) towns++;
+  let garrison = 0;
+  for (const g of ai.garr) garrison += g.length;
+  return (
+    `t${t} ${ai.level} tier ${w.tier[t]} pop ${w.pop[t]}/${w.popCap[t]} ` +
+    `S ${w.supplies[t]} F ${w.fuel[t]} C ${w.credits[t]} trucks ${ai.trucks.length} towns ${towns} ` +
+    `garrison ${garrison} reserve ${ai.reserve.length} army ${ai.members[0].length} ${states[f.state]} ` +
+    `raid ${ai.members[1].length} scouts ${ai.scouts.length} seen ${ai.seen.length} ` +
+    `units ${Array.from(ai.have).join(',')} | ${ai.plan}`
+  );
+}

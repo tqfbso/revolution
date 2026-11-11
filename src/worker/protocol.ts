@@ -1,7 +1,8 @@
+import type { AiLevel } from '../sim/ai';
 import type { Command } from '../sim/commands';
 
 /** assault: storm a held town. clash: two armies meet head on. roam: stress test. */
-/** skirmish: build a base and take the east bank. */
+/** skirmish: build a base and beat the AI, which starts with what you start with. */
 export type Scenario = 'skirmish' | 'assault' | 'clash' | 'roam';
 
 /** Integers per base building in Snapshot.bases. */
@@ -28,7 +29,17 @@ export const NO_AIM = 0xffff;
 
 /** Main thread -> simulation worker. */
 export type ToWorker =
-  | { type: 'init'; seed: number; units: number; scenario: Scenario }
+  | {
+      type: 'init';
+      seed: number;
+      units: number;
+      scenario: Scenario;
+      /** Who plays blue in the skirmish. */
+      ai: AiLevel | 'off';
+      demo: boolean;
+      /** Game speed, 1 = real time. */
+      speed: number;
+    }
   | { type: 'command'; command: Command };
 
 /** Simulation worker -> main thread, once per simulated tick batch. */

@@ -84,9 +84,9 @@ const run = (w: World, ticks: number, first: Command[] = []) => {
   step(w, first);
   for (let t = 1; t < ticks; t++) step(w, []);
 };
-const unitsOf = (w: World, kind: number) =>
+const unitsOf = (w: World, kind: number, team = -1) =>
   Array.from({ length: w.count }, (_, i) => i).filter(
-    (i) => w.state[i] === STATE_ALIVE && w.kind[i] === kind,
+    (i) => w.state[i] === STATE_ALIVE && w.kind[i] === kind && (team < 0 || w.team[i] === team),
   );
 const hq = (w: World) => w.sTeam.indexOf(0);
 
@@ -254,14 +254,15 @@ describe('production', () => {
 });
 
 describe('the skirmish', () => {
-  it('gives both armies a base and red its trucks', () => {
+  it('gives both armies the same start: a headquarters, six trucks and a patrol', () => {
     const w = createWorld(1);
-    step(w, skirmishCommands(w.map, 3000));
-    expect(w.sTeam.filter((t) => t === 0).length).toBe(1);
-    expect(w.sTeam.filter((t) => t === 1).length).toBe(4);
-    expect(unitsOf(w, KIND_TRUCK).length).toBe(6);
-    expect(w.popCap[0]).toBe(60);
-    expect(w.pop[1]).toBeGreaterThan(500);
+    step(w, skirmishCommands(w.map));
+    for (let team = 0; team < 2; team++) {
+      expect(w.sTeam.filter((t) => t === team).length).toBe(1);
+      expect(unitsOf(w, KIND_TRUCK, team).length).toBe(6);
+      expect(w.popCap[team]).toBe(60);
+      expect(w.pop[team]).toBe(24);
+    }
     // A truck sent to the nearest stockpile comes back with a load.
     const before = w.supplies[0];
     run(w, 900, [{ type: CMD_GATHER, units: unitsOf(w, KIND_TRUCK), site: 0 }]);

@@ -137,7 +137,12 @@ async function start(): Promise<void> {
     lookAt,
   );
   const input = new Input(canvas, rts.camera, terrain, units, send, lookAt, structures, card);
-  post({ type: 'init', seed, units: unitCount, scenario });
+  // `?ai=easy|normal|hard|off` picks the opponent of the skirmish.
+  const level = params.get('ai');
+  const ai = level === 'easy' || level === 'hard' || level === 'off' ? level : 'normal';
+  const demo = params.get('demo') === '1';
+  const speed = Number(params.get('speed') ?? 1) || 1;
+  post({ type: 'init', seed, units: unitCount, scenario, ai, demo, speed });
   // The skirmish opens on your headquarters.
   if (scenario === 'skirmish' && map.startX[0] >= 0) {
     rts.look(map.startX[0] * 4 + 14, map.startY[0] * 4 + 10, 95);
