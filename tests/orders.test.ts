@@ -104,7 +104,12 @@ describe('river', () => {
     const ids = Array.from({ length: w.count }, (_, i) => i);
     step(w, [
       { type: CMD_MOVE, units: ids.filter((i) => w.team[i] === 0), x: mid + fx(150), y: mid },
-      { type: CMD_ATTACK_MOVE, units: ids.filter((i) => w.team[i] === 1), x: mid - fx(150), y: mid },
+      {
+        type: CMD_ATTACK_MOVE,
+        units: ids.filter((i) => w.team[i] === 1),
+        x: mid - fx(150),
+        y: mid,
+      },
     ]);
     let wet = 0;
     for (let t = 0; t < 1500; t++) {
