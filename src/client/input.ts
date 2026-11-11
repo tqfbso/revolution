@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { CMD_MOVE, CMD_STOP, type Command } from '../sim/commands';
+import { CMD_ATTACK_MOVE, CMD_MOVE, CMD_STOP, type Command } from '../sim/commands';
 import { fx } from '../sim/fixed';
 import type { Terrain } from './terrain';
 import type { UnitView } from './units';
@@ -9,7 +9,8 @@ const CLICK_PICK_PX = 22;
 
 /**
  * Turns mouse and keyboard into selection (client-only state) and commands (sent to the sim).
- * Left drag: box select. Left click: select one. Shift: add. Right click: move.
+ * Left drag: box select. Left click: select one. Shift: add. Right click: attack-move
+ * (fight on the way). Alt + right click: plain move (do not stop to fight).
  */
 export class Input {
   readonly marker: THREE.Mesh;
@@ -41,7 +42,7 @@ export class Input {
         this.dragStart = { x: e.clientX, y: e.clientY };
         dom.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
-        this.orderMove(e.clientX, e.clientY);
+        this.orderMove(e.clientX, e.clientY, !e.altKey);
       }
     });
     dom.addEventListener('pointermove', (e) => {
@@ -98,6 +99,7 @@ export class Input {
     let best = -1;
     let bestD = CLICK_PICK_PX * CLICK_PICK_PX;
     for (let i = 0; i < this.units.count; i++) {
+      if (!this.units.isAlive(i)) continue;
       this.v.set(pos[3 * i], pos[3 * i + 1] + 0.5, pos[3 * i + 2]).project(this.camera);
       if (this.v.z < -1 || this.v.z > 1) continue;
       const sx = rect.left + (this.v.x * 0.5 + 0.5) * rect.width;
@@ -116,7 +118,7 @@ export class Input {
     this.units.setSelected(picked, additive);
   }
 
-  private orderMove(clientX: number, clientY: number): void {
+  private orderMove(clientX: number, clientY: number, attack: boolean): void {
     if (this.units.selectedCount === 0) return;
     const rect = this.dom.getBoundingClientRect();
     const ndc = new THREE.Vector2(
@@ -127,7 +129,12 @@ export class Input {
     const p = this.terrain.raycast(this.ray.ray.origin, this.ray.ray.direction, this.hit);
     if (!p) return;
     // Float -> fixed happens here, once, at the sim boundary. The command carries integers.
-    this.send({ type: CMD_MOVE, units: this.units.selectedIds(), x: fx(p.x), y: fx(p.z) });
+    this.send({
+      type: attack ? CMD_ATTACK_MOVE : CMD_MOVE,
+      units: this.units.selectedIds(),
+      x: fx(p.x),
+      y: fx(p.z),
+    });
     this.marker.position.set(p.x, p.y + 0.15, p.z);
     this.marker.visible = true;
     this.markerAge = 0;

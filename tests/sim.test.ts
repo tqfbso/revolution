@@ -1,13 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { CMD_MOVE, CMD_SPAWN, CMD_STOP, type Command } from '../src/sim/commands';
+import { CMD_ATTACK_MOVE, CMD_MOVE, CMD_SPAWN, CMD_STOP, type Command } from '../src/sim/commands';
 import { fx, isqrt } from '../src/sim/fixed';
-import { stressTestCommands } from '../src/sim/scenarios';
+import { battleCommands, stressTestCommands } from '../src/sim/scenarios';
+import { KINDS, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
 import { step } from '../src/sim/sim';
-import { FLAG_MOVING, MAP_SIZE_FX, MAX_UNITS, createWorld, hashWorld } from '../src/sim/world';
+import {
+  EV_DEATH,
+  EV_SHOT,
+  FLAG_MOVING,
+  MAP_SIZE_FX,
+  MAX_UNITS,
+  STATE_ALIVE,
+  STATE_FREE,
+  STATE_WRECK,
+  createWorld,
+  hashWorld,
+  type World,
+} from '../src/sim/world';
 
 /** A scripted game: opening spawn plus player orders at fixed ticks. */
 function script(tick: number): Command[] {
-  if (tick === 0) return stressTestCommands(3000);
+  if (tick === 0) return [...stressTestCommands(1500), ...battleCommands(1500, 60)];
+  if (tick === 200) {
+    const units = Array.from({ length: 300 }, (_, i) => 1500 + i * 2);
+    return [{ type: CMD_ATTACK_MOVE, units, x: fx(300), y: fx(300) }];
+  }
   if (tick === 40) {
     const units = Array.from({ length: 500 }, (_, i) => i * 3);
     return [{ type: CMD_MOVE, units, x: fx(200), y: fx(800) }];
@@ -34,9 +51,29 @@ function run(seed: number, ticks: number): number[] {
   const hashes: number[] = [];
   for (let t = 0; t < ticks; t++) {
     step(w, script(t));
-    hashes.push(hashWorld(w));
+    // Fold the tick's combat events into the comparison, then drop them.
+    let h = hashWorld(w);
+    for (const e of w.events) h = (Math.imul(h, 31) + e) >>> 0;
+    w.events.length = 0;
+    hashes.push(h);
   }
   return hashes;
+}
+
+function census(w: World): { alive: number[]; wrecks: number; free: number } {
+  const alive = [0, 0, 0];
+  let wrecks = 0;
+  let free = 0;
+  for (let i = 0; i < w.count; i++) {
+    if (w.state[i] === STATE_ALIVE) alive[w.team[i]]++;
+    else if (w.state[i] === STATE_WRECK) wrecks++;
+    else free++;
+  }
+  return { alive, wrecks, free };
+}
+
+function spawnAt(team: number, kind: number, count: number, x: number, y: number): Command {
+  return { type: CMD_SPAWN, count, team, kind, x: fx(x), y: fx(y), radius: fx(4), wander: false };
 }
 
 describe('determinism', () => {
@@ -56,7 +93,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 282912497;
+const GOLDEN = 3448443821;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -121,5 +158,86 @@ describe('movement', () => {
       expect(w.posY[i]).toBeGreaterThanOrEqual(0);
       expect(w.posY[i]).toBeLessThan(MAP_SIZE_FX);
     }
+  });
+});
+
+describe('combat', () => {
+  it('a battle produces shots, deaths and wrecks, and the books balance', () => {
+    const w = createWorld(5);
+    step(w, battleCommands(600, 40));
+    const total = w.count;
+    let shots = 0;
+    let deaths = 0;
+    const lastHp = Int16Array.from(w.hp);
+    for (let t = 0; t < 1500; t++) {
+      step(w, []);
+      for (let e = 0; e < w.events.length; e += 3) {
+        const [type, a, b] = [w.events[e], w.events[e + 1], w.events[e + 2]];
+        if (type === EV_SHOT) {
+          shots++;
+          expect(w.team[a]).not.toBe(w.team[b]);
+        } else if (type === EV_DEATH) {
+          deaths++;
+          expect(w.state[a]).toBe(STATE_WRECK);
+        }
+      }
+      w.events.length = 0;
+      for (let i = 0; i < total; i++) {
+        expect(w.hp[i]).toBeLessThanOrEqual(lastHp[i]); // nothing heals
+        lastHp[i] = w.hp[i];
+      }
+    }
+    const c = census(w);
+    expect(shots).toBeGreaterThan(1000);
+    expect(deaths).toBeGreaterThan(200);
+    expect(c.alive[0] + c.alive[1] + c.wrecks + c.free).toBe(total);
+    expect(c.wrecks + c.free).toBe(deaths);
+  });
+
+  it('idle units engage an enemy that comes into view, and one side is wiped out', () => {
+    const w = createWorld(9);
+    step(w, [spawnAt(0, KIND_TANK, 12, 500, 500), spawnAt(1, KIND_TANK, 4, 535, 500)]);
+    for (let t = 0; t < 1500; t++) step(w, []);
+    const c = census(w);
+    expect(c.alive[1]).toBe(0);
+    expect(c.alive[0]).toBeGreaterThan(6);
+  });
+
+  it('tanks outrange infantry: the first shot comes from the tank', () => {
+    const w = createWorld(9);
+    step(w, [spawnAt(0, KIND_TANK, 1, 500, 500), spawnAt(1, KIND_INFANTRY, 1, 522, 500)]);
+    let first = -1;
+    for (let t = 0; t < 600 && first < 0; t++) {
+      step(w, []);
+      if (w.events.length > 0) first = w.events[1];
+    }
+    expect(w.kind[first]).toBe(KIND_TANK);
+    expect(KINDS[KIND_TANK].range).toBeGreaterThan(KINDS[KIND_INFANTRY].range);
+  });
+
+  it('units under a plain move order do not stop to fight; same team never fights', () => {
+    const w = createWorld(9);
+    step(w, [spawnAt(0, KIND_TANK, 6, 300, 300), spawnAt(0, KIND_TANK, 6, 320, 300)]);
+    step(w, [{ type: CMD_MOVE, units: [0, 1, 2], x: fx(700), y: fx(700) }]);
+    for (let t = 0; t < 400; t++) step(w, []);
+    expect(w.events.length).toBe(0);
+    expect(w.posX[0]).toBeGreaterThan(fx(380));
+  });
+
+  it('wrecks are cleared and their slots reused; dead units ignore orders', () => {
+    const w = createWorld(9);
+    step(w, [spawnAt(0, KIND_TANK, 10, 500, 500), spawnAt(1, KIND_INFANTRY, 2, 520, 500)]);
+    for (let t = 0; t < 1200; t++) step(w, []);
+    expect(w.state[10]).toBe(STATE_FREE);
+    expect(w.state[11]).toBe(STATE_FREE);
+    const before = w.posX[10];
+    step(w, [{ type: CMD_MOVE, units: [10], x: fx(100), y: fx(100) }]);
+    step(w, []);
+    expect(w.posX[10]).toBe(before);
+    step(w, [spawnAt(2, KIND_TANK, 3, 100, 100)]);
+    expect(w.count).toBe(13);
+    expect(w.state[10]).toBe(STATE_ALIVE);
+    expect(w.team[10]).toBe(2);
+    expect(w.hp[10]).toBe(KINDS[KIND_TANK].hp);
   });
 });

@@ -11,6 +11,19 @@ export const TICK_MS = 1000 / TICK_RATE;
 
 export const FLAG_MOVING = 1;
 export const FLAG_WANDER = 2;
+/** Attack-move: advance on the move target but stop to fight anything met on the way. */
+export const FLAG_AMOVE = 4;
+
+/** Life cycle of an entity slot. Free slots are reused by later spawns. */
+export const STATE_FREE = 0;
+export const STATE_ALIVE = 1;
+export const STATE_WRECK = 2;
+
+export const NO_TARGET = -1;
+
+/** Presentation events produced by a tick: three integers each (type, a, b). Not state. */
+export const EV_SHOT = 1; // a = shooter, b = target
+export const EV_DEATH = 2; // a = unit, b = killer
 
 /**
  * Structure-of-arrays world state. An entity is an index in [0, count).
@@ -18,6 +31,7 @@ export const FLAG_WANDER = 2;
  */
 export interface World {
   tick: number;
+  /** High-water mark: every slot in [0, count) is free, alive or a wreck. */
   count: number;
   groupCount: number;
   rng: Uint32Array;
@@ -31,6 +45,18 @@ export interface World {
   group: Uint16Array;
   team: Uint8Array;
   flags: Uint8Array;
+  state: Uint8Array;
+  kind: Uint8Array;
+  hp: Int16Array;
+  /** Alive: ticks until the weapon is ready. Wreck: ticks until the wreck is cleared. */
+  cooldown: Int16Array;
+  /** Entity being attacked, or NO_TARGET. */
+  attack: Int32Array;
+  /**
+   * Events of the ticks since the consumer last emptied this (see EV_*). Output only:
+   * never read by the sim and not part of the hashed state.
+   */
+  events: number[];
 }
 
 export function createWorld(seed: number): World {
@@ -49,6 +75,12 @@ export function createWorld(seed: number): World {
     group: new Uint16Array(MAX_UNITS),
     team: new Uint8Array(MAX_UNITS),
     flags: new Uint8Array(MAX_UNITS),
+    state: new Uint8Array(MAX_UNITS),
+    kind: new Uint8Array(MAX_UNITS),
+    hp: new Int16Array(MAX_UNITS),
+    cooldown: new Int16Array(MAX_UNITS),
+    attack: new Int32Array(MAX_UNITS),
+    events: [],
   };
   seedRng(world.rng, seed);
   return world;
@@ -77,6 +109,9 @@ export function hashWorld(w: World): number {
     mix(w.targetY[i]);
     mix(w.speed[i]);
     mix(w.group[i] | (w.team[i] << 16) | (w.flags[i] << 24));
+    mix(w.state[i] | (w.kind[i] << 8) | ((w.hp[i] & 0xffff) << 16));
+    mix(w.cooldown[i]);
+    mix(w.attack[i]);
   }
   return h >>> 0;
 }

@@ -10,6 +10,8 @@ export interface PerfStats {
   simMsMax: number;
   units: number;
   selected: number;
+  /** Living units per team. */
+  alive: number[];
   backend: string;
   drawCalls: number;
   triangles: number;
@@ -26,6 +28,7 @@ export class Hud {
     simMsMax: 0,
     units: 0,
     selected: 0,
+    alive: [],
     backend: '',
     drawCalls: 0,
     triangles: 0,
@@ -63,7 +66,8 @@ export class Hud {
       `FPS        ${s.fps.toFixed(0)}\n` +
       `Frame      ${s.frameMs.toFixed(1)} ms (worst ${s.frameMsMax.toFixed(1)})\n` +
       `Sim tick   ${s.simMs.toFixed(2)} ms (worst ${s.simMsMax.toFixed(2)}) @ ${TICK_RATE} Hz\n` +
-      `Units      ${s.units}   selected ${s.selected}\n` +
+      `Units      ${s.alive.reduce((a, b) => a + b, 0)} alive   selected ${s.selected}\n` +
+      `Armies     red ${s.alive[0] ?? 0}   blue ${s.alive[1] ?? 0}   gold ${s.alive[2] ?? 0}\n` +
       `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris\n` +
       `State hash ${s.hash}   build ${__BUILD__}`;
   }
