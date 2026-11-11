@@ -1,6 +1,7 @@
-import { CMD_SPAWN, type Command } from './commands';
+import { CMD_FOUND, CMD_SPAWN, type Command } from './commands';
+import { B_BARRACKS, B_DEPOT, B_HQ, B_WORKS } from './economy';
 import { fx } from './fixed';
-import type { GameMap } from './map';
+import { CELL_SHIFT, type GameMap } from './map';
 import {
   KIND_AD,
   KIND_ARTILLERY,
@@ -12,6 +13,7 @@ import {
   KIND_RECON,
   KIND_STRIKE,
   KIND_TANK,
+  KIND_TRUCK,
 } from './units';
 import { MAP_SIZE, MAX_TEAMS } from './world';
 
@@ -149,5 +151,46 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
     add(1, KIND_DRONE, Math.floor((recon * share[k]) / 4), x + fx(10), y, 20);
     add(1, KIND_STRIKE, Math.floor((strike * share[k]) / 4), x + fx(60), y, 20);
   }
+  return cmds;
+}
+
+/**
+ * The skirmish: both armies have a base. Red, the player, starts with a headquarters, six
+ * trucks and a patrol, and has to build the army that takes the east bank. Blue has its
+ * base and holds its three settlements with a fifth of `total` units, dug in as in the
+ * assault. Nobody commands blue yet, so it does not build: it is the fortress to crack.
+ */
+export function skirmishCommands(map: GameMap, total: number): Command[] {
+  if (map.startX[0] < 0 || map.startX[1] < 0) return assaultCommands(map, total);
+  const cmds: Command[] = [];
+  for (let team = 0; team < 2; team++) {
+    const x = map.startX[team];
+    const y = map.startY[team];
+    cmds.push({ type: CMD_FOUND, team, building: B_HQ, x, y });
+    if (team === 1) {
+      cmds.push({ type: CMD_FOUND, team, building: B_DEPOT, x: x + 6, y: y - 5 });
+      cmds.push({ type: CMD_FOUND, team, building: B_BARRACKS, x: x - 6, y: y + 6 });
+      cmds.push({ type: CMD_FOUND, team, building: B_WORKS, x: x - 7, y: y - 6 });
+    }
+  }
+  const hx = (map.startX[0] << CELL_SHIFT) + fx(6);
+  const hy = (map.startY[0] << CELL_SHIFT) + fx(6);
+  const add = (kind: number, count: number, dx: number, dy: number) =>
+    cmds.push({
+      type: CMD_SPAWN,
+      count,
+      team: 0,
+      kind,
+      x: hx + fx(dx),
+      y: hy + fx(dy),
+      radius: fx(1),
+      wander: false,
+    });
+  add(KIND_TRUCK, 6, 0, 24);
+  add(KIND_INFANTRY, 12, 34, 0);
+  add(KIND_IFV, 4, 34, 22);
+  add(KIND_RECON, 2, 34, -22);
+  const blue = assaultCommands(map, Math.floor((2 * total) / 5));
+  for (const c of blue) if (c.type === CMD_SPAWN && c.team === 1) cmds.push(c);
   return cmds;
 }

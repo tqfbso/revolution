@@ -21,7 +21,9 @@ export const KIND_STRIKE = 7;
 export const KIND_AD = 8;
 /** Electronic-warfare vehicle: drones inside its bubble are blind and fall out of the sky. */
 export const KIND_EW = 9;
-export const KIND_COUNT = 10;
+/** Logistics truck: hauls supplies and fuel, puts up and repairs base buildings. Unarmed. */
+export const KIND_TRUCK = 10;
+export const KIND_COUNT = 11;
 
 export interface UnitKind {
   name: string;
@@ -83,7 +85,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.3),
     range: fx(26),
     reload: 60,
-    damage: [60, 34, 34, 80, 90, 34, 0, 0, 90, 90],
+    damage: [60, 34, 34, 80, 90, 34, 0, 0, 90, 90, 90],
     siege: 60,
     garrison: false,
     wreckTicks: 1800,
@@ -102,7 +104,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.16),
     range: fx(15),
     reload: 24,
-    damage: [14, 9, 9, 12, 12, 9, 1, 1, 12, 12],
+    damage: [14, 9, 9, 12, 12, 9, 1, 1, 12, 12, 12],
     siege: 0,
     garrison: true,
     wreckTicks: 200,
@@ -122,7 +124,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.15),
     range: fx(34),
     reload: 140,
-    damage: [150, 0, 0, 150, 150, 0, 0, 0, 150, 150],
+    damage: [150, 0, 0, 150, 150, 0, 0, 0, 150, 150, 150],
     siege: 40,
     garrison: true,
     wreckTicks: 200,
@@ -140,7 +142,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.4),
     range: fx(20),
     reload: 8,
-    damage: [3, 7, 7, 7, 9, 7, 2, 2, 9, 9],
+    damage: [3, 7, 7, 7, 9, 7, 2, 2, 9, 9, 9],
     siege: 4,
     garrison: false,
     wreckTicks: 1800,
@@ -161,7 +163,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.22),
     range: fx(110),
     reload: 120,
-    damage: [50, 70, 70, 60, 80, 70, 0, 0, 80, 80],
+    damage: [50, 70, 70, 60, 80, 70, 0, 0, 80, 80, 80],
     siege: 120,
     garrison: false,
     wreckTicks: 1800,
@@ -183,7 +185,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.2),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     garrison: true,
     wreckTicks: 200,
@@ -203,7 +205,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.6),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     garrison: false,
     wreckTicks: 1,
@@ -223,7 +225,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.8),
     range: fx(1.5),
     reload: 1,
-    damage: [170, 50, 60, 150, 120, 50, 0, 0, 130, 130],
+    damage: [170, 50, 60, 150, 120, 50, 0, 0, 130, 130, 130],
     siege: 0,
     garrison: false,
     wreckTicks: 1,
@@ -243,7 +245,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.32),
     range: fx(40),
     reload: 12,
-    damage: [0, 0, 0, 0, 0, 0, 10, 12, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 10, 12, 0, 0, 0],
     siege: 0,
     garrison: false,
     wreckTicks: 1800,
@@ -262,7 +264,7 @@ export const KINDS: readonly UnitKind[] = [
     speed: fx(0.3),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     garrison: false,
     wreckTicks: 1800,
@@ -273,6 +275,26 @@ export const KINDS: readonly UnitKind[] = [
     ...PLAIN,
     sight: fx(30),
     jam: fx(45),
+  },
+  {
+    // The whole economy on six wheels. Loses to everything; a raid on the trucks is a raid
+    // on the army that would have been built with what they carry.
+    name: 'Logistics truck',
+    cls: CLASS_VEHICLE,
+    hp: 80,
+    speed: fx(0.34),
+    range: 0,
+    reload: 1000,
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    siege: 0,
+    garrison: false,
+    wreckTicks: 1200,
+    armour: null,
+    turn: 8,
+    carry: 0,
+    ...DIRECT,
+    ...PLAIN,
+    sight: fx(24),
   },
 ];
 

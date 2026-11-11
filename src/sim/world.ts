@@ -32,6 +32,18 @@ export const MAX_SMOKE = 4096;
 /** Shells in the air at once. A gun whose shell finds no room simply misfires. */
 export const MAX_SHELLS = 2048;
 
+/** Units a base building can have on order at once. */
+export const QUEUE_MAX = 8;
+/** What a truck is doing (see src/sim/economy.ts). */
+export const JOB_NONE = 0;
+export const JOB_GATHER = 1;
+export const JOB_LOAD = 2;
+export const JOB_RETURN = 3;
+export const JOB_BUILD = 4;
+/** Stances: fire at will (the default), or hold fire until told otherwise. */
+export const STANCE_FREE = 0;
+export const STANCE_HOLD_FIRE = 1;
+
 /** Owner of a town nobody holds. */
 export const NO_TEAM = 255;
 
@@ -58,6 +70,9 @@ export const EV_UNLOAD = 7; // a = carrier
 export const EV_LAUNCH = 8; // a = gun, b = where the shell will land (see packPoint)
 export const EV_IMPACT = 9; // a = where (see packPoint), b = 0
 export const EV_SMOKE = 10; // a = where (see packPoint), b = how many ticks it will stand
+export const EV_BUILT = 11; // a = structure, b = team
+export const EV_TRAINED = 12; // a = unit, b = structure
+export const EV_TIER = 13; // a = team, b = the tier reached
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
 export function packPoint(x: number, y: number): number {
@@ -156,8 +171,39 @@ export interface World {
   townOwner: Uint8Array;
   townCapturer: Uint8Array;
   townProgress: Int16Array;
-  /** Income collected per team. Nothing to spend it on until the economy milestone. */
+  /** Credits per team: paid by held towns, spent on technology and the advanced units. */
   credits: Int32Array;
+  /** Supplies and fuel per team: hauled in by trucks, spent on everything. */
+  supplies: Int32Array;
+  fuel: Int32Array;
+  /** Technology tier per team, 1 to 3. */
+  tier: Uint8Array;
+  /** Units a team has and may have (recounted once a second, raised by each new unit). */
+  pop: Int32Array;
+  popCap: Int32Array;
+  /** What is left at each resource site. */
+  siteStock: Int32Array;
+  /**
+   * Base buildings (structures of kind S_BASE): owner, type, construction work done, the
+   * production queue (unit types, or TIER_ITEM), work done on its first entry, rally point.
+   */
+  sTeam: Uint8Array;
+  sType: Uint8Array;
+  sBuild: Int32Array;
+  sQueue: Uint8Array;
+  sQueueLen: Uint8Array;
+  sProgress: Int32Array;
+  sRallyX: Int32Array;
+  sRallyY: Int32Array;
+  /** Trucks: the job, the site and the building it refers to, the load and a timer. */
+  job: Uint8Array;
+  jobSite: Int16Array;
+  jobStruct: Int16Array;
+  cargo: Int16Array;
+  cargoKind: Uint8Array;
+  jobTimer: Int16Array;
+  /** STANCE_*. Unlike an order, a stance stays until it is changed. */
+  stance: Uint8Array;
   /** Flowfields for move orders: goal cell (-1 = unused), movement class, cost-to-goal. */
   fieldGoal: Int32Array;
   fieldClass: Uint8Array;
@@ -230,6 +276,27 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     townCapturer: new Uint8Array(MAX_TOWNS).fill(NO_TEAM),
     townProgress: new Int16Array(MAX_TOWNS),
     credits: new Int32Array(MAX_TEAMS),
+    supplies: new Int32Array(MAX_TEAMS).fill(400),
+    fuel: new Int32Array(MAX_TEAMS).fill(150),
+    tier: new Uint8Array(MAX_TEAMS).fill(1),
+    pop: new Int32Array(MAX_TEAMS),
+    popCap: new Int32Array(MAX_TEAMS),
+    siteStock: map.siteStock.slice(),
+    sTeam: new Uint8Array(MAX_STRUCTS).fill(NO_TEAM),
+    sType: new Uint8Array(MAX_STRUCTS),
+    sBuild: new Int32Array(MAX_STRUCTS),
+    sQueue: new Uint8Array(MAX_STRUCTS * QUEUE_MAX),
+    sQueueLen: new Uint8Array(MAX_STRUCTS),
+    sProgress: new Int32Array(MAX_STRUCTS),
+    sRallyX: new Int32Array(MAX_STRUCTS),
+    sRallyY: new Int32Array(MAX_STRUCTS),
+    job: new Uint8Array(MAX_UNITS),
+    jobSite: new Int16Array(MAX_UNITS),
+    jobStruct: new Int16Array(MAX_UNITS),
+    cargo: new Int16Array(MAX_UNITS),
+    cargoKind: new Uint8Array(MAX_UNITS),
+    jobTimer: new Int16Array(MAX_UNITS),
+    stance: new Uint8Array(MAX_UNITS),
     fieldGoal: new Int32Array(MAX_FIELDS).fill(-1),
     fieldClass: new Uint8Array(MAX_FIELDS),
     fieldDist: new Array<Uint16Array | null>(MAX_FIELDS).fill(null),
@@ -260,9 +327,24 @@ export function hashWorld(w: World): number {
   mix(w.fieldsFullTick);
   for (let f = 0; f < MAX_FIELDS; f++) mix(w.fieldGoal[f] ^ (w.fieldClass[f] << 24));
   for (let f = 0; f < CHASE_FIELDS; f++) mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
+  mix(w.map.structCount);
   for (let s = 0; s < w.map.structCount; s++) {
     mix(w.sHp[s]);
     mix(w.sRepair[s] ^ (w.sOcc[s] << 20) ^ (w.sOccTeam[s] << 28));
+    if (w.sTeam[s] === NO_TEAM) continue;
+    mix(w.map.sX[s] | (w.map.sY[s] << 8) | (w.sType[s] << 16) | (w.sTeam[s] << 24));
+    mix(w.sBuild[s]);
+    mix(w.sProgress[s] ^ (w.sQueueLen[s] << 24));
+    mix(w.sRallyX[s]);
+    mix(w.sRallyY[s]);
+    for (let q = 0; q < w.sQueueLen[s]; q++) mix(w.sQueue[s * QUEUE_MAX + q]);
+  }
+  for (let k = 0; k < w.map.siteCount; k++) mix(w.siteStock[k]);
+  for (let t = 0; t < MAX_TEAMS; t++) {
+    mix(w.supplies[t]);
+    mix(w.fuel[t]);
+    mix(w.tier[t] | (w.pop[t] << 8));
+    mix(w.popCap[t]);
   }
   for (let t = 0; t < w.map.townCount; t++) {
     mix(w.townOwner[t] | (w.townCapturer[t] << 8) | (w.townProgress[t] << 16));
@@ -303,6 +385,8 @@ export function hashWorld(w: World): number {
     mix(w.attack[i]);
     mix(w.orderSpeed[i] ^ (w.path[i] << 20));
     mix(w.goal[i]);
+    mix(w.job[i] | (w.stance[i] << 4) | (w.cargoKind[i] << 8) | (w.cargo[i] << 16));
+    mix((w.jobSite[i] & 0xff) | ((w.jobStruct[i] & 0xfff) << 8) | (w.jobTimer[i] << 20));
   }
   return h >>> 0;
 }

@@ -12,6 +12,7 @@ import {
   type Command,
   type SpawnCommand,
 } from './commands';
+import { applyEconomyCommand, updateEconomy } from './economy';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
 import {
   CELL_FX,
@@ -92,6 +93,7 @@ import {
   FLAG_SIEGE,
   FLAG_SMOKE,
   FLAG_WANDER,
+  JOB_NONE,
   MAP_SIZE,
   MAP_SIZE_FX,
   MAX_FIELDS,
@@ -101,6 +103,7 @@ import {
   MAX_UNITS,
   NO_TARGET,
   NO_TEAM,
+  STANCE_HOLD_FIRE,
   STATE_ALIVE,
   STATE_FREE,
   STATE_WRECK,
@@ -184,6 +187,14 @@ const townCount = new Int32Array(MAX_TOWNS * MAX_TEAMS);
 const repairCrew = new Int32Array(MAX_STRUCTS * MAX_TEAMS);
 /** Set when a structure fell or was rebuilt this tick: routes must be recomputed. */
 let topologyChanged = false;
+/** Set when a base building went up: whoever stands on its plot has to step off it. */
+let plotTaken = false;
+
+/** A base building was placed: routes must be recomputed and its plot cleared of units. */
+export function markTopology(): void {
+  topologyChanged = true;
+  plotTaken = true;
+}
 
 // Line-of-sight checks per target search. Candidates beyond the budget count as unseen.
 const MAX_SIGHT_TESTS = 8;
@@ -216,6 +227,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateChaseFields(w);
   updateStructureOrders(w);
   updateTransport(w);
+  updateEconomy(w);
   updateEyes(w);
   updateJamming(w);
   updateSpotters(w);
@@ -238,11 +250,32 @@ export function step(w: World, commands: readonly Command[]): void {
     w.fieldGoal.fill(-1);
     w.path.fill(-1, 0, w.count);
     w.chaseBuilt.fill(-1);
+    if (plotTaken) {
+      plotTaken = false;
+      const map = w.map;
+      for (let i = 0; i < w.count; i++) {
+        if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0 || w.carrier[i] >= 0) continue;
+        const cls = KIND_CLASS[w.kind[i]];
+        const c = cellOfPos(w.posX[i], w.posY[i]);
+        if (map.cost[cls][c] !== 0) continue;
+        const to = map.snap[cls][c];
+        w.posX[i] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+        w.posY[i] = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+      }
+    }
   }
   w.tick++;
 }
 
 function applyCommand(w: World, cmd: Command): void {
+  if (applyEconomyCommand(w, cmd)) return;
+  // Any other order takes a truck off its job.
+  if ('units' in cmd) {
+    for (let k = 0; k < cmd.units.length; k++) {
+      const id = cmd.units[k];
+      if (Number.isInteger(id) && id >= 0 && id < w.count) w.job[id] = JOB_NONE;
+    }
+  }
   switch (cmd.type) {
     case CMD_MOVE:
     case CMD_ATTACK_MOVE: {
@@ -489,7 +522,7 @@ function updateTransport(w: World): void {
 }
 
 /** Squared distance from a point to the footprint of a structure (0 inside it). */
-function structDist2(w: World, s: number, x: number, y: number): number {
+export function structDist2(w: World, s: number, x: number, y: number): number {
   const map = w.map;
   const x0 = map.sX[s] << CELL_SHIFT;
   const y0 = map.sY[s] << CELL_SHIFT;
@@ -604,7 +637,7 @@ function updateStructureOrders(w: World): void {
 }
 
 /** Commands come from outside the sim, so never trust the ids in them. */
-function validUnits(w: World, ids: readonly number[]): number[] {
+export function validUnits(w: World, ids: readonly number[]): number[] {
   const out: number[] = [];
   for (let k = 0; k < ids.length; k++) {
     const id = ids[k];
@@ -761,6 +794,77 @@ function updateChaseFields(w: World): void {
   }
 }
 
+/** Fill slot `id` with a fresh unit standing where its position already says. */
+function initUnit(w: World, id: number, kindId: number, teamId: number): void {
+  w.velX[id] = 0;
+  w.velY[id] = 0;
+  w.targetX[id] = w.posX[id];
+  w.targetY[id] = w.posY[id];
+  w.speed[id] = KINDS[kindId].speed + nextInt(w.rng, 1 + (KINDS[kindId].speed >> 3));
+  w.team[id] = teamId;
+  w.kind[id] = kindId;
+  w.state[id] = STATE_ALIVE;
+  w.hp[id] = KINDS[kindId].hp;
+  // Random first reload so a fresh army does not fire in one synchronised volley.
+  w.cooldown[id] = nextInt(w.rng, KINDS[kindId].reload);
+  w.attack[id] = NO_TARGET;
+  w.orderSpeed[id] = w.speed[id];
+  w.path[id] = -1;
+  w.goal[id] = 0;
+  w.inside[id] = -1;
+  w.orderStruct[id] = -1;
+  w.reveal[id] = 0;
+  w.los[id] = 0;
+  // Hulls start pointing at the other side of the map.
+  w.faceX[id] = teamId === 0 ? 1024 : -1024;
+  w.faceY[id] = 0;
+  w.carrier[id] = -1;
+  w.load[id] = 0;
+  w.orderUnit[id] = -1;
+  w.aimX[id] = 0;
+  w.aimY[id] = 0;
+  w.spotted[id] = 0;
+  w.group[id] = 0;
+  w.flags[id] = 0;
+  w.job[id] = JOB_NONE;
+  w.jobSite[id] = 0;
+  w.jobStruct[id] = -1;
+  w.cargo[id] = 0;
+  w.cargoKind[id] = 0;
+  w.jobTimer[id] = 0;
+  w.stance[id] = 0;
+}
+
+/**
+ * One new unit at (x, y), or on the nearest ground it can stand on. Returns its id, or -1
+ * if there is no room for another unit.
+ */
+export function spawnUnit(w: World, kindId: number, teamId: number, x: number, y: number): number {
+  let id = 0;
+  while (id < w.count && w.state[id] !== STATE_FREE) id++;
+  if (id >= MAX_UNITS) return -1;
+  if (id === w.count) w.count++;
+  const map = w.map;
+  const to =
+    map.snap[KIND_CLASS[kindId]][cellOfPos(clampInt(x, 0, POS_MAX), clampInt(y, 0, POS_MAX))];
+  w.posX[id] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+  w.posY[id] = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+  initUnit(w, id, kindId, teamId);
+  return id;
+}
+
+const lone = [0];
+
+/** Order one unit to (x, y) by the walkable route, dropping whatever order it had. */
+export function sendTo(w: World, i: number, x: number, y: number): void {
+  w.targetX[i] = x;
+  w.targetY[i] = y;
+  w.orderSpeed[i] = w.speed[i];
+  w.flags[i] &= ~ORDER_FLAGS;
+  lone[0] = i;
+  routeUnits(w, lone, x, y);
+}
+
 function spawn(w: World, cmd: SpawnCommand): void {
   const r = clampInt(cmd.radius | 0, 1, MAP_SIZE_FX);
   const cx = cmd.x | 0;
@@ -802,35 +906,8 @@ function spawn(w: World, cmd: SpawnCommand): void {
       w.posX[id] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (w.posX[id] & (CELL_FX - 1));
       w.posY[id] = ((to >> 8) << CELL_SHIFT) + (w.posY[id] & (CELL_FX - 1));
     }
-    w.velX[id] = 0;
-    w.velY[id] = 0;
-    w.targetX[id] = w.posX[id];
-    w.targetY[id] = w.posY[id];
-    w.speed[id] = kind.speed + nextInt(w.rng, 1 + (kind.speed >> 3));
+    initUnit(w, id, kindId, teamId);
     w.group[id] = group;
-    w.team[id] = teamId;
-    w.kind[id] = kindId;
-    w.state[id] = STATE_ALIVE;
-    w.hp[id] = kind.hp;
-    // Random first reload so a fresh army does not fire in one synchronised volley.
-    w.cooldown[id] = nextInt(w.rng, kind.reload);
-    w.attack[id] = NO_TARGET;
-    w.orderSpeed[id] = w.speed[id];
-    w.path[id] = -1;
-    w.goal[id] = 0;
-    w.inside[id] = -1;
-    w.orderStruct[id] = -1;
-    w.reveal[id] = 0;
-    w.los[id] = 0;
-    // Hulls start pointing at the other side of the map.
-    w.faceX[id] = teamId === 0 ? 1024 : -1024;
-    w.faceY[id] = 0;
-    w.carrier[id] = -1;
-    w.load[id] = 0;
-    w.orderUnit[id] = -1;
-    w.aimX[id] = 0;
-    w.aimY[id] = 0;
-    w.spotted[id] = 0;
     w.flags[id] = wanderFlag(cmd.wander && !advance);
     if (cmd.garrisonTown !== undefined && kind.garrison) {
       // Spread over the town's buildings: always the emptiest one that still has room.
@@ -912,6 +989,11 @@ function acquireTargets(w: World): void {
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const ki = w.kind[i];
+    if (w.stance[i] === STANCE_HOLD_FIRE) {
+      w.attack[i] = NO_TARGET;
+      w.los[i] = 0;
+      continue;
+    }
     if (KINDS[ki].indirect) {
       acquireIndirect(w, i);
       continue;
@@ -1475,6 +1557,8 @@ function kill(w: World, i: number, by: number): void {
   w.velX[i] = 0;
   w.velY[i] = 0;
   w.attack[i] = NO_TARGET;
+  w.job[i] = JOB_NONE;
+  w.cargo[i] = 0;
   w.events.push(EV_DEATH, i, by);
 }
 

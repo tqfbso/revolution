@@ -29,7 +29,13 @@ export const T_RUBBLE = 7;
 
 export const S_BUILDING = 0;
 export const S_BRIDGE = 1;
-export const MAX_STRUCTS = 256;
+/** A base building put up by an army during the game (see src/sim/economy.ts). */
+export const S_BASE = 2;
+export const MAX_STRUCTS = 512;
+/** Resource sites: stockpiles of supplies (finite) and oil wells (slow but endless). */
+export const SITE_SUPPLIES = 0;
+export const SITE_FUEL = 1;
+export const MAX_SITES = 32;
 export const MAX_TOWNS = 8;
 /** Height of one storey, for sight from upper floors and for drawing. */
 export const FLOOR_HEIGHT = fx(0.85);
@@ -95,6 +101,18 @@ export interface GameMap {
   smoke: Int32Array;
   now: number;
   hash: number;
+  /**
+   * Resource sites: a point each (the centre of a cell), what it holds and how much it
+   * starts with. What is left of it lives in the world.
+   */
+  siteCount: number;
+  siteX: Int32Array;
+  siteY: Int32Array;
+  siteKind: Uint8Array;
+  siteStock: Int32Array;
+  /** Where each of the two armies sets up: the north-west cell of its headquarters plot. */
+  startX: Int32Array;
+  startY: Int32Array;
 }
 
 function lattice(x: number, y: number, seed: number): number {
@@ -223,7 +241,141 @@ export function generateMap(seed: number): GameMap {
   placeCrossing(map, s, fords[2] - 9, 4, 2, 'Central');
   placeCrossing(map, s, fords[1] - 9, 3, 1, 'North');
   placeCrossing(map, s, fords[3] - 9, 3, 1, 'South');
-  return finishMap(map);
+  finishMap(map);
+  placeSites(map);
+  return map;
+}
+
+/** Side of the headquarters plot, in cells. */
+export const START_PLOT = 3;
+
+/**
+ * True if a base building may stand on the cell rectangle: the plot and a ring of one cell
+ * around it are open ground (so buildings never touch anything and can never wall the map
+ * in two), the ground is nearly level, and no resource site is under or right next to it.
+ */
+export function canPlace(map: GameMap, x: number, y: number, w: number, h: number): boolean {
+  if (x < 2 || y < 2 || x + w > MAP_CELLS - 2 || y + h > MAP_CELLS - 2) return false;
+  for (let j = y - 1; j <= y + h; j++) {
+    for (let i = x - 1; i <= x + w; i++) if (map.type[j * MAP_CELLS + i] !== T_OPEN) return false;
+  }
+  let lo = map.heights[y * MAP_VERTS + x];
+  let hi = lo;
+  for (let j = y; j <= y + h; j++) {
+    for (let i = x; i <= x + w; i++) {
+      const v = map.heights[j * MAP_VERTS + i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+  }
+  if (hi - lo > fx(2.2)) return false;
+  for (let k = 0; k < map.siteCount; k++) {
+    const sx = map.siteX[k] >> CELL_SHIFT;
+    const sy = map.siteY[k] >> CELL_SHIFT;
+    if (sx >= x - 2 && sx <= x + w + 1 && sy >= y - 2 && sy <= y + h + 1) return false;
+  }
+  return true;
+}
+
+/**
+ * The nearest cell to (cx, cy), searching outward ring by ring in a fixed order, for which
+ * `ok` holds. Returns -1 if there is none within `reach` cells.
+ */
+export function findCell(
+  cx: number,
+  cy: number,
+  reach: number,
+  ok: (x: number, y: number) => boolean,
+): number {
+  for (let r = 0; r <= reach; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx !== -r && dx !== r && dy !== -r && dy !== r) continue;
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < 0 || y < 0 || x >= MAP_CELLS || y >= MAP_CELLS) continue;
+        if (ok(x, y)) return y * MAP_CELLS + x;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Where the two armies set up and what there is to haul, the same on both sides of the
+ * river: two stockpiles and a well by each headquarters, a stockpile and a well a long
+ * drive north and south of it, and the richest stockpiles and a well behind each of the
+ * settlements on that bank, where the fighting is.
+ */
+function placeSites(map: GameMap): void {
+  if (map.townCount < 6) return;
+  const site = (kind: number, stock: number, wx: number, wy: number) => {
+    if (map.siteCount >= MAX_SITES) return;
+    const open = (x: number, y: number) => {
+      if (x < 2 || y < 2 || x >= MAP_CELLS - 2 || y >= MAP_CELLS - 2) return false;
+      for (let j = y - 1; j <= y + 1; j++) {
+        for (let i = x - 1; i <= x + 1; i++) {
+          const c = j * MAP_CELLS + i;
+          if (map.type[c] !== T_OPEN || map.cost[CLASS_VEHICLE][c] === 0) return false;
+        }
+      }
+      for (let k = 0; k < map.siteCount; k++) {
+        const dx = (map.siteX[k] >> CELL_SHIFT) - x;
+        const dy = (map.siteY[k] >> CELL_SHIFT) - y;
+        if (dx * dx + dy * dy < 25) return false;
+      }
+      for (let t = 0; t < 2; t++) {
+        const dx = x - map.startX[t];
+        const dy = y - map.startY[t];
+        if (dx >= -3 && dx <= START_PLOT + 2 && dy >= -3 && dy <= START_PLOT + 2) return false;
+      }
+      return true;
+    };
+    const cx = clampInt(wx >> CELL_SHIFT, 2, MAP_CELLS - 3);
+    const cy = clampInt(wy >> CELL_SHIFT, 2, MAP_CELLS - 3);
+    const c = findCell(cx, cy, 30, open);
+    if (c < 0) return;
+    const k = map.siteCount++;
+    map.siteX[k] = ((c % MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
+    map.siteY[k] = (Math.trunc(c / MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
+    map.siteKind[k] = kind;
+    map.siteStock[k] = stock;
+  };
+  for (let side = 0; side < 2; side++) {
+    const dir = side === 0 ? -1 : 1;
+    const hx = map.townX[side] + dir * fx(190);
+    const hy = map.townY[side];
+    const c = findCell(
+      hx >> CELL_SHIFT,
+      hy >> CELL_SHIFT,
+      40,
+      (x, y) =>
+        canPlace(map, x, y, START_PLOT, START_PLOT) &&
+        map.cost[CLASS_VEHICLE][y * MAP_CELLS + x - 1] !== 0,
+    );
+    if (c < 0) continue;
+    map.startX[side] = c % MAP_CELLS;
+    map.startY[side] = Math.trunc(c / MAP_CELLS);
+  }
+  for (let side = 0; side < 2; side++) {
+    if (map.startX[side] < 0) continue;
+    const dir = side === 0 ? -1 : 1;
+    const bx = (map.startX[side] << CELL_SHIFT) + fx(6);
+    const by = (map.startY[side] << CELL_SHIFT) + fx(6);
+    site(SITE_SUPPLIES, 8000, bx + dir * fx(8), by - fx(36));
+    site(SITE_SUPPLIES, 8000, bx - dir * fx(32), by + fx(20));
+    site(SITE_FUEL, 200, bx + dir * fx(30), by + fx(26));
+    for (const ns of [-1, 1]) {
+      site(SITE_SUPPLIES, 12000, bx - dir * fx(10), by + ns * fx(150));
+      site(SITE_FUEL, 200, bx + dir * fx(14), by + ns * fx(165));
+    }
+    for (let k = 0; k < 3; k++) {
+      const t = 2 * k + side;
+      const tx = map.townX[t] + dir * (map.townR[t] + fx(18));
+      site(SITE_SUPPLIES, 16000, tx, map.townY[t] - fx(26));
+      site(SITE_FUEL, 200, tx, map.townY[t] + fx(26));
+    }
+  }
 }
 
 /** Featureless open ground, for tests that are about something other than terrain. */
@@ -260,6 +412,13 @@ function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     smoke: new Int32Array(CELL_COUNT),
     now: 0,
     hash: 0,
+    siteCount: 0,
+    siteX: new Int32Array(MAX_SITES),
+    siteY: new Int32Array(MAX_SITES),
+    siteKind: new Uint8Array(MAX_SITES),
+    siteStock: new Int32Array(MAX_SITES),
+    startX: new Int32Array(2).fill(-1),
+    startY: new Int32Array(2).fill(-1),
   };
 }
 
