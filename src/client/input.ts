@@ -6,16 +6,24 @@ import type { UnitView } from './units';
 
 const CLICK_SLOP_PX = 5;
 const CLICK_PICK_PX = 22;
+const DOUBLE_MS = 350;
 
 /**
  * Turns mouse and keyboard into selection (client-only state) and commands (sent to the sim).
- * Left drag: box select. Left click: select one. Shift: add. Right click: attack-move
- * (fight on the way). Alt + right click: plain move (do not stop to fight).
+ * Left drag: box select. Left click: select one. Double click (or Ctrl + click): everything
+ * of that type on screen. Shift: add. Right click: attack-move (fight on the way). Alt +
+ * right click: plain move (do not stop to fight). Ctrl/Alt + 1..9: save the selection as a
+ * control group; 1..9: recall it; twice: jump the camera to it.
  */
 export class Input {
   readonly marker: THREE.Mesh;
   private dragStart: { x: number; y: number } | null = null;
   private markerAge = 1;
+  /** With `?control=all` every army can be selected and ordered (sandbox). */
+  controlAll = false;
+  private readonly groups: { id: number; gen: number }[][] = [];
+  private lastClick = { time: 0, x: 0, y: 0 };
+  private lastGroup = { time: 0, n: -1 };
   private readonly box = document.getElementById('select-box') as HTMLDivElement;
   private readonly v = new THREE.Vector3();
   private readonly ray = new THREE.Raycaster();
@@ -27,6 +35,7 @@ export class Input {
     private readonly terrain: Terrain,
     private readonly units: UnitView,
     private readonly send: (command: Command) => void,
+    private readonly lookAt: (x: number, z: number) => void,
   ) {
     const markerMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
     markerMaterial.depthWrite = false;
@@ -62,13 +71,20 @@ export class Input {
       const s = this.dragStart;
       this.dragStart = null;
       this.box.style.display = 'none';
-      this.select(s.x, s.y, e.clientX, e.clientY, e.shiftKey);
+      this.select(s.x, s.y, e.clientX, e.clientY, e.shiftKey, e.ctrlKey || e.metaKey);
     });
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Escape') units.setSelected([], false);
+      const digit = /^Digit[1-9]$/.test(e.code) ? Number(e.code[5]) : 0;
+      if (digit) {
+        e.preventDefault();
+        this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
+      } else if (e.code === 'Escape') units.setSelected([], false);
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        units.setSelected(range(units.count), false);
+        units.setSelected(
+          range(units.count).filter((i) => this.mayCommand(i)),
+          false,
+        );
       } else if (e.code === 'KeyX' && units.selectedCount > 0) {
         send({ type: CMD_STOP, units: units.selectedIds() });
       }
@@ -87,7 +103,38 @@ export class Input {
     (this.marker.material as THREE.MeshBasicNodeMaterial).opacity = 1 - this.markerAge;
   }
 
-  private select(x0: number, y0: number, x1: number, y1: number, additive: boolean): void {
+  private mayCommand(id: number): boolean {
+    return this.controlAll ? this.units.isAlive(id) : this.units.isMine(id);
+  }
+
+  private controlGroup(n: number, assign: boolean, additive: boolean): void {
+    const u = this.units;
+    if (assign) {
+      this.groups[n] = u.selectedIds().map((id) => ({ id, gen: u.gen[id] }));
+      return;
+    }
+    // Drop members that died (a reused slot has a different generation).
+    const ids = (this.groups[n] ?? [])
+      .filter((m) => u.isAlive(m.id) && u.gen[m.id] === m.gen)
+      .map((m) => m.id);
+    if (ids.length === 0) return;
+    u.setSelected(ids, additive);
+    const now = performance.now();
+    if (this.lastGroup.n === n && now - this.lastGroup.time < DOUBLE_MS) {
+      const c = u.centreOf(ids);
+      if (c) this.lookAt(c.x, c.z);
+    }
+    this.lastGroup = { time: now, n };
+  }
+
+  private select(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    additive: boolean,
+    sameType: boolean,
+  ): void {
     const rect = this.dom.getBoundingClientRect();
     const isClick = Math.abs(x1 - x0) < CLICK_SLOP_PX && Math.abs(y1 - y0) < CLICK_SLOP_PX;
     const minX = Math.min(x0, x1);
@@ -96,14 +143,16 @@ export class Input {
     const maxY = Math.max(y0, y1);
     const pos = this.units.renderPos;
     const picked: number[] = [];
+    const onScreen: number[] = [];
     let best = -1;
     let bestD = CLICK_PICK_PX * CLICK_PICK_PX;
     for (let i = 0; i < this.units.count; i++) {
-      if (!this.units.isAlive(i)) continue;
+      if (!this.mayCommand(i)) continue;
       this.v.set(pos[3 * i], pos[3 * i + 1] + 0.5, pos[3 * i + 2]).project(this.camera);
       if (this.v.z < -1 || this.v.z > 1) continue;
       const sx = rect.left + (this.v.x * 0.5 + 0.5) * rect.width;
       const sy = rect.top + (-this.v.y * 0.5 + 0.5) * rect.height;
+      if (Math.abs(this.v.x) <= 1 && Math.abs(this.v.y) <= 1) onScreen.push(i);
       if (isClick) {
         const d = (sx - x1) * (sx - x1) + (sy - y1) * (sy - y1);
         if (d < bestD) {
@@ -114,7 +163,20 @@ export class Input {
         picked.push(i);
       }
     }
-    if (isClick && best >= 0) picked.push(best);
+    if (isClick && best >= 0) {
+      const now = performance.now();
+      const last = this.lastClick;
+      const double =
+        now - last.time < DOUBLE_MS && Math.abs(last.x - x1) < 8 && Math.abs(last.y - y1) < 8;
+      this.lastClick = { time: now, x: x1, y: y1 };
+      if (double || sameType) {
+        // Everything of the same type and army that is on screen.
+        const u = this.units;
+        for (const i of onScreen) {
+          if (u.kindOf(i) === u.kindOf(best) && u.teamOf(i) === u.teamOf(best)) picked.push(i);
+        }
+      } else picked.push(best);
+    }
     this.units.setSelected(picked, additive);
   }
 
@@ -128,14 +190,20 @@ export class Input {
     this.ray.setFromCamera(ndc, this.camera);
     const p = this.terrain.raycast(this.ray.ray.origin, this.ray.ray.direction, this.hit);
     if (!p) return;
+    this.orderTo(p.x, p.z, attack);
+  }
+
+  /** Order the selection to a ground point (also used by the minimap). */
+  orderTo(x: number, z: number, attack: boolean): void {
+    if (this.units.selectedCount === 0) return;
     // Float -> fixed happens here, once, at the sim boundary. The command carries integers.
     this.send({
       type: attack ? CMD_ATTACK_MOVE : CMD_MOVE,
       units: this.units.selectedIds(),
-      x: fx(p.x),
-      y: fx(p.z),
+      x: fx(x),
+      y: fx(z),
     });
-    this.marker.position.set(p.x, p.y + 0.15, p.z);
+    this.marker.position.set(x, this.terrain.heightAt(x, z) + 0.15, z);
     this.marker.visible = true;
     this.markerAge = 0;
   }

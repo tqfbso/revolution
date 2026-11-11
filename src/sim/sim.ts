@@ -7,10 +7,10 @@ import {
   type SpawnCommand,
 } from './commands';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
-import { CELL_FX, CELL_SHIFT, CLASS_COUNT, MAP_CELLS, cellOfPos } from './map';
+import { CELL_FX, CELL_SHIFT, CLASS_COUNT, MAP_CELLS, T_FOREST, cellOfPos } from './map';
 import { DIR_X, DIR_Y, UNREACHABLE, buildField, clearLine, flowDirection, newField } from './path';
 import { nextInt } from './rng';
-import { ACQUIRE_RANGE, KINDS, KIND_COUNT, KIND_TANK } from './units';
+import { ACQUIRE_RANGE, CONCEAL_RANGE, KINDS, KIND_COUNT, KIND_TANK } from './units';
 import {
   CHASE_FIELDS,
   EV_DEATH,
@@ -56,6 +56,7 @@ const COARSE_DIM = MAP_SIZE >> 4;
 const COARSE_CELLS = COARSE_DIM * COARSE_DIM;
 const ACQUIRE_CELLS = 3;
 const ACQUIRE_RANGE_SQ = ACQUIRE_RANGE * ACQUIRE_RANGE;
+const CONCEAL_RANGE_SQ = CONCEAL_RANGE * CONCEAL_RANGE;
 // Units without a target look for one every 4 ticks; everyone re-evaluates every 16 so a
 // closer threat replaces a distant one. Staggered by id so the work is spread evenly.
 const SEARCH_IDLE_MASK = 3;
@@ -400,12 +401,13 @@ function bucket(w: World, shift: number, dim: number, start: Int32Array, out: In
 
 /**
  * Pick who to shoot: the nearest living enemy within ACQUIRE_RANGE (ties go to the lowest
- * id). Reads only positions, which do not change during this pass, so the result does not
+ * id) that is not concealed by forest. Reads only positions, which do not change during this pass, so the result does not
  * depend on iteration order.
  */
 function acquireTargets(w: World): void {
   const n = w.count;
   const tick = w.tick;
+  const terrain = w.map.type;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
     const x = w.posX[i];
@@ -415,7 +417,10 @@ function acquireTargets(w: World): void {
     if (t !== NO_TARGET && w.state[t] === STATE_ALIVE && w.team[t] !== w.team[i]) {
       const dx = w.posX[t] - x;
       const dy = w.posY[t] - y;
-      valid = dx * dx + dy * dy <= ACQUIRE_RANGE_SQ;
+      const d2 = dx * dx + dy * dy;
+      valid =
+        d2 <= ACQUIRE_RANGE_SQ &&
+        (d2 <= CONCEAL_RANGE_SQ || terrain[cellOfPos(w.posX[t], w.posY[t])] !== T_FOREST);
     }
     const phase = tick + i;
     if (valid ? (phase & SEARCH_ALL_MASK) !== 0 : (phase & SEARCH_IDLE_MASK) !== 0) {
@@ -443,7 +448,12 @@ function acquireTargets(w: World): void {
         const dx = w.posX[j] - x;
         const dy = w.posY[j] - y;
         const d2 = dx * dx + dy * dy;
-        if (d2 < bestD || (d2 === bestD && j < best)) {
+        if (d2 >= bestD && (d2 > bestD || j >= best)) continue;
+        // Units in forest are concealed: they can only be spotted from close by.
+        if (d2 > CONCEAL_RANGE_SQ && terrain[cellOfPos(w.posX[j], w.posY[j])] === T_FOREST) {
+          continue;
+        }
+        {
           bestD = d2;
           best = j;
         }

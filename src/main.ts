@@ -8,6 +8,8 @@ import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
 import { Effects } from './client/effects';
+import { Fog } from './client/fog';
+import { Minimap } from './client/minimap';
 import { UnitView } from './client/units';
 import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
 import { KIND_INFANTRY, KIND_TANK } from './sim/units';
@@ -75,9 +77,12 @@ async function start(): Promise<void> {
   scene.add(sun, sun.target);
 
   // The same generator the sim worker runs: both derive the map from the seed.
-  const terrain = new Terrain(generateMap(seed), shadows);
+  // You command the red army (team 0) and see what it sees. `?fog=0` lifts the fog,
+  // `?control=all` lets you select and order every army.
+  const fog = new Fog(params.get('fog') !== '0');
+  const terrain = new Terrain(generateMap(seed), fog, shadows);
   const effects = new Effects();
-  const units = new UnitView(terrain, effects, shadows);
+  const units = new UnitView(terrain, effects, fog, shadows);
   units.lodNear *= lodScale;
   units.lodFar *= lodScale;
   const rts = new RtsCamera(canvas, terrain);
@@ -97,7 +102,18 @@ async function start(): Promise<void> {
   };
   post({ type: 'init', seed, units: unitCount, scenario });
 
-  const input = new Input(canvas, rts.camera, terrain, units, send);
+  const lookAt = (x: number, z: number) => rts.moveTo(x, z);
+  const input = new Input(canvas, rts.camera, terrain, units, send, lookAt);
+  input.controlAll = params.get('control') === 'all';
+  const minimap = new Minimap(
+    document.getElementById('minimap') as HTMLCanvasElement,
+    terrain.map,
+    fog,
+    units,
+    rts.camera,
+    lookAt,
+    (x, z, attack) => input.orderTo(x, z, attack),
+  );
   scene.add(terrain.mesh, terrain.water, terrain.trees, units.group, effects.group, input.marker);
 
   // Reinforcements: 250 tanks and 250 infantry squads per side, attacking toward the centre.
@@ -141,6 +157,7 @@ async function start(): Promise<void> {
     units.update(now, dt, rts.camera);
     effects.update(dt, rts.camera);
     input.update(dt);
+    minimap.update(now);
     // The shadow map follows the point the camera looks at and covers only what is close
     // enough to show shadow detail; far units are drawn without shadows.
     const focus = rts.focus;

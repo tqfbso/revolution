@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { attribute, color } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fromFx } from '../sim/fixed';
 import {
@@ -11,6 +12,7 @@ import {
   WATER_LEVEL,
   type GameMap,
 } from '../sim/map';
+import type { Fog } from './fog';
 
 // Draws the sim's map (src/sim/map.ts): the ground mesh coloured by terrain type, a water
 // surface, and instanced trees on forest cells. Heights are the sim's integers as floats.
@@ -55,6 +57,7 @@ export class Terrain {
 
   constructor(
     readonly map: GameMap,
+    private readonly fog: Fog,
     shadows: boolean,
   ) {
     for (let k = 0; k < VERTS * VERTS; k++) this.heights[k] = fromFx(map.heights[k]);
@@ -123,17 +126,20 @@ export class Terrain {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
-    this.mesh = new THREE.Mesh(geometry, new THREE.MeshLambertNodeMaterial({ vertexColors: true }));
+    // Everything in the world is darkened by the fog of war texture.
+    const ground = new THREE.MeshLambertNodeMaterial();
+    ground.colorNode = attribute('color', 'vec3').mul(fog.shade());
+    this.mesh = new THREE.Mesh(geometry, ground);
     this.mesh.matrixAutoUpdate = false;
     this.mesh.receiveShadow = shadows;
 
     const waterMaterial = new THREE.MeshStandardNodeMaterial({
-      color: 0x2c4347,
       roughness: 0.18,
       metalness: 0,
       transparent: true,
       opacity: 0.8,
     });
+    waterMaterial.colorNode = color(0x2c4347).mul(fog.shade());
     this.water = new THREE.Mesh(
       new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE).rotateX(-Math.PI / 2),
       waterMaterial,
@@ -146,7 +152,8 @@ export class Terrain {
 
   private buildTrees(shadows: boolean): void {
     const geometry = treeGeometry();
-    const material = new THREE.MeshLambertNodeMaterial({ vertexColors: true });
+    const material = new THREE.MeshLambertNodeMaterial();
+    material.colorNode = attribute('color', 'vec3').mul(this.fog.shade());
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);

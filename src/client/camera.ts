@@ -66,6 +66,12 @@ export class RtsCamera {
     this.cur = { ...this.goal };
   }
 
+  /** Glide to look at a ground point, keeping zoom and rotation. */
+  moveTo(x: number, z: number): void {
+    this.goal.x = x;
+    this.goal.z = z;
+  }
+
   /** The ground point the camera looks at, and how far it is from it. */
   readonly focus = new THREE.Vector3();
   get distance(): number {

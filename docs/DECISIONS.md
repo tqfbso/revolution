@@ -99,3 +99,64 @@ real projectiles arrive with artillery, where flight time is the point.
 Flashes, tracers, explosions and smoke are driven by the sim's event list (shot, death) but
 simulated on the client with floats and `Math.random`. They can differ between machines
 without affecting the game. The event list is output only and is not part of the state hash.
+
+## 015 The map is generated from the seed, in the sim, with integers
+
+`src/sim/map.ts` builds the heightfield and a terrain type per 4-unit cell (open, forest,
+water, cliff, ford) from the seed using integer noise only. The worker and the renderer
+both run it, so the map never travels over the wire and can never differ between machines.
+Layout is semi-authored: the river, its five fords and the cleared deployment areas are
+placed on purpose, noise fills in the rest. Units belong to a movement class (vehicle,
+foot) with its own passability: forest stops vehicles and halves infantry speed. Ground a
+class cannot reach from the main area (islands, cliff-ringed plateaus, forest clearings for
+vehicles) is treated as impassable for it, so any two passable cells are always connected
+and pathfinding never has to handle "no route".
+
+## 016 Flowfields, built lazily, with a straight-line shortcut
+
+One Dijkstra pass (bucket queue, about 5 ms for the 256x256 grid) gives every cell its cost
+to a goal; any number of units share it. A field is built the first time a unit of that
+order needs it and kept in one of 96 slots while units still follow it. A unit whose
+straight line to its own formation slot is walkable ignores the field and walks the line
+(rechecked every 16 ticks), which keeps open-ground movement natural and makes fields rare
+there. Chasing a target behind an obstacle follows a per-team, per-class "nearest enemy by
+walkable route" field, limited to a 30-cell detour and refreshed at most every 2 seconds,
+only while someone needs it. Rejected: per-unit A* (cost scales with unit count) and a
+navmesh (more code, no gain on a grid map).
+
+## 017 Formations move at the pace of the slowest
+
+A move order arranges the group in a block twice as wide as deep, facing the direction of
+travel, vehicles in the front rows, each unit taking the slot that matches where it already
+stands. Everyone moves at the slowest member's speed so the shape holds. Mixed groups are
+therefore slow; send tanks separately to use their speed. Same trade Age of Empires makes.
+
+## 018 Fog of war is presentation; concealment is simulation
+
+The player commands one army (team 0, red) and sees what it sees: 60 units around each
+unit. Fog lives on the client (`src/client/fog.ts`): the sim stays omniscient, which
+lockstep needs anyway, and the client hides enemies outside vision. What must affect the
+fight is in the sim: a unit standing in forest can only be targeted from within 13 units,
+closer than infantry's own range, so a squad in the woods fires first. `?fog=0` lifts the
+fog and `?control=all` lets one player order every army, for testing. True line of sight
+(ground and buildings blocking sight and fire) is deferred to M4, where buildings make it
+matter.
+
+## 019 Frame rate is defended by spending less, automatically
+
+Fabio saw 60 fps drop to the low 40s mid-battle at about 4000 units. The frame cannot be
+profiled on real hardware from the cloud, so the fix targets both likely causes without
+guessing: effects whose shooter and target are both off-screen are skipped and far ones
+thinned (CPU and overdraw), particle emission sheds load as the pool fills, and the render
+resolution steps down by a quarter when frames stay slow for two seconds and back up after
+twelve smooth ones (GPU fill). `?scale=fixed` pins the resolution.
+
+## 020 Modern battle dynamics are a design pillar
+
+Fabio's call (2026-11-11): keep present-day battle dynamics in mind from the start so the
+game stays interesting: chokepoints, urban warfare, and the kinds of units armies use now.
+Consequences: maps are built around chokepoints (the M3 river and fords, bridges and towns
+in M4); vision is a resource (fog and concealment in M3, spotting and recon in M5); no unit
+is good at everything (missile infantry beats tanks from cover, artillery beats static
+positions and is hunted by counter-battery, drones give cheap eyes and are countered by air
+defence and jamming). The roadmap for M4 to M6 is written around these dynamics.
