@@ -92,7 +92,7 @@ commands blue yet, so it uses none of this with intent (M7).
 - The logistics truck hauls and builds. 26 resource sites, the same on both banks, the
   richest behind the settlements
 - Five base buildings, production queues with rally points, a unit limit set by depots
-  (600 at most), two technology steps paid for in credits
+  (600 at most; since decision 067 800 army points), two technology steps paid for in credits
 - Command card: build, produce, research, stop, hold position, hold fire. Resource bar,
   idle-truck button, victory and defeat when a headquarters falls
 - New default opening, the skirmish: your base and a patrol against a dug-in east bank
@@ -184,6 +184,15 @@ no licences to track.
 Not verified in the cloud, where the browser has no graphics card: the frame rate at
 3,000 and 4,000 units on each graphics level, the WebGPU path, bloom on `high`, and what
 the sounds are like to the ear. The sounds were written without being heard.
+
+## Production and army rules (built, awaiting Fabio's test)
+
+Fabio, 2026-11-12: battles were decided by tank count; wants soldiers and drones close to
+free and fast, vehicles slower, tanks slower still, aircraft slowest. Decision 067: army
+points instead of unit slots, new prices and times, missile teams and drones at tier 1,
+close-range rockets for infantry, a Repeat toggle, a rewritten AI mix. A new map without
+bridge chokepoints and a fix for the slowdown when zoomed in follow in the same thread
+(parts B and C), before M10 Factions.
 
 ## M10 Factions
 

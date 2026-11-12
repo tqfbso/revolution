@@ -33,6 +33,7 @@ import {
   CLASS_AIR,
   CLASS_COUNT,
   CLASS_FOOT,
+  CLASS_VEHICLE,
   FLOOR_HEIGHT,
   MAP_CELLS,
   MAX_STRUCTS,
@@ -89,6 +90,7 @@ import {
   JAM_REVEAL_TICKS,
   KINDS,
   KIND_COUNT,
+  KIND_INFANTRY,
   KIND_TANK,
   REVEAL_TICKS,
   type UnitKind,
@@ -203,6 +205,13 @@ const IS_AIR = KINDS.map((k) => k.cls === CLASS_AIR);
 const CRUSHES = KINDS.map((k) => k.armour !== null && k.cls !== CLASS_AIR && k.cls !== CLASS_FOOT);
 const ARMED = KINDS.map((k) => k.damage.some((d) => d > 0));
 const SIGHT_SQ = KINDS.map((k) => k.sight * k.sight);
+/**
+ * Rifle squads carry shoulder-fired rockets that are useless at range and deadly point
+ * blank: against a vehicle within CLOSE_ROCKET of them they do CLOSE_ROCKET_MULT times
+ * their damage. A tank that drives into a town or a wood without infantry of its own pays.
+ */
+const CLOSE_ROCKET_SQ = fx(8) * fx(8);
+const CLOSE_ROCKET_MULT = 4;
 /**
  * Target priority, added to the squared distance of a candidate: a unit shoots at drones
  * only when it has nothing on the ground to shoot at (unless drones are all it can hit),
@@ -1655,6 +1664,13 @@ function fire(w: World): void {
     const d2 = dx * dx + dy * dy;
     if (d2 > range * range) continue;
     let dmg = kind.damage[w.kind[t]];
+    if (
+      w.kind[i] === KIND_INFANTRY &&
+      KIND_CLASS[w.kind[t]] === CLASS_VEHICLE &&
+      d2 <= CLOSE_ROCKET_SQ
+    ) {
+      dmg *= CLOSE_ROCKET_MULT;
+    }
     const cover = w.inside[t];
     const armour = KINDS[w.kind[t]].armour;
     if (armour !== null && d2 > 0 && !kind.kamikaze) {
