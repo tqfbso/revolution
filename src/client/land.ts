@@ -172,7 +172,7 @@ export class Land {
     const map = this.map;
     const ctx = this.mc;
     const px = this.markCanvas.width / MAP_SIZE;
-    ctx.fillStyle = 'rgba(0,0,0,0.11)';
+    ctx.fillStyle = 'rgba(0,0,0,0.045)';
     for (let j = 0; j < MAP_CELLS; j++) {
       for (let i = 0; i < MAP_CELLS; i++) {
         if (map.type[j * MAP_CELLS + i] !== T_FOREST) continue;

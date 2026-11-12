@@ -348,6 +348,7 @@ function buildingParts(
 const DRAB = 0x5d6149;
 const DRAB_DARK = 0x3f4434;
 const PANEL = 0x8b8c84;
+const SHEET = 0x4c514d;
 const TEAM_PAINT = [0x8a2b22, 0x27467a, 0x9a7a1e];
 const CRATES = [0x5d6149, 0x6b4a36, 0x4b5560, 0x7a7466, 0x55503f];
 
@@ -397,9 +398,72 @@ function baseParts(
   // A long shed with a low pitched roof and a band of team paint under the eaves.
   const shed = (sx: number, sz: number, sw: number, sd: number, h: number, color: number) => {
     parts.push({ size: [sw, h, sd], at: [sx, base + h / 2, sz], color, shade: wear });
-    parts.push({ size: [sw + 0.2, 0.14, sd + 0.2], at: [sx, base + h + 0.07, sz], color: ROOF });
-    parts.push({ size: [sw * 0.55, 0.14, sd + 0.2], at: [sx, base + h + 0.2, sz], color: ROOF });
+    // Sheet-metal roof with a low pitch, and vents along the ridge.
+    parts.push({
+      size: [sw + 0.3, Math.min(sw, sd) * 0.14, sd + 0.3],
+      at: [sx, base + h, sz],
+      color: SHEET,
+      shade: wear,
+      hip: 0,
+    });
+    const long = Math.max(sw, sd);
+    for (let k = 0; k < Math.floor(long / 3); k++) {
+      const a = ((k + 0.5) / Math.floor(long / 3) - 0.5) * long * 0.8;
+      parts.push({
+        size: [0.3, 0.2, 0.3],
+        at: [sx + (sw >= sd ? a : 0), base + h + Math.min(sw, sd) * 0.14, sz + (sw >= sd ? 0 : a)],
+        color: 0x6f726d,
+      });
+    }
     parts.push({ size: [sw + 0.06, 0.16, sd + 0.06], at: [sx, base + h - 0.2, sz], color: paint });
+    // Frame posts down the walls, a footing, a door and a row of small windows to the south.
+    parts.push({ size: [sw + 0.1, 0.18, sd + 0.1], at: [sx, base + 0.09, sz], color: 0x55534d });
+    const bays = Math.max(2, Math.round(sw / 1.5));
+    for (let k = 0; k <= bays; k++) {
+      const px = sx + (k / bays - 0.5) * sw;
+      for (const side of [-1, 1]) {
+        parts.push({
+          size: [0.07, h, 0.05],
+          at: [px, base + h / 2, sz + side * (sd / 2 + 0.02)],
+          color,
+          shade: wear * 0.7,
+        });
+      }
+    }
+    if (h > 1.2) {
+      for (let k = 0; k < bays; k++) {
+        const px = sx + ((k + 0.5) / bays - 0.5) * sw;
+        if (k === Math.floor(bays / 2)) {
+          parts.push({
+            size: [0.6, Math.min(1.0, h * 0.6), 0.05],
+            at: [px, base + Math.min(1.0, h * 0.6) / 2, sz + sd / 2 + 0.03],
+            color: DRAB_DARK,
+          });
+        } else if (k % 2 === 0) {
+          parts.push({
+            size: [0.55, 0.3, 0.05],
+            at: [px, base + h * 0.62, sz + sd / 2 + 0.03],
+            color: GLASS,
+            gloss: 1,
+          });
+        }
+      }
+    }
+  };
+  /** A short wall of sandbags, two courses, the top one set back. */
+  const bags = (bx: number, bz: number, len: number, alongX: boolean) => {
+    parts.push({
+      size: alongX ? [len, 0.3, 0.42] : [0.42, 0.3, len],
+      at: [bx, base + 0.15, bz],
+      color: 0x8a7f62,
+      shade: wear,
+    });
+    parts.push({
+      size: alongX ? [len - 0.3, 0.26, 0.32] : [0.32, 0.26, len - 0.3],
+      at: [bx, base + 0.43, bz],
+      color: 0x7d7358,
+      shade: wear,
+    });
   };
   const mast = (mx: number, mz: number, h: number) => {
     parts.push({ size: [0.08, h, 0.08], at: [mx, base + h / 2, mz], color: 0x9a9a96 });
@@ -411,6 +475,30 @@ function baseParts(
     shed(cx - w * 0.18, cz + d * 0.3, w * 0.44, d * 0.3, 1.4, DRAB);
     mast(cx + w * 0.3, cz + d * 0.3, 6.5);
     mast(cx + w * 0.22, cz + d * 0.36, 4.2);
+    // A dish on the annexe, a generator beside it, sandbags at the door.
+    parts.push({
+      size: [0.9, 0.06, 0.9],
+      at: [cx - w * 0.3, base + 2.05, cz + d * 0.3],
+      color: 0xa3a5a0,
+      rot: [0.7, 0.5, 0],
+    });
+    parts.push({
+      size: [0.08, 0.5, 0.08],
+      at: [cx - w * 0.3, base + 1.7, cz + d * 0.3],
+      color: 0x777a78,
+    });
+    parts.push({
+      size: [1.3, 0.7, 0.7],
+      at: [cx + w * 0.34, base + 0.35, cz - d * 0.3],
+      color: CRATES[2],
+    });
+    parts.push({
+      size: [0.1, 0.5, 0.1],
+      at: [cx + w * 0.38, base + 0.95, cz - d * 0.3],
+      color: 0x3b3d3d,
+    });
+    bags(cx + w * 0.12, cz + d * 0.44, w * 0.3, true);
+    bags(cx + w * 0.3, cz + d * 0.22, d * 0.2, false);
     // The flag of whoever commands from here.
     parts.push({
       size: [0.07, 4.6, 0.07],
@@ -444,13 +532,17 @@ function baseParts(
   } else if (type === B_BARRACKS) {
     shed(cx, cz - d * 0.24, w * 0.9, d * 0.36, 1.25, DRAB);
     shed(cx, cz + d * 0.24, w * 0.9, d * 0.36, 1.25, DRAB);
-    for (let k = 0; k < 5; k++) {
+    // Kit crates in the yard between the huts, sandbags at each end of it.
+    for (let k = 0; k < 4; k++) {
       parts.push({
-        size: [0.5, 0.4, 0.04],
-        at: [x0 + (w * (k + 1)) / 6, base + 0.75, cz - d * 0.06],
-        color: GLASS,
+        size: [0.8, 0.4 + 0.3 * rand(id, 50 + k), 0.5],
+        at: [x0 + (w * (k + 1)) / 5, base + 0.25, cz + (rand(id, 54 + k) - 0.5) * d * 0.08],
+        color: CRATES[Math.floor(rand(id, 58 + k) * CRATES.length)],
+        shade: wear,
       });
     }
+    bags(x0 + 0.4, cz, d * 0.14, false);
+    bags(x0 + w - 0.4, cz, d * 0.14, false);
   } else if (type === B_WORKS) {
     // A vehicle hall with two dark doors on the south side and a workshop annexe.
     shed(cx, cz - d * 0.1, w * 0.86, d * 0.62, 2.1, PANEL);
