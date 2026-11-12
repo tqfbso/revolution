@@ -49,6 +49,9 @@ import {
 import { Batch } from './batch';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
+import { ICON_FROM, ICON_FULL, Icons } from './icons';
+import type { Look } from './look';
+import { fieldPaint } from './surface';
 import {
   SQUAD_OFFSETS,
   TEAM_OFFSETS,
@@ -80,6 +83,11 @@ const SOLDIER_TURN = 9;
 const CULL_RADIUS = 4;
 const WRECK_SMOKE_SECONDS = 50;
 const LOD_HIDDEN = 3;
+/** Paint patterns to go round, and the room left under 1 for the burn (see the material). */
+const SEEDS = 16;
+const BURN_SCALE = 0.97;
+/** Keeps the packed value clear of a whole number, where rounding would flip the seed. */
+const BURN_BASE = 0.01;
 
 /** How a vehicle type is drawn: hull and turret batches per level of detail. */
 interface VehicleDraw {
@@ -161,6 +169,11 @@ export class UnitView {
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
   private readonly jamRings: Batch;
+  private readonly icons = new Icons(MAX_UNITS);
+  /** How far the camera is from what it looks at: decides when the map symbols show. */
+  zoom = 0;
+  private readonly camRight = new THREE.Vector3();
+  private readonly camUp = new THREE.Vector3();
   private readonly frustum = new THREE.Frustum();
   private readonly projScreen = new THREE.Matrix4();
 
@@ -168,16 +181,25 @@ export class UnitView {
     private readonly terrain: Terrain,
     private readonly effects: Effects,
     private readonly fog: Fog,
-    shadows: boolean,
+    look: Look,
     private readonly structures: StructureView,
     private readonly scars: Scars,
   ) {
     const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.82, metalness: 0.08 });
     const tint = attribute('aTint', 'vec4');
-    const painted = mix(attribute('color', 'vec3'), tint.xyz, attribute('teamMask', 'float'));
-    // tint.w is "burn": 1 turns the model into a scorched wreck.
-    material.colorNode = mix(painted, vec3(0.022, 0.02, 0.019), tint.w);
+    const marking = attribute('teamMask', 'float');
+    const painted = mix(attribute('color', 'vec3'), tint.xyz, marking);
+    // tint.w carries two things: its whole part is a number per unit (see SEEDS), its
+    // fraction is "burn", where 1 turns the model into a scorched wreck.
+    const burn = tint.w.fract().sub(BURN_BASE).div(BURN_SCALE).clamp(0, 1);
+    if (look.rich) {
+      const paint = fieldPaint(look, painted, marking, tint.w.floor(), burn);
+      material.colorNode = paint.colour.mul(fog.cloud());
+      material.roughnessNode = paint.roughness;
+      material.metalnessNode = paint.metalness;
+    } else material.colorNode = mix(painted, vec3(0.022, 0.02, 0.019), burn);
 
+    const shadows = look.shadows;
     const batch = (g: THREE.BufferGeometry, cap: number, lod: number) => {
       const b = new Batch(g, material, cap);
       // Far LOD is a few pixels: no shadow work for it.
@@ -245,6 +267,8 @@ export class UnitView {
     );
     this.jamRings.mesh.renderOrder = 3;
     this.group.add(this.jamRings.mesh);
+
+    this.group.add(this.icons.batch.mesh);
 
     const ringGeometry = new THREE.RingGeometry(1.5, 1.72, 24).rotateX(-Math.PI / 2);
     const ringMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
@@ -590,6 +614,12 @@ export class UnitView {
     const batches = this.batches;
     for (const b of batches) b.n = 0;
     this.jamRings.n = 0;
+    // Map symbols: nothing up close, solid when the camera is far out.
+    const icons = this.icons;
+    icons.batch.n = 0;
+    const iconAlpha = Math.min(1, Math.max(0, (this.zoom - ICON_FROM) / (ICON_FULL - ICON_FROM)));
+    const right = this.camRight.setFromMatrixColumn(camera.matrixWorld, 0);
+    const up = this.camUp.setFromMatrixColumn(camera.matrixWorld, 1);
     const lodCount = this.stats.lod;
     lodCount[0] = lodCount[1] = lodCount[2] = 0;
     let culled = 0;
@@ -687,6 +717,25 @@ export class UnitView {
       this.lodOf[i] = lod;
 
       const team = TEAM_RGB[teamId] ?? TEAM_RGB[0];
+      if (iconAlpha > 0 && alive) {
+        // The same size on screen at any distance; brighter than the paint, to carry far.
+        const s = Math.sqrt(d2) * 0.018;
+        const lift = flying ? 0 : 1.2 + s * 0.5;
+        const sel = this.selected[i] ? 1.6 : 1;
+        icons.put(
+          x + up.x * lift,
+          y + up.y * lift,
+          z + up.z * lift,
+          s,
+          right,
+          up,
+          this.kind[i],
+          Math.min(1, team[0] * 1.9 * sel + 0.04),
+          Math.min(1, team[1] * 1.9 * sel + 0.04),
+          Math.min(1, team[2] * 1.9 * sel + 0.04),
+          iconAlpha,
+        );
+      }
       const h = this.heading[i];
       const sin = Math.sin(h);
       const cos = Math.cos(h);
@@ -700,7 +749,10 @@ export class UnitView {
       if (veh) {
         // A jammed drone flickers: its link is gone.
         const jammedNow = flying && alive && this.load[i] > 0;
-        const burn = alive ? (jammedNow ? 0.45 + 0.4 * Math.sin(seconds * 24 + i) : 0) : 1;
+        const burn =
+          (i % SEEDS) +
+          BURN_BASE +
+          BURN_SCALE * (alive ? (jammedNow ? 0.45 + 0.4 * Math.sin(seconds * 24 + i) : 0) : 1);
         if (lod === 2) {
           veh.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
         } else {
@@ -728,7 +780,7 @@ export class UnitView {
       } else {
         const squad = this.squads[this.kind[i]] ?? this.squads[KIND_INFANTRY]!;
         if (lod === 2) {
-          squad.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], 0);
+          squad.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], (i % SEEDS) + BURN_BASE);
         } else {
           // Men drop out of the squad as it loses health.
           const figures = squad.figures;
@@ -752,7 +804,7 @@ export class UnitView {
               team[0],
               team[1],
               team[2],
-              0,
+              ((i + k * 5) % SEEDS) + BURN_BASE,
             );
           }
         }
@@ -770,6 +822,7 @@ export class UnitView {
     this.stats.culled = culled;
     for (const b of batches) b.flush();
     this.jamRings.flush();
+    icons.batch.flush();
     this.rings.count = ringCount;
     if (ringCount > 0) {
       const attr = this.rings.instanceMatrix;

@@ -16,6 +16,8 @@ import type { Snapshot } from '../worker/protocol';
 import { Batch } from './batch';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
+import type { Look } from './look';
+import { masonry } from './surface';
 import { build, type Part } from './structures';
 import type { Terrain } from './terrain';
 
@@ -167,13 +169,21 @@ export class WorksView {
     private readonly terrain: Terrain,
     private readonly fog: Fog,
     private readonly effects: Effects,
-    shadows: boolean,
+    look: Look,
   ) {
+    const shadows = look.shadows;
     const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.94, metalness: 0.02 });
     const tint = attribute('aTint', 'vec4');
     // tint.xyz is the owner's paint (on the marked parts only), tint.w the damage.
     const painted = mix(attribute('color', 'vec3'), tint.xyz, attribute('teamMask', 'float'));
-    material.colorNode = painted.mul(float(1).sub(tint.w.mul(0.55))).mul(fog.shade());
+    const worn = painted.mul(float(1).sub(tint.w.mul(0.55))).mul(fog.shade());
+    if (look.rich) {
+      // Poured concrete, sacking and earth all take the same weathering.
+      const face = masonry(look, 5);
+      material.colorNode = worn.mul(face.tone);
+      material.roughnessNode = face.roughness;
+      material.normalNode = face.normal;
+    } else material.colorNode = worn;
     const batch = (g: THREE.BufferGeometry, cap: number, shadow: boolean) => {
       const b = new Batch(g, material, cap);
       b.mesh.castShadow = shadows && shadow;

@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute } from 'three/tsl';
+import { attribute, float, mix } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fromFx } from '../sim/fixed';
 import { BUILDINGS, B_BARRACKS, B_DEPOT, B_DRONES, B_HQ, B_WORKS } from '../sim/economy';
@@ -19,6 +19,8 @@ import { BASE_STRIDE, type Snapshot } from '../worker/protocol';
 import { Batch } from './batch';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
+import type { Look } from './look';
+import { masonry } from './surface';
 import type { Terrain } from './terrain';
 
 // Buildings, bridges and town flags. Structures are few (dozens), so each is its own mesh,
@@ -60,6 +62,8 @@ export interface Part {
   rot?: [number, number, number];
   /** Multiplies the colour: soot and weathering. */
   shade?: number;
+  /** 1 for glass: smooth enough to show the sky. */
+  gloss?: number;
 }
 
 export function build(parts: Part[]): THREE.BufferGeometry {
@@ -74,6 +78,7 @@ export function build(parts: Part[]): THREE.BufferGeometry {
     c.set(p.color).multiplyScalar(p.shade ?? 1);
     for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.setAttribute('gloss', new THREE.BufferAttribute(new Float32Array(n).fill(p.gloss ?? 0), 1));
     return g;
   });
   const merged = mergeGeometries(geometries);
@@ -147,6 +152,7 @@ function buildingParts(
             size: blown ? [size[0] * 1.5, size[1] * 1.6, size[2] * 1.5] : size,
             at: alongX ? [cx + t, yy, cz + off] : [cx + off, yy, cz + t],
             color: blown ? SOOT : door ? 0x2a2622 : GLASS,
+            gloss: blown || door ? 0 : 1,
           });
         }
       }
@@ -522,11 +528,20 @@ export class StructureView {
     private readonly terrain: Terrain,
     private readonly fog: Fog,
     private readonly effects: Effects,
-    shadows: boolean,
+    look: Look,
   ) {
-    this.shadows = shadows;
+    this.shadows = look.shadows;
     this.material = new THREE.MeshStandardNodeMaterial({ roughness: 0.93, metalness: 0 });
-    this.material.colorNode = attribute('color', 'vec3').mul(fog.shade());
+    if (look.rich) {
+      // Stained plaster and concrete; window glass stays clean enough to show the sky.
+      const wall = masonry(look, 7);
+      const gloss = attribute('gloss', 'float');
+      this.material.colorNode = attribute('color', 'vec3')
+        .mul(mix(wall.tone, float(1), gloss))
+        .mul(fog.shade());
+      this.material.roughnessNode = mix(wall.roughness, float(0.3), gloss);
+      this.material.normalNode = wall.normal;
+    } else this.material.colorNode = attribute('color', 'vec3').mul(fog.shade());
     const ui = new THREE.MeshBasicNodeMaterial();
     ui.colorNode = attribute('aTint', 'vec4').xyz;
     this.pips = new Batch(new THREE.BoxGeometry(0.62, 0.14, 0.62), ui, MAX_STRUCTS * 10 + 64);
