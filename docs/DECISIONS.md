@@ -796,3 +796,28 @@ towns, plus a large random part on this map so that no two attacks need come the
 and it sends raids by a way the army did not take. It pickets and wires its ends of the
 ravine and the farmland like bare fords. Without a river, "its bank" is the half of the map
 nearer its headquarters.
+
+## 070 An easier Easy, depots at the stockpiles, squads in carriers
+
+Fabio, 2026-11-12: the balance is right, but the easy opponent is still too hard. Three
+changes to the AI (`src/sim/ai.ts`), none to the rules of the game:
+
+- Depots beside stockpiles. On the ridge map the AI hauled supplies up to 60 m to its
+  headquarters; a truck there brought in about 70 supplies a minute, against 200 with a
+  depot next to the pile. It sat at zero supplies with thousands of credits unspent. It now
+  puts a depot within 30 m of the richest stockpile it works from far off, and a rich army
+  held back by its unit limit builds two depots at a time. On normal the army reaches 240
+  points at minute 12 where it had 125.
+- Easy and recruit are slower and smaller on purpose, since the fix above would otherwise
+  have made them stronger: easy keeps 110 army points (was 220) and 7 trucks, orders a unit
+  only on every third think, holds the town at its gate and one more until it has attacked
+  once, does not go over the middle of the map before minute 24 (the old rule had a hole:
+  an attack on a town of its own side could carry on to the enemy base at once, and the
+  town on the ridge counted as its own side), and rests five minutes between attacks.
+  Recruit: 70 points, 6 trucks, its gate town only, eight minutes of rest. No level gets
+  free resources or sees through fog, as before (decision 045).
+- Carriers. When the field army sets out, squads board the fighting vehicles it has (two
+  each). They get out when enemy ground troops are within 52 m, at the objective, or at
+  home after a retreat. The army still moves at the pace of whoever walks: a variant where
+  the carried half drove ahead and the rest followed lost more headless games than it won.
+  Not on recruit.
