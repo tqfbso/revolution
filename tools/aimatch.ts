@@ -3,6 +3,7 @@
 import { aiReport, aiThink, createAi, type AiLevel } from '../src/sim/ai';
 import type { Command } from '../src/sim/commands';
 import { B_HQ } from '../src/sim/economy';
+import { generateMap } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import { createWorld, hashWorld, NO_TEAM } from '../src/sim/world';
@@ -10,7 +11,8 @@ import { createWorld, hashWorld, NO_TEAM } from '../src/sim/world';
 const seed = Number(process.argv[2] ?? 1);
 const minutes = Number(process.argv[3] ?? 20);
 const levels = [process.argv[4] ?? 'normal', process.argv[5] ?? 'normal'];
-const w = createWorld(seed);
+const layout = process.env.MAP === 'river' ? 'river' : 'ridge';
+const w = createWorld(seed, generateMap(seed, layout));
 const ais = levels.map((l, t) => (l === 'off' ? null : createAi(t, l as AiLevel, seed)));
 let cmds: Command[] = skirmishCommands(w.map);
 let worst = 0;

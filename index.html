@@ -44,7 +44,8 @@
         display: none;
       }
       #resources {
-        top: 10px;
+        /* Below the row of menus, which reaches past the middle of the screen. */
+        top: 54px;
         left: 50%;
         transform: translateX(-50%);
         white-space: nowrap;
@@ -244,6 +245,10 @@
         <option value="normal">AI: normal</option>
         <option value="hard">AI: hard</option>
         <option value="off">AI: none</option>
+      </select>
+      <select id="map-pick" aria-label="Map" title="Battlefield. Changing this starts a new game">
+        <option value="ridge">Map: ridge</option>
+        <option value="river">Map: river</option>
       </select>
       <select id="volume" aria-label="Sound" title="Sound volume">
         <option value="0">Sound: off</option>
