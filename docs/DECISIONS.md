@@ -564,3 +564,51 @@ leaves you alone for 22 minutes and attacks only with three times what it expect
 meet. Against a player who does nothing it takes the towns but not the base. Easy was softened a little
 (fewer trucks and factories, at most 140 units, first attack at 17 minutes) and is now what the game opens
 on; normal is one click away. The levels still differ only in tempo and judgement.
+
+## 053 Field works are cells, not structures
+
+A wall, a gate, a run of wire, a tank obstacle, a trench or a sandbag position takes one
+map cell and lives in the world per cell. Structures are rectangles fixed with the map,
+there are at most a few hundred of them and each one is a target with a garrison; a
+player who rings a town needs hundreds of small pieces placed anywhere. The player drags
+a line and gets one work per cell, joined edge to edge so a diagonal wall does not leak.
+A work is paid for when ordered (refunded in full if taken down before it is built) and
+has no effect until its builders finish it.
+
+## 054 A work in the way is expensive, not impassable
+
+Passability tables keep the rule that everything a unit may stand on is one connected
+area. A sealed wall would break that rule and strand every order across it. So for
+pathfinding a work that blocks a class is a cell of very high cost: a route never crosses
+one while any way round exists on the whole map, and when none exists the route leads to
+the wall. There the unit breaches if its weapon can and waits if not, with its order
+kept, so the squad behind a tank follows it through the hole. Short chases after a
+target never cross works.
+
+## 055 Passability per army, because of gates
+
+A gate is a wall to everyone but its owner. Passability and flowfields are therefore
+looked up by layer (army and movement class). While no gate stands anywhere all armies
+share the same tables and the same flowfields, so the common case costs what it did; the
+first gate splits the tables (6 ms to rebuild instead of 2.5).
+
+## 056 What stops what, and what opens it
+
+Walls and gates stop everything and block sight at ground level (not from a hill, not
+for drones). Wire stops men of every army, its owner's too; armoured vehicles crush the
+enemy's by driving over it. Tank obstacles stop vehicles only. Trenches and sandbags
+stop nothing: a squad in one takes a third of the damage from direct fire and less from
+shells, and a trench hides it as a wood does. Tank guns and shells bring down walls and
+wire; obstacles shrug off most of both and need the engineer's charge, which is also the
+fastest way through a wall. A trench cannot be destroyed. Engineers are a Barracks unit
+from the first tier, weak in a firefight, so breaching has to be covered.
+
+## 057 The AI's belts have gaps
+
+The AI fortifies with belts, not rings: wire with tank obstacles behind it across the
+enemy's approach to a town it holds, a two-cell gap every seven cells, sandbags behind
+the gaps. Gaps keep its own army and trucks moving without gates, cannot shut it in, and
+are what real obstacle belts are for: they do not stop an attack, they decide where it
+comes through. A human can build a sealed ring with gates; the AI gets through one by
+breaching. No minefields in this milestone: an invisible killer needs detection and
+clearing rules first.

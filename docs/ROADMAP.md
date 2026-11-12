@@ -126,24 +126,31 @@ matters more than it should in AI against AI games; the AI does not yet use carr
 move infantry or smoke to cover an assault on easy and normal; game length is untested
 by a human.
 
-## M8 Fortifications
+## M8 Fortifications (done)
 
 Fabio, 2026-11-11: "Would be great to be able to build around the city, like walls, barbed
-wire etc." The fortress so far is whatever houses happen to stand at a crossing; this
-milestone lets a player (and the AI) make one.
+wire etc." The fortress used to be whatever houses happened to stand at a crossing; now a
+player (and the AI) can make one.
 
-- Field works built by trucks or infantry on open ground and in the streets of a town:
-  walls and barricades (block movement and sight, must be shelled or breached), barbed
-  wire (stops infantry dead, slows nothing with tracks), trenches and sandbag positions
-  (cover in the open, as a house gives it), tank obstacles (stop vehicles, not men)
-- Gates, so a wall does not shut its builder in; pathfinding that treats a wall as an
-  obstacle a breach can open
-- Breaching: engineers, tank guns and artillery against each kind of obstacle
-- The AI fortifies the towns it holds and the fords it watches, and assaults yours. It
-  was built for this: its assault already works through a list of strong points to reduce
-  before the infantry goes in (`strongPoints` in `src/sim/ai.ts`), which today holds
-  occupied houses and base buildings and will hold field works too
-- Minefields are a candidate; decide when the rest is playable
+- Six field works, one 4 m cell each, built by trucks and by the new engineer squad along
+  a line dragged on the ground: wall and gate (stop everything, block sight at ground
+  level; the gate opens for its owner only), barbed wire (stops infantry; armour drives
+  over the enemy's and flattens it), tank obstacle (stops vehicles, not men), trench and
+  sandbags (cover for infantry in the open; right click to man them)
+- Pathfinding goes round a work when there is a way round and otherwise leads to it;
+  units that can breach it do so on arrival, the rest wait for a gap
+- Breaching: tank guns and artillery shoot works down, engineers lay charges (the only
+  quick answer to tank obstacles). Right click an enemy work to order it
+- The AI keeps a few engineer squads that lay belts of wire, obstacles and sandbags in
+  front of the towns it holds and at its end of bare fords, mans the sandbags with
+  garrison troops that find no house, buys engineers and guns when it has seen your
+  works, and sends them against the works in its way when it attacks
+- Decisions 053 to 057
+
+Left out on purpose: minefields (an invisible killer needs a way to find and clear it,
+and the engineer has enough to do for now; revisit after play); works inside a town's
+streets are possible only where the ground is open; the AI builds no walls or gates and
+does not dig trenches; trucks of the AI do not build works.
 
 ## M9 Factions
 
