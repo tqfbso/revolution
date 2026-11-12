@@ -14,6 +14,18 @@ import {
   type SpawnCommand,
 } from './commands';
 import { applyEconomyCommand, updateEconomy } from './economy';
+import {
+  HIT_CHARGE,
+  HIT_DIRECT,
+  applyWorkCommand,
+  blastWorks,
+  canBreach,
+  hitWork,
+  isCover,
+  remove as removeWork,
+  updateWorks,
+  workStands,
+} from './works';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
 import {
   CELL_FX,
@@ -26,21 +38,35 @@ import {
   MAX_STRUCTS,
   MAX_TOWNS,
   S_BASE,
+  layerOf,
   S_BRIDGE,
   S_BUILDING,
   T_BRIDGE,
   T_BUILDING,
   T_FOREST,
   T_RUBBLE,
+  T_SANDBAG,
+  T_TRENCH,
+  T_WIRE,
   cellOfPos,
   deckHeight,
   heightAt,
   lineOfSight,
   razeStructure,
   refreshPassability,
+  refreshWorks,
   stampStructure,
 } from './map';
-import { DIR_X, DIR_Y, UNREACHABLE, buildField, clearLine, flowDirection, newField } from './path';
+import {
+  DIR_CELL,
+  DIR_X,
+  DIR_Y,
+  UNREACHABLE,
+  buildField,
+  clearLine,
+  flowDirection,
+  newField,
+} from './path';
 import { nextInt } from './rng';
 import {
   ACQUIRE_RANGE,
@@ -51,6 +77,7 @@ import {
   COUNTER_BATTERY_TICKS,
   DANGER_CLOSE,
   DETECT_RANGE,
+  ENGINEER_REACH,
   EYE_HEIGHT,
   FACING_COS,
   GARRISON_MAX,
@@ -64,6 +91,7 @@ import {
   KIND_COUNT,
   KIND_TANK,
   REVEAL_TICKS,
+  type UnitKind,
   SCATTER_MIN,
   SCATTER_SHIFT,
   SHELL_BASE_TICKS,
@@ -75,6 +103,7 @@ import {
 } from './units';
 import {
   CHASE_FIELDS,
+  EV_BREACH,
   EV_CAPTURE,
   EV_COLLAPSE,
   EV_DEATH,
@@ -88,6 +117,7 @@ import {
   FLAG_AMOVE,
   FLAG_BOARD,
   FLAG_BOMBARD,
+  FLAG_BREACH,
   FLAG_DIRECT,
   FLAG_GARRISON,
   FLAG_FOCUS,
@@ -169,6 +199,8 @@ const fieldRefs = new Int32Array(MAX_FIELDS);
 const goalScratch = new Int32Array(MAX_UNITS);
 const KIND_CLASS = KINDS.map((k) => k.cls);
 const IS_AIR = KINDS.map((k) => k.cls === CLASS_AIR);
+/** Armoured vehicles drive over barbed wire and leave none. */
+const CRUSHES = KINDS.map((k) => k.armour !== null && k.cls !== CLASS_AIR && k.cls !== CLASS_FOOT);
 const ARMED = KINDS.map((k) => k.damage.some((d) => d > 0));
 const SIGHT_SQ = KINDS.map((k) => k.sight * k.sight);
 /**
@@ -195,10 +227,22 @@ let topologyChanged = false;
 /** Set when a base building went up: whoever stands on its plot has to step off it. */
 let plotTaken = false;
 
+/** Set when only field works changed: the cheaper update of the routes will do. */
+let worksChanged = false;
+
 /** A base building was placed: routes must be recomputed and its plot cleared of units. */
 export function markTopology(): void {
   topologyChanged = true;
   plotTaken = true;
+}
+
+/**
+ * A field work that stops movement went up (`taken`: whoever stands on its cell has to
+ * step off) or came down: routes must be recomputed.
+ */
+export function markWorks(taken: boolean): void {
+  worksChanged = true;
+  if (taken) plotTaken = true;
 }
 
 // Line-of-sight checks per target search. Candidates beyond the budget count as unseen.
@@ -233,6 +277,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateStructureOrders(w);
   updateTransport(w);
   updateEconomy(w);
+  updateWorks(w);
   updateEyes(w);
   updateJamming(w);
   updateSpotters(w);
@@ -248,10 +293,12 @@ export function step(w: World, commands: readonly Command[]): void {
     updateTowns(w);
     clearSmoke(w);
   }
-  if (topologyChanged) {
+  if (topologyChanged || worksChanged) {
     // The ground changed: every route computed so far may run through a wall or off a bridge.
+    if (topologyChanged) refreshPassability(w.map);
+    else refreshWorks(w.map);
     topologyChanged = false;
-    refreshPassability(w.map);
+    worksChanged = false;
     w.fieldGoal.fill(-1);
     w.path.fill(-1, 0, w.count);
     w.chaseBuilt.fill(-1);
@@ -260,10 +307,10 @@ export function step(w: World, commands: readonly Command[]): void {
       const map = w.map;
       for (let i = 0; i < w.count; i++) {
         if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0 || w.carrier[i] >= 0) continue;
-        const cls = KIND_CLASS[w.kind[i]];
+        const layer = layerOf(w.team[i], KIND_CLASS[w.kind[i]]);
         const c = cellOfPos(w.posX[i], w.posY[i]);
-        if (map.cost[cls][c] !== 0) continue;
-        const to = map.snap[cls][c];
+        if (map.cost[layer][c] !== 0) continue;
+        const to = map.snap[layer][c];
         w.posX[i] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
         w.posY[i] = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
       }
@@ -273,7 +320,7 @@ export function step(w: World, commands: readonly Command[]): void {
 }
 
 function applyCommand(w: World, cmd: Command): void {
-  if (applyEconomyCommand(w, cmd)) return;
+  if (applyEconomyCommand(w, cmd) || applyWorkCommand(w, cmd)) return;
   // Any other order takes a truck off its job.
   if ('units' in cmd) {
     for (let k = 0; k < cmd.units.length; k++) {
@@ -405,7 +452,8 @@ const ORDER_FLAGS =
   FLAG_BOMBARD |
   FLAG_SMOKE |
   FLAG_HOLD |
-  FLAG_FOCUS;
+  FLAG_FOCUS |
+  FLAG_BREACH;
 
 /**
  * Send each squad to the nearest carrier of its own army that still has a seat free,
@@ -453,7 +501,8 @@ function orderBoarding(w: World, squads: readonly number[], carriers: readonly n
 function unload(w: World, c: number, follow: boolean): void {
   if (w.load[c] === 0) return;
   const map = w.map;
-  const cost = map.cost[CLASS_FOOT];
+  const layer = layerOf(w.team[c], CLASS_FOOT);
+  const cost = map.cost[layer];
   const one = [0];
   const fxc = w.faceX[c];
   const fyc = w.faceY[c];
@@ -467,7 +516,7 @@ function unload(w: World, c: number, follow: boolean): void {
     let y = clampInt(w.posY[c] - 2 * fyc + Math.trunc((fxc * side) / 1024), 0, POS_MAX);
     const cell = cellOfPos(x, y);
     if (cost[cell] === 0) {
-      const to = map.snap[CLASS_FOOT][cell];
+      const to = map.snap[layer][cell];
       x = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
       y = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
     }
@@ -631,13 +680,16 @@ function enterBuilding(w: World, i: number, s: number): void {
   w.sOccTeam[s] = w.team[i];
 }
 
+export { leaveBuilding as leaveHouse };
+
 /** Step out of a building onto the nearest ground. Does nothing for a unit outside. */
 function leaveBuilding(w: World, i: number): void {
   const s = w.inside[i];
   if (s < 0) return;
   w.inside[i] = -1;
   w.sOcc[s]--;
-  const to = w.map.snap[KIND_CLASS[w.kind[i]]][cellOfPos(w.posX[i], w.posY[i])];
+  const layer = layerOf(w.team[i], KIND_CLASS[w.kind[i]]);
+  const to = w.map.snap[layer][cellOfPos(w.posX[i], w.posY[i])];
   w.posX[i] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
   w.posY[i] = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
 }
@@ -748,7 +800,7 @@ function routeUnits(w: World, units: readonly number[], gx: number, gy: number):
   const goal = cellOfPos(clampInt(gx, 0, POS_MAX), clampInt(gy, 0, POS_MAX));
   for (let k = 0; k < units.length; k++) {
     const id = units[k];
-    const cls = KIND_CLASS[w.kind[id]];
+    const cls = layerOf(w.team[id], KIND_CLASS[w.kind[id]]);
     let tx = clampInt(w.targetX[id], 0, POS_MAX);
     let ty = clampInt(w.targetY[id], 0, POS_MAX);
     const cell = cellOfPos(tx, ty);
@@ -772,7 +824,9 @@ function routeUnits(w: World, units: readonly number[], gx: number, gy: number):
  * built in a slot no moving unit still uses. Returns -1 if every slot is in use (the unit
  * then walks straight, as before pathfinding existed).
  */
-function acquireField(w: World, goal: number, cls: number): number {
+function acquireField(w: World, goal: number, layer: number): number {
+  // Armies whose passability is the same share their fields.
+  const cls = w.map.shared[layer];
   for (let f = 0; f < MAX_FIELDS; f++) {
     if (w.fieldGoal[f] === goal && w.fieldClass[f] === cls) return f;
   }
@@ -815,7 +869,7 @@ function updateChaseFields(w: World): void {
       }
     }
     const dist = (w.chaseDist[f] ??= newField());
-    buildField(w.map, f % CLASS_COUNT, dist, goalScratch, n, CHASE_LIMIT);
+    buildField(w.map, f, dist, goalScratch, n, CHASE_LIMIT);
     w.chaseBuilt[f] = w.tick;
     return;
   }
@@ -873,7 +927,9 @@ export function spawnUnit(w: World, kindId: number, teamId: number, x: number, y
   if (id === w.count) w.count++;
   const map = w.map;
   const to =
-    map.snap[KIND_CLASS[kindId]][cellOfPos(clampInt(x, 0, POS_MAX), clampInt(y, 0, POS_MAX))];
+    map.snap[layerOf(teamId, KIND_CLASS[kindId])][
+      cellOfPos(clampInt(x, 0, POS_MAX), clampInt(y, 0, POS_MAX))
+    ];
   w.posX[id] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
   w.posY[id] = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
   initUnit(w, id, kindId, teamId);
@@ -892,6 +948,40 @@ export function sendTo(w: World, i: number, x: number, y: number): void {
   routeUnits(w, lone, x, y);
 }
 
+/** Order `units` to (x, y) by the walkable route, dropping whatever orders they had. */
+export function orderTo(w: World, units: readonly number[], x: number, y: number): void {
+  for (let k = 0; k < units.length; k++) {
+    const id = units[k];
+    w.targetX[id] = x;
+    w.targetY[id] = y;
+    w.orderSpeed[id] = w.speed[id];
+    w.orderStruct[id] = -1;
+    w.flags[id] &= ~ORDER_FLAGS;
+  }
+  routeUnits(w, units, x, y);
+}
+
+/** How far a unit's siege weapon reaches: an engineer's charge is laid by hand. */
+function siegeReach(kind: UnitKind): number {
+  return kind.engineer ? ENGINEER_REACH : kind.range;
+}
+
+/**
+ * Can unit `i` hit the field work on `cell` from where it stands? In reach, and nothing
+ * between them (the work itself, if it is a wall, does not hide itself).
+ */
+function reachesWork(w: World, i: number, cell: number): boolean {
+  const map = w.map;
+  const cx = ((cell & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+  const cy = ((cell >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+  const dx = cx - w.posX[i];
+  const dy = cy - w.posY[i];
+  const reach = siegeReach(KINDS[w.kind[i]]);
+  if (dx * dx + dy * dy > reach * reach) return false;
+  const z = heightAt(map, cx, cy) + EYE_HEIGHT;
+  return lineOfSight(map, w.posX[i], w.posY[i], eyeZ[i], cx, cy, z, w.inside[i], -1, cell);
+}
+
 function spawn(w: World, cmd: SpawnCommand): void {
   const r = clampInt(cmd.radius | 0, 1, MAP_SIZE_FX);
   const cx = cmd.x | 0;
@@ -908,7 +998,7 @@ function spawn(w: World, cmd: SpawnCommand): void {
   let group = 0;
   let scan = 0;
   const firstGroup = w.groupCount;
-  const cls = kind.cls;
+  const cls = layerOf(teamId, kind.cls);
   const map = w.map;
   spawned.length = 0;
   for (let k = 0; k < n; k++) {
@@ -1414,6 +1504,7 @@ function resolveShells(w: World): void {
     if ((type === T_BUILDING || type === T_BRIDGE) && w.sHp[map.structAt[cell]] > 0) {
       structDamage[map.structAt[cell]] += kind.siege;
     }
+    blastWorks(w, x, y, kind.siege, kind.blast);
     const R = kind.blast;
     const r = (R >> CELL_SHIFT) + 1;
     const cx = x >> CELL_SHIFT;
@@ -1435,11 +1526,11 @@ function resolveShells(w: World): void {
         if (d2 >= reach * reach) continue;
         let dmg = Math.trunc((kind.damage[w.kind[j]] * (2 * reach - isqrt(d2))) / (2 * reach));
         if (w.inside[j] >= 0) dmg >>= 2;
-        else if (
-          KIND_CLASS[w.kind[j]] === CLASS_FOOT &&
-          map.type[cellOfPos(w.posX[j], w.posY[j])] === T_RUBBLE
-        ) {
-          dmg >>= 1;
+        else if (KIND_CLASS[w.kind[j]] === CLASS_FOOT) {
+          // Rubble and sandbags stop half the splinters, a trench three quarters.
+          const under = map.type[cellOfPos(w.posX[j], w.posY[j])];
+          if (under === T_RUBBLE || under === T_SANDBAG) dmg >>= 1;
+          else if (under === T_TRENCH) dmg >>= 2;
         }
         damage[j] += dmg || 1;
         killer[j] = owner;
@@ -1458,7 +1549,8 @@ export function concealed(w: World, j: number): boolean {
   if (KINDS[w.kind[j]].stealth) return true;
   if (w.map.smoke[cellOfPos(w.posX[j], w.posY[j])] > w.tick) return true;
   const t = w.map.type[cellOfPos(w.posX[j], w.posY[j])];
-  return t === T_FOREST || (t === T_RUBBLE && KIND_CLASS[w.kind[j]] === CLASS_FOOT);
+  if (t === T_FOREST) return true;
+  return (t === T_RUBBLE || t === T_TRENCH) && KIND_CLASS[w.kind[j]] === CLASS_FOOT;
 }
 
 /** The nearest standing base building of another army that unit `i` can reach and see, or -1. */
@@ -1518,7 +1610,7 @@ function fire(w: World): void {
       const s = w.orderStruct[i];
       if (
         w.sHp[s] > 0 &&
-        structDist2(w, s, w.posX[i], w.posY[i]) <= kind.range * kind.range &&
+        structDist2(w, s, w.posX[i], w.posY[i]) <= siegeReach(kind) * siegeReach(kind) &&
         seesStructure(w, i, s)
       ) {
         structDamage[s] += kind.siege;
@@ -1528,10 +1620,27 @@ function fire(w: World): void {
       }
     }
     const t = w.attack[i];
+    if ((w.flags[i] & FLAG_BREACH) !== 0) {
+      // Breaching: unless there is an enemy to shoot at right now, hit the work.
+      let engaged = t !== NO_TARGET && w.los[i] !== 0;
+      if (engaged) {
+        const ex = w.posX[t] - w.posX[i];
+        const ey = w.posY[t] - w.posY[i];
+        const er = rangeTo(w, i, t);
+        engaged = ex * ex + ey * ey <= er * er;
+      }
+      const cell = cellOfPos(w.aimX[i], w.aimY[i]);
+      if (!engaged && workStands(w, cell) && reachesWork(w, i, cell)) {
+        hitWork(w, cell, kind.siege, kind.engineer ? HIT_CHARGE : HIT_DIRECT);
+        w.cooldown[i] = kind.reload;
+        w.events.push(EV_BREACH, i, cell);
+        continue;
+      }
+    }
     if (t === NO_TARGET || w.los[i] === 0) {
       // Nothing to shoot at: an enemy base building in range will do (see decision 048).
       if (kind.siege > 0 && ((w.tick + i) & 7) === 0 && w.stance[i] !== STANCE_HOLD_FIRE) {
-        const s = baseInRange(w, i, kind.range);
+        const s = baseInRange(w, i, siegeReach(kind));
         if (s >= 0) {
           structDamage[s] += kind.siege;
           w.cooldown[i] = kind.reload;
@@ -1557,12 +1666,12 @@ function fire(w: World): void {
     if (cover >= 0) {
       // Walls stop most of it. What a tank gun does not do to the men it does to the house.
       dmg = dmg >> 2 || 1;
-      structDamage[cover] += kind.siege;
-    } else if (
-      KIND_CLASS[w.kind[t]] === CLASS_FOOT &&
-      w.map.type[cellOfPos(w.posX[t], w.posY[t])] === T_RUBBLE
-    ) {
-      dmg = (dmg + 1) >> 1;
+      if (!kind.engineer) structDamage[cover] += kind.siege;
+    } else if (KIND_CLASS[w.kind[t]] === CLASS_FOOT) {
+      // Rubble halves what reaches the men in it; a trench or sandbags stop two thirds.
+      const under = w.map.type[cellOfPos(w.posX[t], w.posY[t])];
+      if (under === T_RUBBLE) dmg = (dmg + 1) >> 1;
+      else if (isCover(under)) dmg = Math.trunc((dmg + 2) / 3);
     }
     damage[t] += dmg;
     killer[t] = i;
@@ -1764,7 +1873,7 @@ function steer(w: World): void {
     if (w.state[i] !== STATE_ALIVE) continue;
     if (w.inside[i] >= 0 || w.carrier[i] >= 0) continue; // garrisons and passengers stay put
     let flags = w.flags[i];
-    const cls = KIND_CLASS[w.kind[i]];
+    const cls = layerOf(w.team[i], KIND_CLASS[w.kind[i]]);
     const x = w.posX[i];
     const y = w.posY[i];
     const cell = cellOfPos(x, y);
@@ -1775,11 +1884,31 @@ function steer(w: World): void {
     if ((flags & FLAG_SIEGE) !== 0) {
       // Close enough to shell the structure and able to see it: stop here.
       const st = w.orderStruct[i];
-      const reach = KINDS[w.kind[i]].range - fx(1);
+      const reach = siegeReach(KINDS[w.kind[i]]) - fx(1);
       if (structDist2(w, st, x, y) <= reach * reach && seesStructure(w, i, st)) {
         w.velX[i] = 0;
         w.velY[i] = 0;
         continue;
+      }
+    }
+    if ((flags & FLAG_BREACH) !== 0) {
+      const bc = cellOfPos(w.aimX[i], w.aimY[i]);
+      if (
+        !workStands(w, bc) ||
+        w.wTeam[bc] === w.team[i] ||
+        !canBreach(KINDS[w.kind[i]], w.wKind[bc])
+      ) {
+        // It is down (or was never ours to bring down): on with whatever comes next.
+        flags &= ~FLAG_BREACH;
+        w.flags[i] = flags;
+      } else if (reachesWork(w, i, bc)) {
+        w.velX[i] = 0;
+        w.velY[i] = 0;
+        continue;
+      } else if ((flags & FLAG_MOVING) === 0) {
+        // Arrived, and it cannot be got at from here.
+        flags &= ~FLAG_BREACH;
+        w.flags[i] = flags;
       }
     }
     if ((flags & (FLAG_BOMBARD | FLAG_MOVING)) === (FLAG_BOMBARD | FLAG_MOVING)) {
@@ -1811,7 +1940,7 @@ function steer(w: World): void {
         busy = true;
       } else {
         // Something is in the way: take the walkable route to the nearest enemy, if any.
-        const f = w.team[i] * CLASS_COUNT + cls;
+        const f = cls;
         w.chaseWanted[f] = tick;
         const field = w.chaseDist[f];
         const dir = field ? flowDirection(map, cls, field, cell) : -1;
@@ -1852,6 +1981,28 @@ function steer(w: World): void {
         if (dir >= 0) {
           vx = Math.trunc((DIR_X[dir] * pace) / 1024);
           vy = Math.trunc((DIR_Y[dir] * pace) / 1024);
+          const next = cell + DIR_CELL[dir];
+          if (map.cost[cls][next] === 0) {
+            // The only way on is through a field work. An enemy's is breached by whoever
+            // can (the order goes on when it is down); the others wait at it. At one of
+            // its own army's the unit gives up: there is no gate.
+            if (map.workTeam[next] === w.team[i]) {
+              w.flags[i] = flags & ~(FLAG_MOVING | FLAG_AMOVE | FLAG_DIRECT);
+              vx = 0;
+              vy = 0;
+            } else if (
+              canBreach(KINDS[w.kind[i]], w.wKind[next]) &&
+              !KINDS[w.kind[i]].indirect &&
+              w.stance[i] !== STANCE_HOLD_FIRE
+            ) {
+              w.aimX[i] = ((next & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+              w.aimY[i] = ((next >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+              w.flags[i] = flags | FLAG_BREACH;
+            } else {
+              vx = 0;
+              vy = 0;
+            }
+          }
         } else {
           // At the field's goal with no clear line to the unit's own spot (or cut off from
           // the goal altogether): this is as close as it gets.
@@ -1964,7 +2115,7 @@ function integrate(w: World): void {
     let ny = clampInt(y + w.velY[i] + pushY[i], 0, POS_MAX);
     // Impassable ground is a hard wall: slide along it. (A unit that somehow stands on
     // impassable ground may move freely, so it can get off.)
-    const cost = map.cost[KIND_CLASS[w.kind[i]]];
+    const cost = map.cost[layerOf(w.team[i], KIND_CLASS[w.kind[i]])];
     if (cost[cellOfPos(nx, ny)] === 0 && cost[cellOfPos(x, y)] !== 0) {
       if (cost[cellOfPos(nx, y)] !== 0) ny = y;
       else if (cost[cellOfPos(x, ny)] !== 0) nx = x;
@@ -1975,6 +2126,11 @@ function integrate(w: World): void {
     }
     w.posX[i] = nx;
     w.posY[i] = ny;
+    if (CRUSHES[w.kind[i]]) {
+      // Tracks flatten the other side's wire.
+      const c = cellOfPos(nx, ny);
+      if (map.type[c] === T_WIRE && map.workTeam[c] !== w.team[i]) removeWork(w, c, true);
+    }
   }
   // Passengers go where their vehicle goes.
   for (let i = 0; i < n; i++) {

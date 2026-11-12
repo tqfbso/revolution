@@ -201,7 +201,70 @@ export interface FoundCommand {
   y: number;
 }
 
+export const CMD_FORTIFY = 21;
+export const CMD_DEMOLISH = 22;
+export const CMD_BREACH = 23;
+export const CMD_OCCUPY = 24;
+export const CMD_FIELDWORK = 25;
+
+/**
+ * Trucks and engineers put up field works, one per cell, in the order given. Each is paid
+ * for at once by the army of the first builder, as far as its money goes; a cell that
+ * already holds an unfinished work of that army is simply worked on. Builders go on to
+ * unfinished works nearby when theirs is done.
+ */
+export interface FortifyCommand {
+  type: typeof CMD_FORTIFY;
+  units: number[];
+  /** Kind of field work (see WORKS in src/sim/works.ts). */
+  work: number;
+  /** Cell indices (y * MAP_CELLS + x). */
+  cells: number[];
+}
+
+/** Take down field works of `team`, or give up planned ones (those for a full refund). */
+export interface DemolishCommand {
+  type: typeof CMD_DEMOLISH;
+  team: number;
+  cells: number[];
+}
+
+/**
+ * Bring down the enemy field work on the cell under (x, y): tanks and missile teams fire
+ * at it from range, engineers go up to it and lay charges, guns shell it.
+ */
+export interface BreachCommand {
+  type: typeof CMD_BREACH;
+  units: number[];
+  x: number;
+  y: number;
+}
+
+/**
+ * Infantry takes position in the trench or sandbag line under (x, y), two squads to a
+ * cell outward from that point, and holds it.
+ */
+export interface OccupyCommand {
+  type: typeof CMD_OCCUPY;
+  units: number[];
+  x: number;
+  y: number;
+}
+
+/** Scenario command: finished field works for `team`, free, wherever the ground takes them. */
+export interface FieldworkCommand {
+  type: typeof CMD_FIELDWORK;
+  team: number;
+  work: number;
+  cells: number[];
+}
+
 export type Command =
+  | FortifyCommand
+  | DemolishCommand
+  | BreachCommand
+  | OccupyCommand
+  | FieldworkCommand
   | GatherCommand
   | BuildCommand
   | AssistCommand

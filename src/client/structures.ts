@@ -53,7 +53,7 @@ function rand(seed: number, k: number): number {
   return (h >>> 0) / 4294967296;
 }
 
-interface Part {
+export interface Part {
   size: [number, number, number];
   at: [number, number, number];
   color: number;
@@ -62,7 +62,7 @@ interface Part {
   shade?: number;
 }
 
-function build(parts: Part[]): THREE.BufferGeometry {
+export function build(parts: Part[]): THREE.BufferGeometry {
   const c = new THREE.Color();
   const geometries = parts.map((p) => {
     const g = new THREE.BoxGeometry(...p.size);

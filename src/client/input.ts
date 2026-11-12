@@ -3,11 +3,13 @@ import {
   CMD_ATTACK,
   CMD_ATTACK_MOVE,
   CMD_BOMBARD,
+  CMD_BREACH,
   CMD_HOLD,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
   CMD_LOAD,
   CMD_MOVE,
+  CMD_OCCUPY,
   CMD_STOP,
   CMD_UNLOAD,
   type Command,
@@ -19,6 +21,8 @@ import type { StructureView } from './structures';
 import { fx } from '../sim/fixed';
 import type { Terrain } from './terrain';
 import type { UnitView } from './units';
+import { WORK_SANDBAG, WORK_TRENCH, canBreach } from '../sim/works';
+import type { WorksView } from './works';
 
 const CLICK_SLOP_PX = 5;
 const CLICK_PICK_PX = 22;
@@ -59,6 +63,7 @@ export class Input {
     private readonly lookAt: (x: number, z: number) => void,
     private readonly structures: StructureView,
     private readonly card: CommandCard,
+    private readonly works: WorksView,
   ) {
     const markerMaterial = new THREE.MeshBasicNodeMaterial({ color: 0x7dff8a, transparent: true });
     markerMaterial.depthWrite = false;
@@ -74,6 +79,14 @@ export class Input {
         // Placing a building: left click puts it down, anything else calls it off.
         if (e.button === 0) card.confirm(e.shiftKey);
         else card.cancelPlacing();
+      } else if (card.tool !== 0) {
+        // A field-work tool in hand: left drag draws, anything else puts the tool away.
+        const { ground } = this.structureAt(e.clientX, e.clientY);
+        if (e.button === 0 && ground) {
+          card.toolDown(ground.x, ground.z);
+          this.drawing = true;
+          dom.setPointerCapture(e.pointerId);
+        } else card.cancelTool();
       } else if (e.button === 0 && this.attackMoveArmed) {
         // C, then left click: attack-move to the spot.
         this.armAttackMove(false);
@@ -90,9 +103,10 @@ export class Input {
     dom.addEventListener('pointermove', (e) => {
       this.pointerX = e.clientX;
       this.pointerY = e.clientY;
-      if (card.placing >= 0) {
+      if (card.placing >= 0 || card.tool !== 0) {
         const { ground } = this.structureAt(e.clientX, e.clientY);
-        if (ground) card.hover(ground.x, ground.z);
+        if (ground && card.placing >= 0) card.hover(ground.x, ground.z);
+        else if (ground) card.toolHover(ground.x, ground.z);
       }
       if (!this.dragStart) return;
       const s = this.dragStart;
@@ -106,6 +120,11 @@ export class Input {
       this.box.style.height = `${h}px`;
     });
     dom.addEventListener('pointerup', (e) => {
+      if (e.button === 0 && this.drawing) {
+        this.drawing = false;
+        card.toolUp(e.shiftKey);
+        return;
+      }
       if (e.button !== 0 || !this.dragStart) return;
       const s = this.dragStart;
       this.dragStart = null;
@@ -119,7 +138,9 @@ export class Input {
         this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
       } else if (e.code === 'Escape') {
         this.armAttackMove(false);
+        this.drawing = false;
         if (card.placing >= 0) card.cancelPlacing();
+        else if (card.tool !== 0) card.cancelTool();
         else {
           units.setSelected([], false);
           card.select(-1);
@@ -169,6 +190,8 @@ export class Input {
 
   private pointerX = 0;
   private pointerY = 0;
+  /** A line of field works is being drawn (see the card's tool). */
+  private drawing = false;
 
   update(dt: number): void {
     if (!this.marker.visible) return;
@@ -355,6 +378,31 @@ export class Input {
       if (rest.length > 0) this.send({ type: CMD_MOVE, units: rest, x: fx(ex), y: fx(ez) });
       this.mark(ex, p[3 * enemy + 1] + 0.2, ez);
       return;
+    }
+    // A field work under the pointer. The enemy's: whoever can, brings it down (guns shell
+    // it). A trench or sandbags, whoever dug them: infantry takes position in them.
+    const work = ground ? this.works.workAt(ground.x, ground.z) : null;
+    if (work && work.done && ground) {
+      const u = this.units;
+      const cover = work.kind === WORK_TRENCH || work.kind === WORK_SANDBAG;
+      const foot = ids.filter((id) => KINDS[u.kindOf(id)].garrison);
+      const gx = fx((work.cell % 256) * 4 + 2);
+      const gy = fx(Math.floor(work.cell / 256) * 4 + 2);
+      if (cover && foot.length > 0 && !shell) {
+        this.send({ type: CMD_OCCUPY, units: foot, x: gx, y: gy });
+        const rest = ids.filter((id) => !foot.includes(id));
+        if (rest.length > 0) {
+          this.send({ type: attack ? CMD_ATTACK_MOVE : CMD_MOVE, units: rest, x: gx, y: gy });
+        }
+        this.mark(ground.x, ground.y + 0.15, ground.z);
+        return;
+      }
+      const able = ids.filter((id) => canBreach(KINDS[u.kindOf(id)], work.kind));
+      if (work.team !== u.playerTeam && able.length > 0) {
+        this.send({ type: CMD_BREACH, units: able, x: gx, y: gy });
+        this.mark(ground.x, ground.y + 0.6, ground.z);
+        return;
+      }
     }
     // On one of your carriers: the selected squads climb aboard.
     const carrier = this.carrierAt(clientX, clientY);

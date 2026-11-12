@@ -34,6 +34,7 @@ import {
   KIND_ATGM,
   KIND_COUNT,
   KIND_DRONE,
+  KIND_ENGINEER,
   KIND_EW,
   KIND_IFV,
   KIND_INFANTRY,
@@ -53,6 +54,7 @@ import {
   JOB_LOAD,
   JOB_NONE,
   JOB_RETURN,
+  JOB_WORK,
   MAP_SIZE_FX,
   MAX_TEAMS,
   NO_TEAM,
@@ -187,6 +189,7 @@ export const UNIT_PRICE: readonly UnitPrice[] = (() => {
   t[KIND_INFANTRY] = price(B_BARRACKS, 1, 80, 0, 0, 10);
   t[KIND_RECON] = price(B_BARRACKS, 1, 50, 0, 30, 12);
   t[KIND_ATGM] = price(B_BARRACKS, 2, 110, 0, 20, 14);
+  t[KIND_ENGINEER] = price(B_BARRACKS, 1, 90, 0, 0, 12);
   t[KIND_IFV] = price(B_WORKS, 1, 130, 60, 0, 16);
   t[KIND_TANK] = price(B_WORKS, 2, 220, 100, 0, 22);
   t[KIND_AD] = price(B_WORKS, 2, 160, 60, 60, 18);
@@ -443,7 +446,8 @@ function updateTrucks(w: World): void {
   builders.fill(0, 0, map.structCount);
   for (let i = 0; i < n; i++) {
     const job = w.job[i];
-    if (job === JOB_NONE) continue;
+    // (Field works are another module's job: see updateWorks.)
+    if (job === JOB_NONE || job === JOB_WORK) continue;
     if (w.state[i] !== STATE_ALIVE) {
       w.job[i] = JOB_NONE;
       continue;

@@ -15,6 +15,9 @@ const FOREST_SIGHT = 3;
 const HIGH_GROUND = 5;
 const SEE_WALL = 1;
 const SEE_FOREST = 2;
+/** A field wall: stops the eye unless it looks from above the top of it. */
+const SEE_LOW = 3;
+const LOW_HEIGHT = 2.6;
 
 /**
  * Fog of war for the player's army. Presentation only: the simulation knows everything,
@@ -102,6 +105,12 @@ export class Fog {
   /** A building went up or came down in this cell. */
   setWall(cell: number, standing: boolean): void {
     this.block[cell] = standing ? SEE_WALL : 0;
+  }
+
+  /** A field wall or gate went up or came down in this cell. */
+  setLowWall(cell: number, standing: boolean): void {
+    if (standing) this.block[cell] = SEE_LOW;
+    else if (this.block[cell] === SEE_LOW) this.block[cell] = 0;
   }
 
   reset(): void {
@@ -237,6 +246,7 @@ export class Fog {
         if (rise > slope) slope = rise;
         const what = block[c];
         if (what === SEE_WALL) break;
+        if (what === SEE_LOW && eye < ground[c] + LOW_HEIGHT) break;
         if (what === SEE_FOREST && ++forest > FOREST_SIGHT) break;
         if (smoke[c] > clock && ++haze > 1) break;
       }

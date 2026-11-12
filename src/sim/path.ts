@@ -4,6 +4,18 @@
 // which is what makes thousand-unit orders affordable.
 import { CELL_COUNT, CELL_SHIFT, MAP_CELLS, type GameMap } from './map';
 
+/** Cell offset of each of the eight directions. */
+export const DIR_CELL = [
+  1,
+  MAP_CELLS + 1,
+  MAP_CELLS,
+  MAP_CELLS - 1,
+  -1,
+  -MAP_CELLS - 1,
+  -MAP_CELLS,
+  -MAP_CELLS + 1,
+];
+
 /** Cost of a cell the goal cannot be reached from (or that lies beyond the search limit). */
 export const UNREACHABLE = 0xffff;
 const W = MAP_CELLS;
@@ -21,24 +33,28 @@ export const DIR_Y = [0, 724, 1024, 724, 0, -724, -1024, -724];
 // frontier lives in 32 buckets indexed by cost modulo 32. Entries are (cell) records in
 // linked lists; a cell improved twice leaves a stale entry behind that is skipped on pop.
 // The resulting costs are the true shortest costs, so they do not depend on pop order.
-const BUCKETS = 32;
+// A field work in the way costs WORK_COST a step (see the map), hence the many buckets.
+const BUCKETS = 4096;
 const bucketHead = new Int32Array(BUCKETS);
 const entryCell = new Int32Array(CELL_COUNT * 8 + 8);
 const entryNext = new Int32Array(CELL_COUNT * 8 + 8);
 
 /**
- * Fill `dist` with the travel cost from every cell to the nearest of `goals` for movement
- * class `cls`, not searching past `limit`. Diagonal steps never cut a blocked corner.
+ * Fill `dist` with the travel cost from every cell to the nearest of `goals` for the
+ * movement layer `layer` (see layerOf), not searching past `limit`. Diagonal steps never
+ * cut a blocked corner. A field work in the way is a very expensive step, not a wall: the
+ * route goes through one only if there is no way round.
  */
 export function buildField(
   map: GameMap,
-  cls: number,
+  layer: number,
   dist: Uint16Array,
   goals: ArrayLike<number>,
   goalCount: number,
   limit: number,
 ): void {
-  const cost = map.cost[cls];
+  const cost = map.pathCost[layer];
+  const hard = map.cost[layer];
   dist.fill(UNREACHABLE);
   bucketHead.fill(-1);
   let entries = 0;
@@ -68,7 +84,7 @@ export function buildField(
         const step = cost[n];
         if (step === 0) continue;
         const diagonal = (k & 1) !== 0;
-        if (diagonal && (cost[c + NX[k]] === 0 || cost[c + NY[k] * W] === 0)) continue;
+        if (diagonal && (hard[c + NX[k]] === 0 || hard[c + NY[k] * W] === 0)) continue;
         const nd = d + (diagonal ? DIAGONAL : STRAIGHT) * step;
         if (nd < dist[n] && nd <= limit) {
           dist[n] = nd;
@@ -88,8 +104,13 @@ export function buildField(
  * Direction (0..7, see DIR_X/DIR_Y) to step from `cell` toward the field's goal, or -1 at
  * the goal or where the goal cannot be reached.
  */
-export function flowDirection(map: GameMap, cls: number, dist: Uint16Array, cell: number): number {
-  const cost = map.cost[cls];
+export function flowDirection(
+  map: GameMap,
+  layer: number,
+  dist: Uint16Array,
+  cell: number,
+): number {
+  const cost = map.cost[layer];
   const x = cell & (W - 1);
   const y = cell >> 8;
   let best = dist[cell];
@@ -111,16 +132,16 @@ export function flowDirection(map: GameMap, cls: number, dist: Uint16Array, cell
 
 const HALF_CELL_SHIFT = CELL_SHIFT - 1;
 
-/** True if class `cls` can walk the straight line between two points (sampled every half cell). */
+/** True if units of `layer` can walk the straight line between two points (sampled every half cell). */
 export function clearLine(
   map: GameMap,
-  cls: number,
+  layer: number,
   x0: number,
   y0: number,
   x1: number,
   y1: number,
 ): boolean {
-  const cost = map.cost[cls];
+  const cost = map.cost[layer];
   const dx = x1 - x0;
   const dy = y1 - y0;
   const ax = dx < 0 ? -dx : dx;
