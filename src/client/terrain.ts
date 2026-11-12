@@ -78,7 +78,7 @@ function conifer(): THREE.BufferGeometry {
 function broadleaf(): THREE.BufferGeometry {
   const blob = (r: number, x: number, y: number, z: number, colour: number) => {
     // Indexed, like the trunk it is merged with.
-    const g = mergeVertices(new THREE.IcosahedronGeometry(r, 1));
+    const g = mergeVertices(new THREE.IcosahedronGeometry(r, 0));
     g.deleteAttribute('normal');
     g.scale(1, 0.8, 1);
     g.translate(x, 0, z);

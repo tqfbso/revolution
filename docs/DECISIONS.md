@@ -699,3 +699,17 @@ of dust. The particle budget (6000 of each kind) and the thinning of far and uns
 effects are unchanged, so the cost is one texture read per sprite pixel. On `high` a
 bloom pass lets fire and flashes bleed light; it is the one part that costs a full-screen
 pass, which is why it is not in `normal`.
+
+## 066 Sound is synthesised, and distance does the work
+
+Eight sounds (rifle burst, autocannon, tank gun, howitzer, missile, explosion, shell
+impact, collapse), three takes each, are computed at start-up from noise and sine waves:
+no files and no licences, like the textures. What sells them is the path to the ear, which
+is the point the camera looks at, raised with the zoom. A sound arrives late (170 world
+units a second), loses its treble with distance and is panned by where it is on screen,
+so the same howitzer sample is a crack beside you and a dull late thump from across the
+map. Things out of sight are still heard, quieter and duller: a battle you cannot see is
+information a commander would have. Each tick only the loudest few of each kind start,
+and small arms may not take the last voices, so a blast is never crowded out. Volume is
+on screen and remembered. These are first-pass sounds, written without being able to
+listen to them; recorded CC0 samples can replace any of the eight buffers.

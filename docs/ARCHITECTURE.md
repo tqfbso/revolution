@@ -222,7 +222,24 @@ Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwis
   smoke) and stretched tracer quads, three draw calls in all, fed by sim events.
 - **Scars** (`src/client/scars.ts`): craters and burn marks, permanent, one draw call.
 - **Light**: hemisphere sky light plus one sun with a shadow map that follows the camera
-  focus. ACES tone mapping.
+  focus, and an environment map of a simple sky for reflections. ACES tone mapping.
+- **Look** (`src/client/look.ts`): the graphics level (`low`, `normal`, `high`) and the
+  textures, which `src/client/textures.ts` bakes from noise at start-up. Every renderer
+  class takes it and builds its materials for the level.
+- **Ground** (`src/client/terrain.ts`): one material blending grass, earth, rock and
+  asphalt by weights in the vertices, plus a 512 x 512 wear texture the client writes
+  into (tracks at start-up, then vehicles and shells). The river reads the ground height
+  from a texture to tint and fade by depth.
+- **Surface detail** (`src/client/surface.ts`): boxes have no texture coordinates, so
+  masonry is laid on from world position and paint, camouflage and mud from the model's
+  own space, with a pattern number per unit.
+- **Shade** (`Fog.shade()`): the fog of war and the cloud shadows, multiplied into every
+  surface.
+- **Symbols** (`src/client/icons.ts`): a map symbol per visible unit when the camera is
+  far out. One draw call.
+- **Sound** (`src/client/sound.ts`): eight sounds synthesised at start-up, played with
+  delay, loss of treble and level by distance from the point the camera looks at; the
+  loudest few per tick, 36 voices at most.
 
 - **Structures** (`src/client/structures.ts`): one mesh per building or bridge, rebuilt
   from boxes when it changes state (standing, shot up, collapsed). On top, two small
