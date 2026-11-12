@@ -21,6 +21,11 @@ export interface PerfStats {
   scale: number;
   drawCalls: number;
   triangles: number;
+  /** Camera distance, and the CPU cost per frame of the units, the effects and the draw submit. */
+  zoom: number;
+  cpuUnits: number;
+  cpuFx: number;
+  cpuDraw: number;
   hash: string;
 }
 
@@ -42,6 +47,10 @@ export class Hud {
     scale: 1,
     drawCalls: 0,
     triangles: 0,
+    zoom: 0,
+    cpuUnits: 0,
+    cpuFx: 0,
+    cpuDraw: 0,
     hash: '',
   };
   private readonly el = document.getElementById('perf') as HTMLPreElement;
@@ -80,6 +89,7 @@ export class Hud {
       `Armies     red (you) ${s.alive[0] ?? 0}   blue ${s.alive[1] ?? 0}   gold ${s.alive[2] ?? 0}\n` +
       `Detail     near ${s.lod[0]}  mid ${s.lod[1]}  far ${s.lod[2]}  off-screen ${s.culled}  fx ${s.particles}\n` +
       `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris, scale ${(s.scale * 100).toFixed(0)}%\n` +
+      `CPU/frame  units ${s.cpuUnits.toFixed(1)}  fx ${s.cpuFx.toFixed(1)}  draw submit ${s.cpuDraw.toFixed(1)} ms   camera ${s.zoom.toFixed(0)} m away\n` +
       `State hash ${s.hash}   build ${__BUILD__}`;
   }
 

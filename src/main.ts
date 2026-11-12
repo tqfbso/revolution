@@ -407,10 +407,14 @@ async function start(): Promise<void> {
     units.zoom = rts.distance;
     const cm = rts.camera.matrixWorld.elements;
     sound.listen(rts.focus.x, rts.focus.z, rts.distance, cm[0], cm[2]);
+    const c0 = performance.now();
     units.update(now, dt, rts.camera);
+    const c1 = performance.now();
     structures.update(now / 1000, dt);
     works.update(now / 1000);
+    const c2 = performance.now();
     effects.update(dt, rts.camera);
+    const c3 = performance.now();
     terrain.update(dt);
     input.update(dt);
     card.update();
@@ -429,8 +433,16 @@ async function start(): Promise<void> {
     }
     sun.target.position.copy(focus);
     sun.position.copy(focus).addScaledVector(sunDir, 400);
+    const c4 = performance.now();
     if (pipeline) pipeline.render();
     else renderer.render(scene, rts.camera);
+    const c5 = performance.now();
+    // Smoothed, so the readout is readable: where the CPU time of a frame goes.
+    const st = hud.stats;
+    st.cpuUnits += (c1 - c0 - st.cpuUnits) * 0.05;
+    st.cpuFx += (c3 - c2 - st.cpuFx) * 0.05;
+    st.cpuDraw += (c5 - c4 - st.cpuDraw) * 0.05;
+    st.zoom = rts.distance;
     hud.stats.units = units.count;
     hud.stats.selected = units.selectedCount;
     hud.stats.drawCalls = renderer.info.render.drawCalls;

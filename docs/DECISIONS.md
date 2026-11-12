@@ -745,3 +745,19 @@ points. In headless games an army at minute 14 on hard is about 175 rifle squads
 missile teams, 50 carriers and 6 tanks. Duels on open ground (`tools/pointduel.ts`): one
 tank beats eight squads and loses to ten; three tanks beat fifteen; four tanks and twelve
 squads lose to twenty squads and six missile teams, which is the counter working.
+
+## 068 Zoomed in, the cost is fill and shadows, so cap those
+
+Fabio: the frame rate drops when the camera is close. In a software-rendered browser the
+unit and effect code costs 1 to 2 ms a frame at any zoom, while the draw cost rises as the
+camera comes down and a shadow pass was a quarter of it (1.4 million triangles with
+shadows, 0.7 million without, 2000 units). Real GPU timings are still Fabio's to report, so
+the stats overlay now shows where the CPU time goes (units, effects, draw submit) and the
+camera distance. Three changes, none of them visible at normal play:
+
+- Puffs of smoke and fire the camera is inside of, or right up against, fade out and stop
+  being drawn: a sprite that fills the screen is a full-screen blend per layer.
+- The number of units drawn in full detail has a budget (120 on low, 300 normal, 500 high);
+  the near distance shrinks until the count fits and grows back when there is room.
+- Soldiers cast shadows only at full detail (five meshes a squad); vehicles keep theirs one
+  level further out.
