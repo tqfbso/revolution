@@ -69,9 +69,9 @@ function paint(g: THREE.BufferGeometry, y: number, colour: number): THREE.Buffer
 function conifer(): THREE.BufferGeometry {
   return mergeGeometries([
     paint(new THREE.CylinderGeometry(0.09, 0.16, 1.3, 5, 1, true), 0.65, 0x4a3d2e),
-    paint(new THREE.ConeGeometry(1.05, 1.7, 7, 1, true), 1.6, 0x35462a),
-    paint(new THREE.ConeGeometry(0.8, 1.6, 7, 1, true), 2.5, 0x3c4d2f),
-    paint(new THREE.ConeGeometry(0.5, 1.5, 6, 1, true), 3.45, 0x485a36),
+    paint(new THREE.ConeGeometry(1.05, 1.7, 7, 1, true), 1.6, 0x3d5030),
+    paint(new THREE.ConeGeometry(0.8, 1.6, 7, 1, true), 2.5, 0x465a36),
+    paint(new THREE.ConeGeometry(0.5, 1.5, 6, 1, true), 3.45, 0x54683e),
   ]);
 }
 
@@ -149,7 +149,7 @@ export class Terrain {
       }
       return n;
     };
-    const floor = new THREE.Color(0x2b3421);
+    const floor = new THREE.Color(0x374029);
     const c = new THREE.Color();
     const typeAt = (i: number, j: number) =>
       i < 0 || j < 0 || i >= GRID || j >= GRID ? T_OPEN : map.type[j * GRID + i];

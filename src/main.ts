@@ -94,8 +94,8 @@ async function start(): Promise<void> {
   scene.fog = new THREE.Fog(SKY, 500, 2200);
   // Overcast-bright sky light plus a low, warm sun: long readable shadows, muted colours.
   // With reflections on, most of the sky's light comes from the environment map instead.
-  scene.add(new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.55));
-  const sun = new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 4.6);
+  scene.add(new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.78));
+  const sun = new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 4.3);
   const sunDir = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
   sun.castShadow = shadows;
   const shadowSize = quality === 'high' ? 4096 : quality === 'low' ? 1024 : 2048;
