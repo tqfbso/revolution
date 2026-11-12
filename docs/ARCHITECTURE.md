@@ -64,6 +64,26 @@ flowfield is thrown away (`refreshPassability`, a few milliseconds, a handful of
 game). `lineOfSight` walks a line in half-cell steps and fails on a standing building, on
 more than 12 units of forest, or on ground that rises above the line between the two eyes.
 
+Passability comes in two steps. `map.natural[class]` is the terrain alone. On top of it
+`refreshWorks` lays the field works and writes one table per layer, where a layer is an
+army and a movement class (`layerOf`): `cost` (0 = cannot enter) and `pathCost`, in which
+a work in the way is not a hole but a very expensive cell. While nobody owns a gate the
+layers of all armies are the same arrays, so flowfields are shared between armies exactly
+as before field works existed.
+
+## Field works (`src/sim/works.ts`)
+
+Walls, gates, wire, tank obstacles, trenches and sandbags are one cell each and live in
+the world per cell (`wKind`, `wTeam`, `wHp`, `wBuild`), not in the structure list. A
+planned work is paid for and does nothing; when its builders (trucks and engineers,
+`JOB_WORK`) have finished it, it becomes the terrain type of its cell and `refreshWorks`
+runs (2.5 ms, 6 ms once there are gates). Because a work costs a great deal to path
+through rather than being impassable, a wall round a town does not cut the map in two:
+a route goes round when it can, and otherwise leads to the wall, where a unit that can
+breach it does so without an order (`FLAG_BREACH`) and one that cannot waits. Walls and
+gates block `lineOfSight` below 2.6 units of height. The client gets the list of works
+with a snapshot whenever `worksRev` has changed (`src/client/works.ts` draws them).
+
 ## Pathfinding (`src/sim/path.ts`)
 
 Flowfields: `buildField` runs Dijkstra with a bucket queue from one or many goal cells and
@@ -164,6 +184,12 @@ again and runs `military`. A think costs about 0.02 ms per tick on average.
 - `military`: `enlist` gives new units a job; `garrisons` puts town troops into houses;
   `scouting` runs recon posts and drone rounds; `runReserve` answers the worst alarm;
   `runForce` drives the field army and the raiders through march, assault and retreat
+
+- `fortify` (with the economy): its sappers, a few engineer squads it keeps back, lay a
+  belt of wire, tank obstacles and sandbags on the enemy side of each town it holds on
+  its bank and at its end of a bare ford, with what money is left over. A belt has a gap
+  every seven cells so it never shuts the AI's own army in. In `assault`, engineers and
+  guns are sent against the nearest standing enemy work on the way to the objective
 
 `tools/aimatch.ts` plays AI against AI without a browser and prints a line a minute; it is
 the way to test a change to the AI or to prices (a 40-minute game takes a few seconds).

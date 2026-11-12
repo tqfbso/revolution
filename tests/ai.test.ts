@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { aiThink, createAi, findCrossings, type Ai, type AiLevel } from '../src/sim/ai';
-import { CMD_FOUND, CMD_SPAWN, type Command } from '../src/sim/commands';
+import { CMD_FIELDWORK, CMD_FOUND, CMD_SPAWN, type Command } from '../src/sim/commands';
 import { B_BARRACKS, B_HQ } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
-import { MAP_CELLS, flatMap, generateMap } from '../src/sim/map';
+import { MAP_CELLS, T_WIRE, flatMap, generateMap } from '../src/sim/map';
+import { WORK_WALL } from '../src/sim/works';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import { KIND_INFANTRY, KIND_TANK, KIND_TRUCK } from '../src/sim/units';
@@ -43,6 +44,13 @@ const count = (w: World, team: number, kind = -1) => {
     if (w.state[i] === STATE_ALIVE && w.team[i] === team && (kind < 0 || w.kind[i] === kind)) n++;
   }
   return n;
+};
+/** The standing headquarters of `team`, or -1. */
+const hqOf = (w: World, team: number) => {
+  for (let s = 0; s < w.map.structCount; s++) {
+    if (w.sTeam[s] === team && w.sType[s] === B_HQ && w.sHp[s] > 0) return s;
+  }
+  return -1;
 };
 const buildings = (w: World, team: number, type = -1) => {
   let n = 0;
@@ -142,6 +150,41 @@ describe('the AI opponent', () => {
     play(w, ais, 20 * MINUTE, () => w.sHp[redHq] <= 0);
     expect(w.sHp[redHq]).toBeLessThanOrEqual(0);
   });
+
+  it('digs in at the towns it holds, and never shuts itself in', () => {
+    const { w, ais } = match(4, ['normal', null]);
+    play(w, ais, 14 * MINUTE, () => ais[0]!.laid >= 20 && w.workCount >= 20);
+    expect(ais[0]!.laid).toBeGreaterThanOrEqual(20);
+    let wire = 0;
+    for (let k = 0; k < w.workCount; k++) {
+      const c = w.workCells[k];
+      expect(w.wTeam[c]).toBe(0);
+      if (w.map.type[c] === T_WIRE) wire++;
+    }
+    expect(wire).toBeGreaterThan(0);
+    // The belts have gaps: it still goes on to win.
+    play(w, ais, 30 * MINUTE, () => hqOf(w, 1) < 0);
+    expect(hqOf(w, 1)).toBe(-1);
+  }, 120000);
+
+  it('still wins against a base that is walled off all round', () => {
+    const { w, ais } = match(4, ['normal', null]);
+    // A wall right round the enemy headquarters, with no gate.
+    const hq = hqOf(w, 1);
+    const cx = w.map.sX[hq] + (w.map.sW[hq] >> 1);
+    const cy = w.map.sY[hq] + (w.map.sH[hq] >> 1);
+    const ring: number[] = [];
+    const R = 9;
+    for (let k = -R; k <= R; k++) {
+      ring.push((cy - R) * MAP_CELLS + cx + k, (cy + R) * MAP_CELLS + cx + k);
+      ring.push((cy + k) * MAP_CELLS + cx - R, (cy + k) * MAP_CELLS + cx + R);
+    }
+    step(w, [{ type: CMD_FIELDWORK, team: 1, work: WORK_WALL, cells: ring }]);
+    const before = w.workCount;
+    expect(before).toBeGreaterThan(40);
+    play(w, ais, 40 * MINUTE, () => hqOf(w, 1) < 0);
+    expect(hqOf(w, 1)).toBe(-1);
+  }, 180000);
 
   it('is slower to get going on easy than on hard', () => {
     const pop = (level: AiLevel) => {

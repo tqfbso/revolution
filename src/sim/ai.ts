@@ -16,10 +16,13 @@ import {
   CMD_ATTACK_MOVE,
   CMD_ATTACK_STRUCTURE,
   CMD_BOMBARD,
+  CMD_BREACH,
   CMD_BUILD,
+  CMD_FORTIFY,
   CMD_GARRISON,
   CMD_GATHER,
   CMD_MOVE,
+  CMD_OCCUPY,
   CMD_RALLY,
   CMD_RESEARCH,
   CMD_TRAIN,
@@ -56,12 +59,23 @@ import {
   T_FORD,
   T_FOREST,
   T_OPEN,
+  T_SANDBAG,
   T_WATER,
   canPlace,
   findCell,
   type GameMap,
 } from './map';
 import { seedRng, nextInt } from './rng';
+import {
+  WORKS,
+  WORK_SANDBAG,
+  WORK_TRAP,
+  WORK_TRENCH,
+  WORK_WIRE,
+  canBreach,
+  canFortify,
+  workStands,
+} from './works';
 import { concealed, structDist2 } from './sim';
 import {
   GARRISON_MAX,
@@ -71,6 +85,7 @@ import {
   KIND_ATGM,
   KIND_COUNT,
   KIND_DRONE,
+  KIND_ENGINEER,
   KIND_EW,
   KIND_IFV,
   KIND_INFANTRY,
@@ -81,6 +96,7 @@ import {
 } from './units';
 import {
   FLAG_BOMBARD,
+  FLAG_BREACH,
   FLAG_GARRISON,
   FLAG_MOVING,
   FLAG_SIEGE,
@@ -131,6 +147,10 @@ interface Tuning {
   counter: boolean;
   /** Lays smoke in front of a town it storms. */
   smoke: boolean;
+  /** Engineer squads it keeps to put up field works (0 = it builds none). */
+  sappers: number;
+  /** Its belts get tank obstacles behind the wire. */
+  traps: boolean;
 }
 
 const MINUTE = 60 * TICK_RATE;
@@ -154,6 +174,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     raids: 0,
     counter: false,
     smoke: false,
+    sappers: 0,
+    traps: false,
   },
   easy: {
     period: 40,
@@ -171,6 +193,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     raids: 0,
     counter: false,
     smoke: false,
+    sappers: 1,
+    traps: false,
   },
   normal: {
     period: 20,
@@ -188,6 +212,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     raids: 11 * MINUTE,
     counter: true,
     smoke: false,
+    sappers: 2,
+    traps: true,
   },
   hard: {
     period: 20,
@@ -205,6 +231,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     raids: 7 * MINUTE,
     counter: true,
     smoke: true,
+    sappers: 3,
+    traps: true,
   },
 };
 
@@ -214,7 +242,7 @@ const CD = MAP_SIZE >> 4;
 const CC = CD * CD;
 
 /** What a unit of each type is worth in a fight, roughly. Strength is this times health. */
-const POWER = [30, 8, 12, 16, 20, 2, 1, 10, 4, 2, 0];
+const POWER = [30, 8, 12, 16, 20, 2, 1, 10, 4, 2, 0, 6];
 /** Units that form the line of an attack; the rest follow behind it. */
 const LINE = KINDS.map(
   (k, i) => k.cls !== CLASS_AIR && !k.indirect && k.damage.some((d) => d > 0) && i !== KIND_TRUCK,
@@ -228,6 +256,8 @@ const R_RAID = 2;
 const R_SCOUT = 3;
 /** On the way from the reserve to the field army. */
 const R_JOIN = 4;
+/** Engineers kept back to put up field works. */
+const R_SAPPER = 5;
 /** Garrison of town t: R_TOWN + t. */
 const R_TOWN = 8;
 
@@ -330,6 +360,7 @@ export interface Ai {
   reserve: number[];
   joining: number[];
   scouts: number[];
+  sappers: number[];
   garr: number[][];
   forces: [Force, Force];
   members: [number[], number[]];
@@ -352,6 +383,14 @@ export interface Ai {
   restUntil: number;
   /** Per town (and, last, the enemy base): the strength that was not enough last time. */
   grudge: Int32Array;
+  /** Enemy field works it has seen that still stand. */
+  foeWorks: number;
+  /** Per town, then per crossing: no new look at its field works before this tick. */
+  fortAt: Int32Array;
+  /** Per town: a cell of the sandbags it put up there, or -1. */
+  nest: Int32Array;
+  /** Field works it has ordered so far. */
+  laid: number;
   /** One line on what it is up to, for tests and the debug overlay. */
   plan: string;
 }
@@ -411,6 +450,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     reserve: [],
     joining: [],
     scouts: [],
+    sappers: [],
     garr: [],
     forces: [force(R_ARMY), force(R_RAID)],
     members: [[], []],
@@ -427,6 +467,10 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     lastRaid: 0,
     restUntil: 0,
     grudge: new Int32Array(MAX_TOWNS + 1),
+    foeWorks: 0,
+    fortAt: new Int32Array(MAX_TOWNS + 16),
+    nest: new Int32Array(MAX_TOWNS).fill(-1),
+    laid: 0,
     plan: '',
   };
   seedRng(ai.rng, (seed ^ Math.imul(team + 1, 0x51ed27)) | 0);
@@ -444,6 +488,7 @@ export function aiThink(ai: Ai, w: World, out: Command[]): void {
     perceive(ai, w);
     economy(ai, w, out);
     production(ai, w, out);
+    fortify(ai, w, out);
   } else if (phase === period >> 1) {
     perceive(ai, w);
     military(ai, w, out);
@@ -667,6 +712,7 @@ function perceive(ai: Ai, w: World): void {
   ai.reserve.length = 0;
   ai.joining.length = 0;
   ai.scouts.length = 0;
+  ai.sappers.length = 0;
   ai.members[0].length = 0;
   ai.members[1].length = 0;
   for (const g of ai.garr) g.length = 0;
@@ -696,6 +742,7 @@ function perceive(ai: Ai, w: World): void {
     else if (role === R_RAID) ai.members[1].push(i);
     else if (role === R_SCOUT) ai.scouts.push(i);
     else if (role === R_JOIN) ai.joining.push(i);
+    else if (role === R_SAPPER) ai.sappers.push(i);
     else if (role - R_TOWN < ai.garr.length) ai.garr[role - R_TOWN].push(i);
     else ai.role[i] = R_NONE;
   }
@@ -753,6 +800,14 @@ function perceive(ai: Ai, w: World): void {
     if (w.sTeam[s] === NO_TEAM || w.sTeam[s] === ai.team || ai.known[s] !== 0) continue;
     if (watched[square(structX(map, s), structY(map, s))] !== 0) ai.known[s] = 1;
   }
+  // Enemy field works: the ones standing where it has looked lately.
+  let works = 0;
+  for (let k = 0; k < w.workCount; k++) {
+    const c = w.workCells[k];
+    if (w.wTeam[c] === ai.team || !workStands(w, c) || w.wKind[c] >= WORK_TRENCH) continue;
+    if (tick - ai.seenAt[square(cellX(c), cellY(c))] < 4 * MINUTE) works++;
+  }
+  ai.foeWorks = works;
   for (let t = 0; t < map.townCount; t++) if (w.townOwner[t] === ai.team) ai.held[t] = 1;
   // Old defeats fade: the enemy who stopped it then may be somewhere else by now.
   if (tick % MINUTE < ai.tune.period >> 1) {
@@ -1135,6 +1190,12 @@ function wantedMix(ai: Ai, w: World): void {
     want[KIND_ARTILLERY] += 6;
     want[KIND_TANK] += 4;
   }
+  if (ai.foeWorks >= 6) {
+    // Wire and walls in the way: charges, and guns to shoot the gaps.
+    want[KIND_ENGINEER] += 5;
+    want[KIND_ARTILLERY] += 4;
+    want[KIND_TANK] += 3;
+  }
   for (let k = 0; k < KIND_COUNT; k++) {
     if (want[k] < 0 || UNIT_PRICE[k].tier > tier) want[k] = 0;
   }
@@ -1168,6 +1229,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
   const drones = tier >= 2 ? (ai.level === 'hard' ? 3 : 2) : 0;
   // Under attack, everything goes into units: the plans can wait.
   const calm = ai.alarm === null;
+  const sappers = calm && w.tick > 3 * MINUTE ? ai.tune.sappers : 0;
   let s0 = calm ? ai.resS : 0;
   let f0 = calm ? ai.resF : 0;
   let c0 = calm ? ai.resC : 0;
@@ -1185,6 +1247,9 @@ function production(ai: Ai, w: World, out: Command[]): void {
         // Eyes are bought by the head, not as a share of the army.
         if (have[k] >= (k === KIND_RECON ? scouts : drones)) continue;
         score = 1 << 20;
+      } else if (k === KIND_ENGINEER && have[k] < sappers) {
+        // So are the sappers, once there is a town to dig in at.
+        score = 1 << 19;
       } else if (want[k] === 0) continue;
       if (best < 0 || score > bestScore) {
         best = k;
@@ -1255,6 +1320,120 @@ function wantedIn(ai: Ai, w: World, t: number): number {
   return g;
 }
 
+// ---------------------------------------------------------------- field works
+
+const isCoverCell = (map: GameMap, c: number) => map.type[c] >= T_SANDBAG - 1;
+
+/**
+ * A belt across the enemy's way to (x, y): wire, tank obstacles one cell behind it, gaps
+ * two cells wide every seven so that nobody (the AI's own army least of all) is shut in or
+ * out, and sandbags behind each gap. `half` is half its length in cells.
+ */
+function belt(
+  ai: Ai,
+  w: World,
+  x: number,
+  y: number,
+  half: number,
+  wire: number[],
+  traps: number[],
+  bags: number[],
+): boolean {
+  const map = w.map;
+  const cx = clampInt(x >> CELL_SHIFT, 4, MAP_CELLS - 5);
+  const cy = clampInt(y >> CELL_SHIFT, 4, MAP_CELLS - 5);
+  const veh = map.natural[CLASS_VEHICLE];
+  let gaps = 0;
+  for (let k = -half; k <= half; k++) {
+    const yy = cy + k;
+    if (yy < 3 || yy >= MAP_CELLS - 3) continue;
+    const c = yy * MAP_CELLS + cx;
+    const phase = (((k + half) % 7) + 7) % 7;
+    if (phase >= 5) {
+      if (veh[c] !== 0 && w.wKind[c] === 0) gaps++;
+      const b = c - 3 * ai.fwd;
+      if (phase === 5 && w.wKind[b] === 0 && canFortify(map, WORK_SANDBAG, b)) bags.push(b);
+      continue;
+    }
+    if (w.wKind[c] === 0 && canFortify(map, WORK_WIRE, c)) wire.push(c);
+    const t = c - ai.fwd;
+    if (w.wKind[t] === 0 && canFortify(map, WORK_TRAP, t)) traps.push(t);
+  }
+  return gaps >= 2;
+}
+
+/**
+ * Field works: the towns it holds get a belt of wire and obstacles on the side the enemy
+ * comes from, and so does its bank of a bare ford. Its sappers put them up when nothing is
+ * burning, with what money is left over, and mend them when they have been shot up.
+ */
+function fortify(ai: Ai, w: World, out: Command[]): void {
+  const map = w.map;
+  const tick = w.tick;
+  if (ai.sappers.length === 0 || ai.alarm !== null) return;
+  const free = ai.sappers.filter(
+    (i) => w.job[i] === JOB_NONE && (w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET,
+  );
+  if (free.length === 0) return;
+  let purse = w.supplies[ai.team] - ai.resS - 120;
+  if (purse < 60) return;
+  const sites = map.townCount + ai.crossings.length;
+  for (let k = 0; k < sites && k < ai.fortAt.length; k++) {
+    if (ai.fortAt[k] > tick) continue;
+    let x: number;
+    let y: number;
+    let half: number;
+    if (k < map.townCount) {
+      if (w.townOwner[k] !== ai.team || bankOf(ai, map.townX[k], map.townY[k]) !== ai.side) {
+        continue;
+      }
+      x = map.townX[k] + ai.fwd * (map.townR[k] + fx(14));
+      y = map.townY[k];
+      half = clampInt((map.townR[k] >> CELL_SHIFT) + 2, 6, 16);
+    } else {
+      const c = ai.crossings[k - map.townCount];
+      if (c.town[ai.side] >= 0 || !ai.tune.traps) continue;
+      x = c.bankX[ai.side];
+      y = c.bankY[ai.side];
+      half = 6;
+    }
+    if (expect(ai, w, x, y, 1, 0) > 12) continue;
+    const wire: number[] = [];
+    const traps: number[] = [];
+    const bags: number[] = [];
+    const open = belt(ai, w, x, y, half, wire, traps, bags);
+    ai.fortAt[k] = tick + 4 * MINUTE;
+    if (!open) continue;
+    if (!ai.tune.traps) traps.length = 0;
+    // Sandbags first (the garrison's), then the wire, then the obstacles: as far as the
+    // money goes.
+    const jobs: [number, number[]][] = [
+      [WORK_SANDBAG, bags],
+      [WORK_WIRE, wire],
+      [WORK_TRAP, traps],
+    ];
+    let ordered = 0;
+    for (const [kind, cells] of jobs) {
+      const n = Math.min(cells.length, Math.trunc(purse / WORKS[kind].supplies));
+      if (n <= 0) continue;
+      cells.length = n;
+      purse -= n * WORKS[kind].supplies;
+      ordered += n;
+      out.push({ type: CMD_FORTIFY, units: free, work: kind, cells });
+    }
+    if (k < map.townCount && bags.length > 0 && ai.nest[k] < 0) ai.nest[k] = bags[0];
+    if (ordered > 0) {
+      ai.laid += ordered;
+      // Not everything was affordable: look again sooner.
+      if (purse < 60) ai.fortAt[k] = tick + MINUTE;
+      return;
+    }
+  }
+  // Nothing to do: wait at the staging area.
+  const back = free.filter((i) => dist(w.posX[i], w.posY[i], ai.stageX, ai.stageY) > fx(34));
+  order(out, CMD_MOVE, back, ai.stageX, ai.stageY);
+}
+
 /** Give every new unit a job. */
 function enlist(ai: Ai, w: World): void {
   const map = w.map;
@@ -1290,6 +1469,9 @@ function enlist(ai: Ai, w: World): void {
     } else if (kind === KIND_DRONE && drones < 3) {
       role = R_SCOUT;
       drones++;
+    } else if (kind === KIND_ENGINEER && ai.sappers.length < ai.tune.sappers) {
+      role = R_SAPPER;
+      ai.sappers.push(i);
     } else if (FOOT(kind) || kind === KIND_RECON) {
       let best = -1;
       let need = 0;
@@ -1358,6 +1540,15 @@ function garrisons(ai: Ai, w: World, out: Command[]): void {
     }
     for (const [structure, units] of batches) out.push({ type: CMD_GARRISON, units, structure });
     // No house left to hold: the rubble of the town is cover too.
+    const nest = ai.nest[t];
+    if (nest >= 0 && map.type[nest] === T_SANDBAG && loose.length > 0) {
+      // Unless it has dug positions at the edge: those face the enemy.
+      const idle = loose.filter((i) => !isCoverCell(map, cellAt(w.posX[i], w.posY[i])));
+      if (idle.length > 0) {
+        out.push({ type: CMD_OCCUPY, units: idle, x: cellX(nest), y: cellY(nest) });
+      }
+      continue;
+    }
     const far = loose.filter(
       (i) => dist(w.posX[i], w.posY[i], map.townX[t], map.townY[t]) > map.townR[t] >> 1,
     );
@@ -1895,7 +2086,7 @@ function follow(ai: Ai, w: World, out: Command[], units: number[], cx: number, c
   order(out, CMD_MOVE, mid, cx, cy);
   order(out, CMD_MOVE, rear, bx, by);
   if (strikes.length === 0) return;
-  const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2];
+  const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2, 0];
   let best = -1;
   let bestKey = 0;
   for (const e of ai.seen) {
@@ -1919,9 +2110,8 @@ function follow(ai: Ai, w: World, out: Command[], units: number[], cx: number, c
 /**
  * The strong points of an objective: what has to be reduced before the infantry goes in.
  * Today these are the houses the enemy is known to hold in a town, and his base buildings.
- * Field fortifications (walls, wire, trenches: the milestone after this one) belong in
- * this list too; everything downstream of it already treats a strong point as "a
- * structure the guns and tanks shell until it is gone".
+ * Field works are not in this list (they are cells, not structures): `assault` picks
+ * the nearest standing one on the way and sends engineers and guns against it.
  */
 function strongPoints(ai: Ai, w: World, obj: Objective): number[] {
   const map = w.map;
@@ -2037,11 +2227,36 @@ function assault(
   }
   const tx = point >= 0 ? structX(map, point) : obj.x;
   const ty = point >= 0 ? structY(map, point) : obj.y;
+  // Enemy wire, walls or obstacles between it and the objective: the nearest is opened
+  // by whoever can, while the rest of the line stands off.
+  let gapCell = -1;
+  let gapD = fx(60);
+  for (let k = 0; k < w.workCount; k++) {
+    const c = w.workCells[k];
+    if (w.wTeam[c] === ai.team || !workStands(w, c) || w.wKind[c] >= WORK_TRENCH) continue;
+    const wx = cellX(c);
+    const wy = cellY(c);
+    const d = dist(wx, wy, cx, cy);
+    if (d >= gapD || dist(wx, wy, tx, ty) > dist(cx, cy, tx, ty) + fx(8)) continue;
+    gapD = d;
+    gapCell = c;
+  }
+  const sappers: number[] = [];
   const shell: number[] = [];
   const line: number[] = [];
   for (const i of units) {
     const kind = w.kind[i];
     const flags = w.flags[i];
+    if (
+      gapCell >= 0 &&
+      (KINDS[kind].engineer || kind === KIND_ARTILLERY) &&
+      canBreach(KINDS[kind], w.wKind[gapCell])
+    ) {
+      const at = cellAt(w.aimX[i], w.aimY[i]);
+      const busy = (flags & (FLAG_BREACH | FLAG_BOMBARD)) !== 0 && w.wKind[at] !== 0;
+      if (!busy && w.attack[i] === NO_TARGET) sappers.push(i);
+      continue;
+    }
     if (
       point >= 0 &&
       (kind === KIND_ARTILLERY || (kind === KIND_TANK && w.attack[i] === NO_TARGET))
@@ -2053,6 +2268,9 @@ function assault(
     if (!LINE[kind]) continue;
     if ((flags & (FLAG_MOVING | FLAG_SIEGE)) !== 0 || w.attack[i] !== NO_TARGET) continue;
     if (dist(w.posX[i], w.posY[i], tx, ty) > fx(18)) line.push(i);
+  }
+  if (sappers.length > 0) {
+    out.push({ type: CMD_BREACH, units: sappers, x: cellX(gapCell), y: cellY(gapCell) });
   }
   if (shell.length > 0) out.push({ type: CMD_ATTACK_STRUCTURE, units: shell, structure: point });
   order(out, CMD_ATTACK_MOVE, line, tx, ty);
@@ -2073,6 +2291,6 @@ export function aiReport(ai: Ai, w: World): string {
     `S ${w.supplies[t]} F ${w.fuel[t]} C ${w.credits[t]} trucks ${ai.trucks.length} towns ${towns} ` +
     `garrison ${garrison} reserve ${ai.reserve.length} army ${ai.members[0].length} ${states[f.state]} ` +
     `raid ${ai.members[1].length} scouts ${ai.scouts.length} seen ${ai.seen.length} ` +
-    `units ${Array.from(ai.have).join(',')} | ${ai.plan}`
+    `works ${ai.laid} foe works ${ai.foeWorks} units ${Array.from(ai.have).join(',')} | ${ai.plan}`
   );
 }
