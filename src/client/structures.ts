@@ -20,6 +20,7 @@ import { Batch } from './batch';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import type { Look } from './look';
+import type { Clutter } from './clutter';
 import { masonry } from './surface';
 import type { Terrain } from './terrain';
 
@@ -31,6 +32,9 @@ import type { Terrain } from './terrain';
 const CELL = 4;
 const FLOOR = fromFx(FLOOR_HEIGHT);
 const WALLS = [0x8a8478, 0x7d6a58, 0x9a9384, 0x6f7272, 0x86705a, 0x77786a];
+/** Roofing: clay tiles in three ages, slate, tarred felt. */
+const TILES = [0x7b4d3c, 0x6c4436, 0x855a43, 0x4d5055, 0x43403d];
+const TRIM = [0xa39c8c, 0x6d5a4a, 0x8f8a7c, 0x55585a, 0x9a8468, 0x8b8c7c];
 const ROOF = 0x3e3c3a;
 const GLASS = 0x1b2126;
 const SOOT = 0x0d0c0b;
@@ -64,12 +68,60 @@ export interface Part {
   shade?: number;
   /** 1 for glass: smooth enough to show the sky. */
   gloss?: number;
+  /**
+   * A roof instead of a box, `size` being its footprint and height: the ridge runs along
+   * the longer side, and is drawn in from each end by `hip` (0 = plain gables).
+   */
+  hip?: number;
+}
+
+/** A pitched roof as a closed solid: two slopes and two ends, flat-shaded. */
+function roofGeometry(w: number, h: number, d: number, hip: number): THREE.BufferGeometry {
+  const alongX = w >= d;
+  const L = (alongX ? w : d) / 2;
+  const S = (alongX ? d : w) / 2;
+  const r = Math.max(0, L - hip);
+  // Along the ridge = a, across it = b.
+  const corner = (a: number, b: number): [number, number, number] =>
+    alongX ? [a, 0, b] : [b, 0, a];
+  const ridge = (a: number): [number, number, number] => (alongX ? [a, h, 0] : [0, h, a]);
+  const A = corner(-L, -S);
+  const B = corner(L, -S);
+  const C = corner(L, S);
+  const D = corner(-L, S);
+  const E = ridge(-r);
+  const F = ridge(r);
+  const tris = [A, E, F, A, F, B, C, F, E, C, E, D, B, F, C, D, E, A, A, B, C, A, C, D];
+  const pos = new Float32Array(tris.length * 3);
+  tris.forEach((v, i) => pos.set(v, i * 3));
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  // Whichever way round a face came out, its normal must point away from the middle.
+  const n = g.getAttribute('normal');
+  for (let t = 0; t < tris.length; t += 3) {
+    const mx = (pos[3 * t] + pos[3 * t + 3] + pos[3 * t + 6]) / 3;
+    const my = (pos[3 * t + 1] + pos[3 * t + 4] + pos[3 * t + 7]) / 3 - h * 0.3;
+    const mz = (pos[3 * t + 2] + pos[3 * t + 5] + pos[3 * t + 8]) / 3;
+    if (n.getX(t) * mx + n.getY(t) * my + n.getZ(t) * mz >= 0) continue;
+    for (let k = 0; k < 3; k++) {
+      const a = pos[3 * t + 3 + k];
+      pos[3 * t + 3 + k] = pos[3 * t + 6 + k];
+      pos[3 * t + 6 + k] = a;
+    }
+  }
+  g.computeVertexNormals();
+  g.setIndex([...Array(tris.length).keys()]);
+  return g;
 }
 
 export function build(parts: Part[]): THREE.BufferGeometry {
   const c = new THREE.Color();
   const geometries = parts.map((p) => {
-    const g = new THREE.BoxGeometry(...p.size);
+    const g =
+      p.hip === undefined
+        ? new THREE.BoxGeometry(...p.size)
+        : roofGeometry(p.size[0], p.size[1], p.size[2], p.hip);
     if (p.rot) g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...p.rot)));
     g.translate(...p.at);
     g.deleteAttribute('uv');
@@ -105,28 +157,130 @@ function buildingParts(
   const wear = damaged ? 0.62 : 0.92 + rand(id, 2) * 0.12;
   parts.push({ size: [w + 0.3, 2.4, d + 0.3], at: [cx, base - 1.15, cz], color: 0x55524c });
   parts.push({ size: [w, h, d], at: [cx, base + h / 2, cz], color: wall, shade: wear });
-  // Roof slab, parapet and a stair head.
-  parts.push({ size: [w + 0.24, 0.12, d + 0.24], at: [cx, base + h + 0.06, cz], color: ROOF });
-  for (const side of [-1, 1]) {
+  const top = base + h;
+  // Small houses have pitched roofs; blocks of flats and anything large a flat one.
+  const pitched = floors <= 3 && Math.min(w, d) <= 12 && rand(id, 10) < 0.8;
+  if (pitched) {
+    const tile = TILES[Math.floor(rand(id, 7) * TILES.length)];
+    const rise = Math.min(w, d) * (0.2 + rand(id, 8) * 0.1);
+    const hip = rand(id, 9) < 0.35 ? Math.min(w, d) * 0.45 : 0;
     parts.push({
-      size: [w + 0.24, 0.22, 0.14],
-      at: [cx, base + h + 0.2, cz + (side * (d + 0.1)) / 2],
-      color: wall,
-      shade: wear * 0.85,
+      size: [w + 0.5, rise, d + 0.5],
+      at: [cx, top, cz],
+      color: tile,
+      shade: damaged ? 0.5 : 0.68 + rand(id, 12) * 0.2,
+      hip,
     });
+    // Eaves board under the tiles, and a chimney or two through them.
+    parts.push({ size: [w + 0.3, 0.08, d + 0.3], at: [cx, top - 0.02, cz], color: TRIM[0] });
+    const stacks = 1 + (rand(id, 13) < 0.4 ? 1 : 0);
+    for (let c = 0; c < stacks; c++) {
+      const along = (rand(id, 14 + c) - 0.5) * (Math.max(w, d) - 2.4 - 2 * hip);
+      const across = (c === 0 ? 0.22 : -0.25) * Math.min(w, d);
+      parts.push({
+        size: [0.32, rise + 0.35, 0.32],
+        at: [
+          cx + (w >= d ? along : across),
+          top + (rise + 0.35) / 2,
+          cz + (w >= d ? across : along),
+        ],
+        color: 0x6b4c3d,
+        shade: wear * 0.9,
+      });
+    }
+  } else {
+    // Roof slab, parapet, a stair head and what collects on a flat roof.
+    parts.push({ size: [w + 0.24, 0.12, d + 0.24], at: [cx, top + 0.06, cz], color: ROOF });
+    for (const side of [-1, 1]) {
+      parts.push({
+        size: [w + 0.24, 0.22, 0.14],
+        at: [cx, top + 0.2, cz + (side * (d + 0.1)) / 2],
+        color: wall,
+        shade: wear * 0.85,
+      });
+      parts.push({
+        size: [0.14, 0.22, d + 0.24],
+        at: [cx + (side * (w + 0.1)) / 2, top + 0.2, cz],
+        color: wall,
+        shade: wear * 0.85,
+      });
+    }
     parts.push({
-      size: [0.14, 0.22, d + 0.24],
-      at: [cx + (side * (w + 0.1)) / 2, base + h + 0.2, cz],
+      size: [1.3, 0.7, 1.6],
+      at: [cx + (rand(id, 3) - 0.5) * (w - 2.5), top + 0.45, cz + (rand(id, 4) - 0.5) * (d - 3)],
       color: wall,
-      shade: wear * 0.85,
+      shade: wear * 0.8,
+    });
+    const things = 2 + Math.floor(rand(id, 20) * 4);
+    for (let i = 0; i < things; i++) {
+      const tx = cx + (rand(id, 21 + i) - 0.5) * (w - 1.6);
+      const tz = cz + (rand(id, 27 + i) - 0.5) * (d - 1.6);
+      const r = rand(id, 33 + i);
+      if (r < 0.4) {
+        // A ventilation unit.
+        parts.push({ size: [0.7, 0.32, 0.5], at: [tx, top + 0.28, tz], color: 0x8c8f8c });
+        parts.push({ size: [0.5, 0.05, 0.3], at: [tx, top + 0.46, tz], color: 0x4a4d4d });
+      } else if (r < 0.7) {
+        // A vent pipe.
+        parts.push({ size: [0.12, 0.6, 0.12], at: [tx, top + 0.42, tz], color: 0x5c5f5e });
+      } else if (r < 0.85) {
+        // A water tank on a frame.
+        parts.push({ size: [0.8, 0.5, 0.8], at: [tx, top + 0.62, tz], color: 0x5a6468 });
+        parts.push({ size: [0.7, 0.26, 0.7], at: [tx, top + 0.25, tz], color: 0x3b3d3d });
+      } else {
+        // An aerial.
+        parts.push({ size: [0.04, 1.5, 0.04], at: [tx, top + 0.87, tz], color: 0x777a78 });
+        parts.push({ size: [0.5, 0.03, 0.03], at: [tx, top + 1.4, tz], color: 0x777a78 });
+      }
+    }
+  }
+  // A plinth in darker render, a string course under the top floor, a canopy over the door.
+  const trim = TRIM[Math.floor(rand(id, 1) * TRIM.length)];
+  parts.push({
+    size: [w + 0.08, 0.26, d + 0.08],
+    at: [cx, base + 0.13, cz],
+    color: wall,
+    shade: wear * 0.62,
+  });
+  if (floors >= 2) {
+    parts.push({
+      size: [w + 0.1, 0.06, d + 0.1],
+      at: [cx, base + (floors - 1) * FLOOR + 0.05, cz],
+      color: trim,
+      shade: wear,
     });
   }
   parts.push({
-    size: [1.3, 0.7, 1.6],
-    at: [cx + (rand(id, 3) - 0.5) * (w - 2.5), base + h + 0.45, cz + (rand(id, 4) - 0.5) * (d - 3)],
-    color: wall,
+    size: [0.9, 0.05, 0.4],
+    at: [
+      cx +
+        ((Math.floor(Math.max(2, Math.round(w / 1.15)) / 2) + 0.5) /
+          Math.max(2, Math.round(w / 1.15)) -
+          0.5) *
+          w,
+      base + 0.7,
+      cz + d / 2 + 0.2,
+    ],
+    color: trim,
     shade: wear * 0.8,
   });
+  // Balconies on the upper floors of the bigger houses, here and there.
+  if (!pitched && floors >= 3) {
+    for (let f = 1; f < floors; f++) {
+      for (let i = 0; i < Math.floor(w / 3.4); i++) {
+        if (rand(id, 60 + f * 9 + i) < 0.45) continue;
+        const bx = cx + ((i + 0.5) / Math.floor(w / 3.4) - 0.5) * w;
+        const by = base + f * FLOOR + 0.2;
+        parts.push({ size: [1.0, 0.05, 0.36], at: [bx, by, cz + d / 2 + 0.18], color: CONCRETE });
+        parts.push({
+          size: [1.0, 0.24, 0.03],
+          at: [bx, by + 0.14, cz + d / 2 + 0.35],
+          color: trim,
+          shade: 0.8,
+        });
+      }
+    }
+  }
   // Windows on all four faces: dark glass set just proud of the wall.
   let k = 10;
   for (let f = 0; f < floors; f++) {
@@ -174,9 +328,14 @@ function buildingParts(
         rot: alongX ? [0, 0, rand(id, 350 + i) - 0.5] : [rand(id, 350 + i) - 0.5, 0, 0],
       });
     }
+    const sag = pitched ? Math.min(w, d) * 0.1 : 0;
     parts.push({
-      size: [w * 0.45, 0.16, d * 0.5],
-      at: [cx + (rand(id, 5) - 0.5) * w * 0.5, base + h + 0.07, cz + (rand(id, 6) - 0.5) * d * 0.4],
+      size: [w * 0.45, 0.16 + sag * 1.6, d * 0.5],
+      at: [
+        cx + (rand(id, 5) - 0.5) * w * 0.5,
+        base + h + 0.07 + sag * 0.8,
+        cz + (rand(id, 6) - 0.5) * d * 0.4,
+      ],
       color: SOOT,
     });
   }
@@ -522,6 +681,8 @@ export class StructureView {
   private readonly pips: Batch;
   private readonly flags: Batch;
   private readonly shadows: boolean;
+  /** Set by the game once the land's small things exist. */
+  clutter: Clutter | null = null;
 
   constructor(
     private readonly map: GameMap,
@@ -600,7 +761,7 @@ export class StructureView {
   topOf(s: number): number {
     const m = this.map;
     if (m.sKind[s] === S_BRIDGE) return Math.max(fromFx(m.sBase[s]), fromFx(m.sEast[s]));
-    return fromFx(m.sBase[s]) + (this.hp[s] === 0 ? 0.8 : m.sFloors[s] * FLOOR);
+    return fromFx(m.sBase[s]) + (this.hp[s] === 0 ? 0.8 : m.sFloors[s] * FLOOR + 0.9);
   }
 
   centreOf(s: number): { x: number; z: number } {
@@ -618,6 +779,16 @@ export class StructureView {
 
   private show(s: number, state: number): void {
     if (this.shown[s] === state) return;
+    const sm = this.map;
+    if (sm.sKind[s] === S_BASE) {
+      // A base building takes the place of whatever hedge or fence stood there.
+      this.clutter?.clear(
+        sm.sX[s] * CELL - 1,
+        sm.sY[s] * CELL - 1,
+        (sm.sX[s] + sm.sW[s]) * CELL + 1,
+        (sm.sY[s] + sm.sH[s]) * CELL + 1,
+      );
+    }
     const m = this.map;
     const old = this.meshes[s];
     if (old) {

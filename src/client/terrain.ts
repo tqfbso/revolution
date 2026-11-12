@@ -30,6 +30,7 @@ import {
   type GameMap,
 } from '../sim/map';
 import type { Fog } from './fog';
+import { Land } from './land';
 import type { Look } from './look';
 
 // Draws the sim's map (src/sim/map.ts): the ground mesh, a water surface, and instanced
@@ -110,6 +111,8 @@ export class Terrain {
   private readonly wearTexture: THREE.DataTexture;
   private wearDirty = false;
   private wearAge = 0;
+  /** Fields, roads and yards, and the small things that stand on them (rich looks only). */
+  readonly land: Land | null;
 
   constructor(
     readonly map: GameMap,
@@ -120,16 +123,20 @@ export class Terrain {
     for (let k = 0; k < VERTS * VERTS; k++) this.heights[k] = fromFx(map.heights[k]);
     this.wearTexture = new THREE.DataTexture(this.wear, WEAR, WEAR, THREE.RedFormat);
     this.wearTexture.magFilter = this.wearTexture.minFilter = THREE.LinearFilter;
+    this.land = look.rich
+      ? new Land(map, this.heights, look.quality === 'high' ? 4096 : 2048)
+      : null;
     this.layTracks();
+    this.land?.finish();
     this.wearTexture.needsUpdate = true;
 
     const positions = new Float32Array(VERTS * VERTS * 3);
     const colors = new Float32Array(VERTS * VERTS * 3);
     // Per vertex: how much of it is earth, rock, asphalt, and how wet it is.
     const splat = new Float32Array(VERTS * VERTS * 4);
-    const low = new THREE.Color(0x4b5a39);
-    const mid = new THREE.Color(0x6a7549);
-    const high = new THREE.Color(0x8b8863);
+    const low = new THREE.Color(look.rich ? 0x42552f : 0x4b5a39);
+    const mid = new THREE.Color(look.rich ? 0x586a39 : 0x6a7549);
+    const high = new THREE.Color(look.rich ? 0x7a7c4e : 0x8b8863);
     // Packed earth in the settlements, a paved road along the main street onto the bridge.
     const built = (i: number, j: number) => {
       let n = 0;
@@ -172,7 +179,8 @@ export class Terrain {
         colors[3 * k] = c.r * speckle;
         colors[3 * k + 1] = c.g * speckle;
         colors[3 * k + 2] = c.b * speckle;
-        const town = h > 0.2 ? built(i, j) : 0;
+        // With the rich look the streets and yards are drawn by `Land`, much more finely.
+        const town = h > 0.2 && !look.rich ? built(i, j) : 0;
         // Bare earth: yards, the river banks and bed, a little under the trees.
         let earth = town === 1 ? 0.5 : 0;
         earth = Math.max(earth, THREE.MathUtils.clamp((0.75 - h) / 0.9, 0, 1), wet / 4);
@@ -217,6 +225,41 @@ export class Terrain {
     this.water.receiveShadow = shadows;
 
     this.buildTrees(shadows);
+    this.mesh.add(this.surround());
+  }
+
+  /**
+   * The country beyond the edge of the map: four plain sheets of grass at the height of the
+   * map's rim, so that the world does not end in a void. Nothing ever goes there.
+   */
+  private surround(): THREE.Mesh {
+    let rim = 0;
+    for (let i = 0; i < VERTS; i++) {
+      rim += this.heights[i] + this.heights[(VERTS - 1) * VERTS + i];
+      rim += this.heights[i * VERTS] + this.heights[i * VERTS + VERTS - 1];
+    }
+    rim = rim / (4 * VERTS) - 0.4;
+    const far = 2600;
+    const sheet = (x0: number, z0: number, x1: number, z1: number) => {
+      const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(-Math.PI / 2);
+      g.translate((x0 + x1) / 2, rim, (z0 + z1) / 2);
+      return g;
+    };
+    const geometry = mergeGeometries([
+      sheet(-far, -far, MAP_SIZE + far, 0),
+      sheet(-far, MAP_SIZE, MAP_SIZE + far, MAP_SIZE + far),
+      sheet(-far, 0, 0, MAP_SIZE),
+      sheet(MAP_SIZE, 0, MAP_SIZE + far, MAP_SIZE),
+    ]);
+    const m = new THREE.MeshLambertNodeMaterial();
+    const xz = positionWorld.xz;
+    const patches = texture(this.look.tex.noise, xz.div(420)).r.mul(0.5).add(0.72);
+    m.colorNode = color(this.look.rich ? 0x4f6034 : 0x5a6641)
+      .mul(patches)
+      .mul(this.fog.shade());
+    const mesh = new THREE.Mesh(geometry, m);
+    mesh.matrixAutoUpdate = false;
+    return mesh;
   }
 
   /** Everything in the world is darkened by the fog of war texture (and the clouds). */
@@ -243,35 +286,44 @@ export class Terrain {
     const D = texture(tex.dirt, xz.div(8.5));
     // Rock is sampled sliding with height, so cliff faces do not smear.
     const R = texture(tex.rock, xz.add(positionWorld.y.mul(0.8)).div(13));
-    const P = texture(tex.paved, xz.div(10));
+    const P = texture(tex.paved, xz.div(this.look.rich ? 5.5 : 10));
     // Broad patches a field or two across: drier grass, thin soil, bare ground.
     const macro = texture(tex.noise, xz.div(210));
     type F = THREE.Node<'float'>;
     const sharp = (w: F, h: F) => smoothstep(0.38, 0.62, w.add(h.sub(0.5).mul(0.6)));
     const patch = texture(tex.noise, xz.div(47));
     const bare = macro.b.sub(0.63).max(0).mul(1.6).add(patch.g.sub(0.5).mul(0.45));
-    const wEarth = sharp(
-      sp.x.add(wear.mul(1.1)).add(bare).clamp(0, 1),
-      D.b.add(float(1).sub(G.b)).mul(0.5),
-    );
+    const breakUp = D.b.add(float(1).sub(G.b)).mul(0.5);
+    const wEarth = sharp(sp.x.add(bare).clamp(0, 1), breakUp);
+    // What the battle has churned up lies on top of everything, roads included.
+    const wWorn = sharp(wear.mul(1.1).clamp(0, 1), breakUp);
     const wRock = sharp(sp.y, R.b);
-    const wPaved = sharp(sp.z, P.b);
+    const land = this.land!;
+    const where = xz.div(MAP_SIZE);
+    const field = texture(land.fields, where);
+    const mark = texture(land.marks, where);
+    // Hard surfaces (streets, yards) take the paving's grain; shade under trees does not.
+    const wPaved = smoothstep(0.5, 0.9, mark.a);
     const dry = mix(tone, tone.mul(vec3(1.14, 1.04, 0.8)), macro.g.mul(macro.r).mul(1.8).min(1));
     const grass = dry
       .mul(G.b.mul(0.9).add(0.55))
       .mul(macro.r.mul(0.5).add(patch.r.mul(0.3)).add(0.62));
     // Wet earth is darker; so is earth that tracks have churned.
     const damp = sp.w.max(wear.mul(0.6));
+    const wEarthAll = wEarth.max(wWorn);
     const earth = color(0x574f43)
       .mul(D.b.mul(0.9).add(0.55))
       .mul(mix(float(1), float(0.55), damp));
     const rock = color(0x6d675d).mul(R.b.mul(0.9).add(0.55));
-    const paved = color(0x47464a).mul(P.b.mul(0.8).add(0.6));
-    const albedo = mix(mix(mix(grass, earth, wEarth), rock, wRock), paved, wPaved);
-    const detail = mix(mix(mix(G, D, wEarth), R, wRock), P, wPaved);
+    // Fields lie in the grass , streets on it all.
+    const sown = mix(grass, field.rgb.mul(G.b.mul(0.7).add(0.68)), field.a);
+    const natural = mix(mix(sown, earth, wEarth), rock, wRock);
+    const made = mix(natural, mark.rgb.mul(mix(float(1), P.b.mul(0.7).add(0.65), wPaved)), mark.a);
+    const albedo = mix(made, earth, wWorn);
+    const detail = mix(mix(mix(mix(G, D, wEarth), R, wRock), P, wPaved), D, wWorn);
     const m = new THREE.MeshStandardNodeMaterial({ metalness: 0 });
     m.colorNode = albedo.mul(shade);
-    m.roughnessNode = detail.a.sub(damp.mul(wEarth).mul(0.3)).clamp(0.25, 1);
+    m.roughnessNode = detail.a.sub(damp.mul(wEarthAll).mul(0.3)).clamp(0.25, 1);
     // The texture's slopes tilt the surface normal: its u runs east, its v south.
     const tilt = detail.xy.mul(2).sub(1);
     const n = normalWorld.add(vec3(tilt.x, 0, tilt.y).mul(0.9)).normalize();
@@ -431,7 +483,9 @@ export class Terrain {
             pts.push(((c % N) + 0.5) * CELL, (Math.floor(c / N) + 0.5) * CELL);
           c = from[c];
         }
-        this.strokeTrack(smoothLine(smoothLine(pts)));
+        const line = smoothLine(smoothLine(pts));
+        this.strokeTrack(line);
+        this.land?.road(line);
       }
     }
   }
@@ -446,8 +500,8 @@ export class Terrain {
           pts[k] + (pts[k + 2] - pts[k]) * f,
           pts[k + 1] + (pts[k + 3] - pts[k + 1]) * f,
           1.5,
-          70,
-          175,
+          this.land ? 26 : 70,
+          this.land ? 90 : 175,
         );
       }
     }

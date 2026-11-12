@@ -1,3 +1,4 @@
+import type { Clutter } from './clutter';
 import * as THREE from 'three/webgpu';
 import { attribute, float, mix } from 'three/tsl';
 import { MAP_CELLS, NO_OWNER, T_FORD, T_OPEN, isWork, type GameMap } from '../sim/map';
@@ -147,6 +148,8 @@ export interface WorkHit {
 }
 
 export class WorksView {
+  /** Set by the game once the land's small things exist. */
+  clutter: Clutter | null = null;
   readonly group = new THREE.Group();
   /** Per cell: the record of the work on it (see Snapshot.works), 0 = none. */
   readonly at = new Int32Array(CELLS);
@@ -260,6 +263,15 @@ export class WorksView {
     for (let k = 0; k < works.length; k += 2) {
       next.push(works[k]);
       fresh[k >> 1] = works[k + 1];
+    }
+    if (this.clutter) {
+      const had = new Set(old);
+      for (const c of next) {
+        if (had.has(c)) continue;
+        const x = (c % MAP_CELLS) * CELL;
+        const z = Math.floor(c / MAP_CELLS) * CELL;
+        this.clutter.clear(x - 0.5, z - 0.5, x + CELL + 0.5, z + CELL + 0.5);
+      }
     }
     // Gone: the ground is as it was.
     const keep = new Set(next);

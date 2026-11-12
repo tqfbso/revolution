@@ -11,6 +11,7 @@ import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
 import { makeLook, readQuality, skyScene } from './client/look';
+import { Clutter } from './client/clutter';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
@@ -93,8 +94,8 @@ async function start(): Promise<void> {
   scene.fog = new THREE.Fog(SKY, 500, 2200);
   // Overcast-bright sky light plus a low, warm sun: long readable shadows, muted colours.
   // With reflections on, most of the sky's light comes from the environment map instead.
-  scene.add(new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.95));
-  const sun = new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 3.7);
+  scene.add(new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.55));
+  const sun = new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 4.6);
   const sunDir = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
   sun.castShadow = shadows;
   const shadowSize = quality === 'high' ? 4096 : quality === 'low' ? 1024 : 2048;
@@ -113,7 +114,7 @@ async function start(): Promise<void> {
     // What shiny things reflect, and the light that comes from the whole sky.
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(skyScene(sunDir), 0.02).texture;
-    scene.environmentIntensity = 0.55;
+    scene.environmentIntensity = 0.45;
     pmrem.dispose();
   }
   // The skirmish is fought on the ridge map unless `?map=river` asks for the old one; the
@@ -127,6 +128,9 @@ async function start(): Promise<void> {
   const structures = new StructureView(map, terrain, fog, effects, look);
   const works = new WorksView(map, terrain, fog, effects, look);
   const scars = new Scars(fog, terrain, look);
+  const clutter = new Clutter(terrain, fog, look);
+  structures.clutter = clutter;
+  works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
   const sound = new Sound();
   units.sound = sound;
@@ -277,6 +281,7 @@ async function start(): Promise<void> {
     terrain.mesh,
     terrain.water,
     terrain.trees,
+    clutter.group,
     structures.group,
     works.group,
     scars.mesh,
@@ -417,6 +422,7 @@ async function start(): Promise<void> {
     const dt = Math.min(dtMs / 1000, 0.1);
     rts.update(dt);
     units.zoom = rts.distance;
+    clutter.update(rts.distance);
     const cm = rts.camera.matrixWorld.elements;
     sound.listen(rts.focus.x, rts.focus.z, rts.distance, cm[0], cm[2]);
     const c0 = performance.now();

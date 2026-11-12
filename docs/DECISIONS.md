@@ -821,3 +821,33 @@ changes to the AI (`src/sim/ai.ts`), none to the rules of the game:
   home after a retreat. The army still moves at the pace of whoever walks: a variant where
   the carried half drove ahead and the rest followed lost more headless games than it won.
   Not on recruit.
+
+## 071 The land is dressed by the renderer alone
+
+Fabio after M9 and the ridge map: "the visuals don't look great". Screenshots said why:
+empty olive ground, flat-roofed boxes on a slab of asphalt, a steep camera, and the void
+past the map edge. Lighting changes alone moved little. So, on normal and high detail:
+
+- Ground. Two textures drawn once at load from the map (`src/client/land.ts`): crop
+  parcels in six kinds on the open low ground, and a layer of made things: a street with
+  pavements, kerbs, centre line and crossings through each town, yards and door paths,
+  dirt roads along the lanes units use, soft darkening under woods and around walls.
+  Battle wear still goes on top.
+- Props (`src/client/clutter.ts`): hedges, bushes, bales, rocks, fences, poles, street
+  lamps, sheds, bus shelters, wood stacks and grass tufts, instanced per 128 m chunk;
+  the small kinds are hidden when zoomed out. They are cleared under anything built.
+- Houses: small ones get tiled or slate roofs, gabled or hipped, with chimneys; flat roofs
+  collect vents, tanks and aerials; all get a plinth, a string course and a door canopy,
+  the taller ones balconies.
+- Camera: 35 degrees when close, 56 when far (was fixed), so a close look shows walls and
+  a horizon instead of roofs.
+- Grass sheets continue past the map edge; ACES tone mapping; a stronger sun against a
+  weaker sky for contrast.
+
+All of it is cosmetic. Props block nothing, give no cover and are not in the simulation,
+so the golden hash stands and multiplayer stays in step. That is also the limit: a hedge
+that does not stop a bullet is a small lie, accepted because cover from field boundaries
+belongs with the urban work (docs/URBAN.md), not here. Low detail keeps the old ground.
+
+Measured with 3,000 units in view on software rendering (real frame rates are Fabio's to
+report): 155 draw calls and 640k triangles on normal, 167 on high, 79 and 550k on low.
