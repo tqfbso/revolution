@@ -141,8 +141,9 @@ interface Tuning {
    */
   breakOff: number;
   odds: number;
-  /** First tick of raids on trucks and outlying depots (0 = never). */
+  /** First tick of raids on trucks and outlying depots (0 = never), and IFVs in a raiding party. */
   raids: number;
+  raidParty: number;
   /** Builds against what it has seen of the enemy. */
   counter: boolean;
   /** Lays smoke in front of a town it storms. */
@@ -172,6 +173,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     breakOff: 55,
     odds: 24,
     raids: 0,
+    raidParty: 4,
     counter: false,
     smoke: false,
     sappers: 0,
@@ -186,11 +188,12 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     builders: 2,
     garrison: 3,
     ratio: 230,
-    firstAttack: 17 * MINUTE,
+    firstAttack: 20 * MINUTE,
     minArmy: 280,
     breakOff: 45,
     odds: 20,
     raids: 0,
+    raidParty: 4,
     counter: false,
     smoke: false,
     sappers: 1,
@@ -205,11 +208,12 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     builders: 2,
     garrison: 4,
     ratio: 170,
-    firstAttack: 9 * MINUTE,
+    firstAttack: 12 * MINUTE,
     minArmy: 240,
     breakOff: 45,
     odds: 14,
-    raids: 11 * MINUTE,
+    raids: 14 * MINUTE,
+    raidParty: 4,
     counter: true,
     smoke: false,
     sappers: 2,
@@ -229,6 +233,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     breakOff: 45,
     odds: 11,
     raids: 7 * MINUTE,
+    raidParty: 6,
     counter: true,
     smoke: true,
     sappers: 3,
@@ -1901,10 +1906,10 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
       const ifvs = ai.reserve.filter(
         (i) => w.kind[i] === KIND_IFV && w.hp[i] * 2 > KINDS[KIND_IFV].hp,
       );
-      if (ifvs.length < 5) return;
+      if (ifvs.length < tune.raidParty) return;
       const obj = raidTarget(ai, w);
       if (obj === null) return;
-      const party = ifvs.slice(0, 6);
+      const party = ifvs.slice(0, tune.raidParty);
       for (const i of party) ai.role[i] = R_RAID;
       ai.reserve = ai.reserve.filter((i) => ai.role[i] === R_RESERVE);
       f.launch = strength(w, party);

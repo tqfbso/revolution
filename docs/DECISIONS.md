@@ -612,3 +612,22 @@ are what real obstacle belts are for: they do not stop an attack, they decide wh
 comes through. A human can build a sealed ring with gates; the AI gets through one by
 breaching. No minefields in this milestone: an invisible killer needs detection and
 clearing rules first.
+
+## 058 A slower game by longer fights, not slower units
+
+Fabio, 2026-11-12: the game felt too quick to plan fortifications. Movement and the economy
+stay as they are; what changes is how fast things die and how soon fights begin.
+
+- Ground units have 5/3 the health (`TOUGHNESS_NUM/DEN` in units.ts): the same as 40% less
+  damage per shot, without rounding the small whole-number damage tables. Drones keep their
+  health (jamming drains it at a fixed rate); strike drones hit 5/3 harder, so they stay
+  one-shot munitions and a tank still takes two. Buildings and field works are unchanged,
+  so assaulting a wall costs the same, while the men and tanks around it last longer.
+- Field works build in half the time. Tank, artillery, EW, IFV and air defence take
+  longer to produce (tank 22 to 32 s, artillery 26 to 38 s). Prices and income unchanged.
+- First attacks come later on easy (20 min) and normal (12 min), normal raids from 14 min
+  with four IFVs instead of six. Recruit and hard are untouched.
+- Game speed 0.75x or 1x (menu, remembered) and Space to pause. These only change how
+  often ticks run, never what a tick does, so lockstep is unaffected. Orders given while
+  paused wait in the queue and all start on the first tick after resuming; the screen
+  counts them.

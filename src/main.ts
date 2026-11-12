@@ -117,7 +117,31 @@ async function start(): Promise<void> {
     type: 'module',
   });
   const post = (msg: ToWorker) => worker.postMessage(msg);
-  const send = (command: Command) => post({ type: 'command', command });
+  // Pause (Space): the sim stands still; orders wait and all start when play resumes.
+  let paused = false;
+  let queued = 0;
+  const pausedEl = document.getElementById('paused');
+  const pauseBtn = document.getElementById('pause');
+  const showPause = () => {
+    if (pausedEl) {
+      pausedEl.style.display = paused ? 'block' : 'none';
+      pausedEl.innerHTML = `PAUSED<small>${queued === 0 ? 'give orders, they start when you resume' : `${queued} order${queued === 1 ? '' : 's'} waiting`} · Space to resume</small>`;
+    }
+    if (pauseBtn) pauseBtn.textContent = paused ? 'Resume (Space)' : 'Pause (Space)';
+  };
+  const setPaused = (p: boolean) => {
+    paused = p;
+    if (!p) queued = 0;
+    post({ type: 'pause', paused });
+    showPause();
+  };
+  const send = (command: Command) => {
+    post({ type: 'command', command });
+    if (paused) {
+      queued++;
+      showPause();
+    }
+  };
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
     structures.applySnapshot(e.data, performance.now() / 1000);
     works.applySnapshot(e.data);
@@ -159,8 +183,37 @@ async function start(): Promise<void> {
       ? level
       : 'easy';
   const demo = params.get('demo') === '1';
-  const speed = Number(params.get('speed') ?? 1) || 1;
+  // Game speed: `?speed=N` for testing, or the 0.75x / 1x choice on screen (remembered).
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem('revolution.speed');
+  } catch {
+    // storage may be blocked; the default is fine
+  }
+  const speed = Number(params.get('speed') ?? saved ?? 1) || 1;
   post({ type: 'init', seed, units: unitCount, scenario, ai, demo, speed });
+  const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
+  if (speedEl) {
+    if (speed === 0.75 || speed === 1) speedEl.value = String(speed);
+    speedEl.addEventListener('change', () => {
+      post({ type: 'speed', speed: Number(speedEl.value) });
+      try {
+        localStorage.setItem('revolution.speed', speedEl.value);
+      } catch {
+        // not remembered; still applied
+      }
+      speedEl.blur();
+    });
+  }
+  pauseBtn?.addEventListener('click', () => {
+    setPaused(!paused);
+    pauseBtn.blur();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space' || e.repeat) return;
+    e.preventDefault();
+    setPaused(!paused);
+  });
   // The skirmish opens on your headquarters.
   if (scenario === 'skirmish' && map.startX[0] >= 0) {
     rts.look(map.startX[0] * 4 + 14, map.startY[0] * 4 + 10, 95);

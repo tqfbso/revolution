@@ -40,7 +40,10 @@ export type ToWorker =
       /** Game speed, 1 = real time. */
       speed: number;
     }
-  | { type: 'command'; command: Command };
+  | { type: 'command'; command: Command }
+  /** Game speed (0.5 to 16) and pause: both only change when ticks run, never what a tick does. */
+  | { type: 'speed'; speed: number }
+  | { type: 'pause'; paused: boolean };
 
 /** Simulation worker -> main thread, once per simulated tick batch. */
 export interface Snapshot {

@@ -87,7 +87,7 @@ const PLAIN = { spotter: false, stealth: false, jam: 0, kamikaze: false, enginee
 
 const DIRECT = { indirect: false, minRange: 0, blast: 0 };
 
-export const KINDS: readonly UnitKind[] = [
+const BASE_KINDS: readonly UnitKind[] = [
   {
     name: 'Main battle tank',
     cls: CLASS_VEHICLE,
@@ -330,6 +330,26 @@ export const KINDS: readonly UnitKind[] = [
     sight: fx(34),
   },
 ];
+
+/**
+ * Pacing (decision 058): fights last about 1.7 times longer. Rather than shave the damage
+ * tables, which hold small whole numbers, every ground unit is that much tougher: the same
+ * as 40% less damage per shot, with no loss of resolution. Drones keep their health, since
+ * jamming drains it at a fixed rate and a hit kills them either way; strike drones hit harder
+ * by the same factor, so a tank still takes two of them.
+ */
+export const TOUGHNESS_NUM = 5;
+export const TOUGHNESS_DEN = 3;
+
+export const KINDS: readonly UnitKind[] = BASE_KINDS.map((k) => {
+  const scale = (n: number) => Math.round((n * TOUGHNESS_NUM) / TOUGHNESS_DEN);
+  if (k.cls === CLASS_AIR) {
+    // A strike drone is a one-shot munition, not a firefight weapon: it hits as hard against
+    // the tougher targets as it used to against the old ones.
+    return k.kamikaze ? { ...k, damage: k.damage.map(scale) } : k;
+  }
+  return { ...k, hp: scale(k.hp) };
+});
 
 /** How close an engineer squad must be to what it blows up. */
 export const ENGINEER_REACH = fx(7);

@@ -152,6 +152,13 @@ and the engineer has enough to do for now; revisit after play); works inside a t
 streets are possible only where the ground is open; the AI builds no walls or gates and
 does not dig trenches; trucks of the AI do not build works.
 
+## Pacing pass (done, between M8 and M9)
+
+Fabio, 2026-11-12: too quick to think about laying fortifications. Longer fights (ground
+units 1.7x tougher), works build twice as fast, heavy units slower to produce, later and
+smaller first AI attacks on easy and normal, game speed 0.75x/1x and Space to pause with
+orders allowed. Decision 058.
+
 ## M9 Factions
 
 - Three asymmetric factions with distinct units and tech
