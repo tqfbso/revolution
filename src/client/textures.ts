@@ -141,6 +141,8 @@ export interface Textures {
   metal: THREE.DataTexture;
   /** Ripples for the river. */
   water: THREE.DataTexture;
+  /** Four smoke puffs on one sheet (2 x 2): R = density, G = billows inside it. */
+  puffs: THREE.DataTexture;
 }
 
 /** `size` is the edge of the detail textures in pixels: 512 normally, 256 on low quality. */
@@ -250,5 +252,40 @@ export function makeTextures(size: number): Textures {
     const h = fbm(u, v, 6, 4, 701) * 0.7 + fbm(u * 1, v * 2, 14, 2, 719) * 0.3;
     return { h, tone: h, rough: 0.1 };
   });
-  return { noise: noiseTex, grass, dirt, rock, paved, wall, metal, water };
+  return { noise: noiseTex, grass, dirt, rock, paved, wall, metal, water, puffs: makePuffs() };
+}
+
+/** Ragged-edged blobs: what a puff of smoke or a lick of flame looks like from one side. */
+function makePuffs(): THREE.DataTexture {
+  const tile = 128;
+  const size = tile * 2;
+  const px = new Uint8Array(size * size * 4);
+  for (let variant = 0; variant < 4; variant++) {
+    const ox = (variant & 1) * tile;
+    const oy = (variant >> 1) * tile;
+    for (let y = 0; y < tile; y++) {
+      for (let x = 0; x < tile; x++) {
+        const u = (x + 0.5) / tile;
+        const v = (y + 0.5) / tile;
+        const d = Math.hypot(u - 0.5, v - 0.5) * 2;
+        const lumps = fbm(u * 0.5 + variant * 0.25, v * 0.5, 8, 4, 811 + variant * 7);
+        const billow = fbm(u * 0.5, v * 0.5 + variant * 0.25, 14, 3, 853 + variant * 5);
+        // Solid in the middle, eaten away toward the rim by the lumps.
+        const edge = d + (lumps - 0.5) * 0.95;
+        const t = Math.min(1, Math.max(0, (0.92 - edge) / 0.55));
+        const density = t * t * (3 - 2 * t) * (d < 1 ? 1 : 0);
+        const k = ((oy + y) * size + ox + x) * 4;
+        px[k] = Math.round(density * 255);
+        px[k + 1] = Math.round(Math.min(1, Math.max(0, 0.5 + (billow - 0.5) * 1.8)) * 255);
+        px[k + 2] = 0;
+        px[k + 3] = 255;
+      }
+    }
+  }
+  const t = new THREE.DataTexture(px, size, size, THREE.RGBAFormat);
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
 }

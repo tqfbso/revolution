@@ -1,21 +1,53 @@
 // Battle effects: muzzle flashes, tracers, explosions, smoke. Presentation only: driven by
 // the sim's combat events, simulated on the client with ordinary floats and Math.random.
 import * as THREE from 'three/webgpu';
-import { attribute, smoothstep, uv } from 'three/tsl';
+import { attribute, mix, smoothstep, texture, uv, vec2, vec3 } from 'three/tsl';
 import { Batch } from './batch';
+import type { Look } from './look';
 
 const MAX_PARTICLES = 6000;
 const MAX_TRACERS = 3000;
-const FIELDS = 14; // x y z vx vy vz age life size0 size1 r g b alpha
+// x y z vx vy vz age life size0 size1 r g b alpha turn spin gravity
+const FIELDS = 17;
 const ADDITIVE = 0;
 const SMOKE = 1;
+/** The wind that carries smoke and dust, the way the clouds go (world units a second). */
+const WIND_X = 1.5;
+const WIND_Z = 0.6;
+/** Room left under 1 for a sprite's opacity, above which sits the number of its puff. */
+const ALPHA_SCALE = 0.98;
 
-function spriteMaterial(additive: boolean): THREE.MeshBasicNodeMaterial {
+/**
+ * A sprite that faces the camera. With a look it is one of four ragged puffs, picked by
+ * the whole part of the tint's fourth value; without (low quality) a soft round dot.
+ */
+function spriteMaterial(
+  additive: boolean,
+  look: Look | null,
+  cloud: THREE.Node<'float'>,
+): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true });
   const tint = attribute('aTint', 'vec4');
-  m.colorNode = tint.xyz;
-  // Soft round sprite without a texture.
-  m.opacityNode = tint.w.mul(smoothstep(0.08, 0.5, uv().sub(0.5).length()).oneMinus());
+  const alpha = tint.w.fract().div(ALPHA_SCALE);
+  if (look === null) {
+    m.colorNode = tint.xyz;
+    m.opacityNode = alpha.mul(smoothstep(0.08, 0.5, uv().sub(0.5).length()).oneMinus());
+  } else {
+    const puff = tint.w.floor();
+    const at = vec2(puff.mod(2), puff.div(2).floor()).add(uv()).div(2);
+    const t = texture(look.tex.puffs, at);
+    if (additive) {
+      // Fire: white-hot where it is thick, the tint's colour toward the ragged edge.
+      m.colorNode = mix(tint.xyz, vec3(1, 0.95, 0.8), t.x.mul(t.x).mul(0.3)).mul(
+        t.y.mul(0.5).add(0.75),
+      );
+      m.opacityNode = alpha.mul(t.x);
+    } else {
+      // Smoke: darker in its folds, and in the shadow of a cloud like everything else.
+      m.colorNode = tint.xyz.mul(t.y.mul(0.7).add(0.62)).mul(cloud);
+      m.opacityNode = alpha.mul(t.x);
+    }
+  }
   m.depthWrite = false;
   m.fog = false;
   if (additive) m.blending = THREE.AdditiveBlending;
@@ -43,11 +75,12 @@ export class Effects {
   private trN = 0;
   private readonly tracers: Batch;
 
-  constructor() {
+  constructor(look: Look, cloud: THREE.Node<'float'>) {
     const quad = () => new THREE.PlaneGeometry(1, 1);
+    const rich = look.rich ? look : null;
     this.sprites = [
-      new Batch(quad(), spriteMaterial(true), MAX_PARTICLES),
-      new Batch(quad(), spriteMaterial(false), MAX_PARTICLES),
+      new Batch(quad(), spriteMaterial(true, rich, cloud), MAX_PARTICLES),
+      new Batch(quad(), spriteMaterial(false, rich, cloud), MAX_PARTICLES),
     ];
     // A tracer is two crossed quads along +Z, one unit long, stretched per instance.
     const a = new THREE.PlaneGeometry(1, 1).rotateX(Math.PI / 2).translate(0, 0, 0.5);
@@ -108,6 +141,36 @@ export class Effects {
     p[o + 11] = g;
     p[o + 12] = b;
     p[o + 13] = alpha;
+    p[o + 14] = Math.random() * 6.283;
+    // Small things spin fast, a big cloud barely turns.
+    p[o + 15] = (Math.random() - 0.5) * (1.6 / (0.5 + size1));
+    // Sparks (small, shrinking) fall; fireballs and smoke do not.
+    p[o + 16] = kind === ADDITIVE && size0 < 0.3 ? -14 : 0;
+  }
+
+  /** A clod of earth or a piece of plate: dark, thrown up, and it comes down again. */
+  private debris(x: number, y: number, z: number, spread: number, up: number, size: number): void {
+    if (this.thin !== 0 || this.n[SMOKE] >= MAX_PARTICLES * 0.6) return;
+    const life = 0.9 + Math.random() * 0.9;
+    this.emit(
+      SMOKE,
+      x,
+      y,
+      z,
+      rnd(spread),
+      up * (0.5 + Math.random()),
+      rnd(spread),
+      life,
+      size,
+      size * 0.8,
+      0.07,
+      0.06,
+      0.05,
+      1,
+    );
+    const o = (this.n[SMOKE] - 1) * FIELDS;
+    this.p[SMOKE][o + 15] = rnd(7);
+    this.p[SMOKE][o + 16] = -16;
   }
 
   private tracer(
@@ -377,27 +440,52 @@ export class Effects {
     );
   }
 
-  /** A shell landing: a flash, a fountain of earth, splinters, a slow cloud of dust. */
+  /**
+   * A shell landing: a flash, a fountain of earth thrown high, clods that come down again,
+   * splinters, a slow cloud of dust that the wind takes.
+   */
   shellImpact(x: number, y: number, z: number): void {
-    this.emit(ADDITIVE, x, y + 0.6, z, 0, 0, 0, 0.13, 2.4, 5.5, 1, 0.82, 0.5, 1);
-    for (let k = 0; k < 7; k++) {
+    this.emit(ADDITIVE, x, y + 0.3, z, 0, 0, 0, 0.18, 7, 12, 1, 0.65, 0.35, 0.25); // ground glow
+    this.emit(ADDITIVE, x, y + 0.6, z, 0, 0, 0, 0.12, 2.4, 5.5, 1, 0.88, 0.6, 1);
+    for (let k = 0; k < 4; k++) {
       this.emit(
-        SMOKE,
-        x + rnd(0.8),
-        y + 0.4,
-        z + rnd(0.8),
-        rnd(2.5),
-        5 + Math.random() * 7,
-        rnd(2.5),
-        1.6 + Math.random(),
-        1.1,
-        4.2,
-        0.25,
-        0.2,
-        0.15,
-        0.7,
+        ADDITIVE,
+        x + rnd(0.4),
+        y + 0.6,
+        z + rnd(0.4),
+        rnd(2),
+        3 + Math.random() * 4,
+        rnd(2),
+        0.3 + Math.random() * 0.25,
+        1,
+        2.4,
+        1,
+        0.5,
+        0.14,
+        0.9,
       );
     }
+    // The fountain: dark earth, narrow at the foot, spreading as it climbs.
+    for (let k = 0; k < 9; k++) {
+      const up = 6 + Math.random() * 10;
+      this.emit(
+        SMOKE,
+        x + rnd(0.6),
+        y + 0.4,
+        z + rnd(0.6),
+        rnd(2.2),
+        up,
+        rnd(2.2),
+        1.5 + Math.random() * 1.2,
+        0.9,
+        3.2 + up * 0.15,
+        0.17,
+        0.14,
+        0.105,
+        0.85,
+      );
+    }
+    for (let k = 0; k < 9; k++) this.debris(x, y + 0.4, z, 6, 11, 0.12 + Math.random() * 0.18);
     for (let k = 0; k < 10; k++) {
       this.emit(
         ADDITIVE,
@@ -416,7 +504,24 @@ export class Effects {
         1,
       );
     }
-    this.emit(SMOKE, x, y + 0.3, z, 0, 0.5, 0, 3, 2.5, 9, 0.4, 0.35, 0.28, 0.16);
+    for (let k = 0; k < 3; k++) {
+      this.emit(
+        SMOKE,
+        x + rnd(1.5),
+        y + 0.5,
+        z + rnd(1.5),
+        rnd(1),
+        0.6,
+        rnd(1),
+        4 + Math.random() * 2,
+        2.5,
+        9,
+        0.4,
+        0.35,
+        0.28,
+        0.2,
+      );
+    }
   }
 
   /** A burst from an autocannon: three fat tracers and small bursts where they land. */
@@ -469,64 +574,90 @@ export class Effects {
     );
   }
 
-  /** A vehicle brewing up: fireball, sparks, a column of black smoke. */
+  /**
+   * A vehicle brewing up: a flash that lights the ground, a fireball that rolls upward and
+   * turns to black smoke, plates and sparks thrown clear, dust blown out along the ground.
+   */
   explosion(x: number, y: number, z: number): void {
-    this.emit(ADDITIVE, x, y + 0.8, z, 0, 0, 0, 0.16, 3, 7.5, 1, 0.82, 0.5, 1);
-    for (let k = 0; k < 7; k++) {
+    this.emit(ADDITIVE, x, y + 0.3, z, 0, 0, 0, 0.22, 9, 15, 1, 0.6, 0.3, 0.28); // ground glow
+    this.emit(ADDITIVE, x, y + 0.8, z, 0, 0, 0, 0.14, 3, 7.5, 1, 0.9, 0.65, 1);
+    for (let k = 0; k < 9; k++) {
       this.emit(
         ADDITIVE,
-        x + rnd(0.6),
-        y + 0.8,
-        z + rnd(0.6),
-        rnd(3),
-        2 + Math.random() * 4,
-        rnd(3),
-        0.5 + Math.random() * 0.5,
-        1.4,
-        3.4,
+        x + rnd(0.7),
+        y + 0.8 + Math.random() * 0.6,
+        z + rnd(0.7),
+        rnd(3.2),
+        2.5 + Math.random() * 5,
+        rnd(3.2),
+        0.55 + Math.random() * 0.6,
+        1.3,
+        3.6,
         1,
-        0.42,
-        0.1,
-        0.9,
+        0.5,
+        0.12,
+        0.7,
       );
     }
-    for (let k = 0; k < 10; k++) {
+    for (let k = 0; k < 12; k++) {
       this.emit(
         ADDITIVE,
         x,
         y + 1,
         z,
-        rnd(16),
-        4 + Math.random() * 11,
-        rnd(16),
-        0.5 + Math.random() * 0.5,
+        rnd(17),
+        4 + Math.random() * 12,
+        rnd(17),
+        0.5 + Math.random() * 0.6,
         0.2,
         0.04,
         1,
-        0.7,
-        0.35,
+        0.75,
+        0.4,
         1,
       );
     }
-    for (let k = 0; k < 8; k++) {
+    for (let k = 0; k < 7; k++) this.debris(x, y + 0.8, z, 7, 9, 0.16 + Math.random() * 0.2);
+    // The fireball's smoke: rises fast, then hangs and drifts.
+    for (let k = 0; k < 10; k++) {
+      const g = 0.05 + Math.random() * 0.06;
       this.emit(
         SMOKE,
         x + rnd(1),
-        y + 1,
+        y + 1 + Math.random(),
         z + rnd(1),
-        rnd(1.6),
-        2 + Math.random() * 3,
-        rnd(1.6),
-        2.4 + Math.random() * 2,
+        rnd(1.8),
+        2.5 + Math.random() * 4.5,
+        rnd(1.8),
+        3 + Math.random() * 3,
         1.6,
-        6.5,
-        0.1,
-        0.1,
-        0.1,
-        0.6,
+        7,
+        g,
+        g,
+        g,
+        0.75,
       );
     }
-    this.emit(SMOKE, x, y + 0.3, z, 0, 0.3, 0, 2.2, 3, 11, 0.5, 0.46, 0.38, 0.22); // dust ring
+    // Dust blown outward along the ground.
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * 6.283 + rnd(0.3);
+      this.emit(
+        SMOKE,
+        x + Math.cos(a),
+        y + 0.3,
+        z + Math.sin(a),
+        Math.cos(a) * 9,
+        0.4,
+        Math.sin(a) * 9,
+        1.6 + Math.random() * 0.8,
+        1.4,
+        5,
+        0.42,
+        0.37,
+        0.29,
+        0.3,
+      );
+    }
   }
 
   /** A squad going down: dust and a little smoke, nothing theatrical. */
@@ -551,41 +682,47 @@ export class Effects {
     }
   }
 
-  /** One puff of the oily smoke a burning wreck gives off; `heat` 1 = fresh fire. */
+  /**
+   * One puff of the oily smoke a burning wreck gives off; `heat` 1 = fresh fire, when
+   * flames still lick out of it.
+   */
   wreckSmoke(x: number, y: number, z: number, heat: number): void {
+    const g = 0.05 + Math.random() * 0.05;
     this.emit(
       SMOKE,
       x + rnd(0.3),
       y + 0.9,
       z + rnd(0.3),
-      0.7 + rnd(0.3),
-      2 + Math.random(),
-      0.3 + rnd(0.3),
-      3.2 + Math.random() * 1.5,
+      rnd(0.4),
+      2.2 + Math.random() * 1.2,
+      rnd(0.4),
+      4.5 + Math.random() * 2.5,
       0.9,
-      4.2 + heat * 1.5,
-      0.08,
-      0.08,
-      0.085,
-      0.3 + heat * 0.25,
+      5 + heat * 2,
+      g,
+      g,
+      g * 1.05,
+      0.34 + heat * 0.3,
     );
-    if (Math.random() < heat * 0.7) {
-      this.emit(
-        ADDITIVE,
-        x + rnd(0.4),
-        y + 0.8,
-        z + rnd(0.4),
-        rnd(0.4),
-        1.3,
-        rnd(0.4),
-        0.4,
-        0.9,
-        0.3,
-        1,
-        0.45,
-        0.1,
-        0.7,
-      );
+    if (Math.random() < heat * 0.9) {
+      for (let k = 0; k < 2; k++) {
+        this.emit(
+          ADDITIVE,
+          x + rnd(0.5),
+          y + 0.7,
+          z + rnd(0.5),
+          rnd(0.5),
+          1.4 + Math.random(),
+          rnd(0.5),
+          0.35 + Math.random() * 0.3,
+          1.0,
+          0.35,
+          1,
+          0.55,
+          0.14,
+          0.8,
+        );
+      }
     }
   }
 
@@ -604,7 +741,6 @@ export class Effects {
       const m = batch.m;
       const t = batch.t;
       const drag = kind === SMOKE ? Math.exp(-1.6 * dt) : Math.exp(-2.5 * dt);
-      const gravity = kind === SMOKE ? 0 : -14;
       let n = this.n[kind];
       for (let i = 0; i < n;) {
         const o = i * FIELDS;
@@ -616,24 +752,37 @@ export class Effects {
           continue;
         }
         const size0 = p[o + 8];
-        // Sparks (small, shrinking) fall; fireballs and smoke do not.
-        const g = size0 < 0.3 ? gravity : 0;
-        p[o + 3] *= drag;
-        p[o + 4] = p[o + 4] * drag + g * dt;
-        p[o + 5] *= drag;
+        const g = p[o + 16];
+        if (g !== 0) {
+          // Thrown things keep their speed and fall.
+          p[o + 4] += g * dt;
+        } else {
+          p[o + 3] *= drag;
+          p[o + 4] *= drag;
+          p[o + 5] *= drag;
+          if (kind === SMOKE) {
+            // Smoke is taken by the wind.
+            p[o + 3] += (WIND_X - p[o + 3]) * 0.5 * dt;
+            p[o + 5] += (WIND_Z - p[o + 5]) * 0.5 * dt;
+          }
+        }
         const x = (p[o] += p[o + 3] * dt);
         const y = (p[o + 1] += p[o + 4] * dt);
         const z = (p[o + 2] += p[o + 5] * dt);
         const k = age / life;
         const s = size0 + (p[o + 9] - size0) * (1 - (1 - k) * (1 - k));
         const q = i * 16;
-        m[q] = rx * s;
-        m[q + 1] = ry * s;
-        m[q + 2] = rz * s;
+        // Each sprite turns slowly about the line of sight.
+        const turn = (p[o + 14] += p[o + 15] * dt);
+        const cs = Math.cos(turn) * s;
+        const sn = Math.sin(turn) * s;
+        m[q] = rx * cs + ux * sn;
+        m[q + 1] = ry * cs + uy * sn;
+        m[q + 2] = rz * cs + uz * sn;
         m[q + 3] = 0;
-        m[q + 4] = ux * s;
-        m[q + 5] = uy * s;
-        m[q + 6] = uz * s;
+        m[q + 4] = ux * cs - rx * sn;
+        m[q + 5] = uy * cs - ry * sn;
+        m[q + 6] = uz * cs - rz * sn;
         m[q + 7] = 0;
         m[q + 8] = 0;
         m[q + 9] = 0;
@@ -644,11 +793,27 @@ export class Effects {
         m[q + 14] = z;
         m[q + 15] = 1;
         const c = i * 4;
-        t[c] = p[o + 10];
-        t[c + 1] = p[o + 11];
-        t[c + 2] = p[o + 12];
-        // Smoke fades in fast and out slowly; fire just fades out.
-        t[c + 3] = p[o + 13] * (kind === SMOKE ? Math.min(1, k * 8) * (1 - k) : 1 - k * k);
+        if (kind === SMOKE) {
+          t[c] = p[o + 10];
+          t[c + 1] = p[o + 11];
+          t[c + 2] = p[o + 12];
+        } else {
+          // Fire cools as it ages: yellow-white, orange, a dull red at the end.
+          t[c] = p[o + 10];
+          t[c + 1] = p[o + 11] * (1 - 0.6 * k);
+          t[c + 2] = p[o + 12] * (1 - k) * (1 - k);
+        }
+        // Smoke fades in fast and out slowly; fire just fades out; debris stays solid.
+        const fade =
+          g !== 0
+            ? Math.min(1, (1 - k) * 4)
+            : kind === SMOKE
+              ? Math.min(1, k * 8) * (1 - k)
+              : 1 - k * k;
+        t[c + 3] =
+          (((Math.abs(p[o + 15]) * 1e4) | 0) & 3) +
+          Math.min(1, p[o + 13] * fade) * ALPHA_SCALE * 0.999 +
+          0.0005;
         i++;
       }
       this.n[kind] = n;

@@ -688,3 +688,14 @@ play. So the readability layer grows with the realism: past a camera distance of
 map symbol fades in over every visible unit (frame in the army's colour, glyph per type,
 brighter when selected), a constant size on screen, one draw call. Close up there are
 none and the markings on the vehicles do the work.
+
+## 065 Effects with shape, weight and wind
+
+Particles were soft round dots. They are now four ragged puffs on one sheet, each sprite
+turning slowly; fire cools from yellow-white to dull red as it ages; smoke is carried by
+the same wind as the clouds and darkens under them; clods and plates are thrown up and
+fall back. An explosion is a ground flash, a fireball, its black smoke, debris and a ring
+of dust. The particle budget (6000 of each kind) and the thinning of far and unseen
+effects are unchanged, so the cost is one texture read per sprite pixel. On `high` a
+bloom pass lets fire and flashes bleed light; it is the one part that costs a full-screen
+pass, which is why it is not in `normal`.
