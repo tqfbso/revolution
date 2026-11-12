@@ -851,3 +851,24 @@ belongs with the urban work (docs/URBAN.md), not here. Low detail keeps the old 
 
 Measured with 3,000 units in view on software rendering (real frame rates are Fabio's to
 report): 155 draw calls and 640k triangles on normal, 167 on high, 79 and 550k on low.
+
+## 072 Sound, second pass: layers, echo, and a bed for what has no voice
+
+Fabio on the first pass: "ok, not great". Still no files: asset hosts are blocked and
+synthesis keeps the licence question closed. What changed in `src/client/sound.ts`:
+
+- Small arms are layered: a crack, the body of the report, a low thump, a tail. Distance
+  already strips the top end, so close fire now snaps and far fire is the thump alone.
+  Seven takes instead of three: ragged squad bursts, a pair, a single shot, a machine gun.
+- Echo. One shared convolver with a made impulse: four slaps off woods and slopes, then a
+  dark wash. Each voice sends more of itself there the further away it is.
+- A far-battle bed. There are 36 voices and at most a few new ones a tick, so a hundred
+  rifles were three sounds. Every shot that gets no voice (too far, or crowded out) now
+  adds to a level that fades a loop of crackle and rolling thuds in and out. Big fights
+  sound big, including the ones off screen.
+- Ambience: wind in two loops of unequal length, louder from high up; a few birds near
+  the ground that stop when the firing starts.
+
+None of it can be heard in the cloud. Checked offline: every buffer renders finite at
+the expected level, and the page starts sound without errors. Whether it sounds right is
+Fabio's call; the levels to turn are `BED`, the echo send in `at()`, and the bird gain.

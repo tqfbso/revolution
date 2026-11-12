@@ -208,7 +208,8 @@ on the ridge map); its squads ride to the attack in carriers.
 
 - Dressed ground: fields, streets, yards, dirt roads, props; pitched roofs and roof
   clutter; camera angle that changes with zoom; land past the map edge (decision 071).
-- Sound pass 2: see below once built.
+- Sound pass 2: layered small arms, echo that grows with distance, a far-battle bed,
+  wind and birds (decision 072).
 
 ## Urban warfare (planned, not built; order awaits Fabio)
 
