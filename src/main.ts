@@ -15,6 +15,7 @@ import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
 import { Scars } from './client/scars';
+import { Sound } from './client/sound';
 import { StructureView } from './client/structures';
 import { WorksView } from './client/works';
 import { UnitView } from './client/units';
@@ -123,6 +124,8 @@ async function start(): Promise<void> {
   const works = new WorksView(map, terrain, fog, effects, look);
   const scars = new Scars(fog, terrain, look);
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
+  const sound = new Sound();
+  units.sound = sound;
   units.lodNear *= lodScale;
   units.lodFar *= lodScale;
   const rts = new RtsCamera(canvas, terrain);
@@ -353,6 +356,18 @@ async function start(): Promise<void> {
       location.search = params.toString();
     });
   }
+  const pickVolume = document.getElementById('volume') as HTMLSelectElement | null;
+  if (pickVolume) {
+    pickVolume.value = String(
+      [0, 0.35, 0.7, 1].reduce((a, b) =>
+        Math.abs(b - sound.volume) < Math.abs(a - sound.volume) ? b : a,
+      ),
+    );
+    pickVolume.addEventListener('change', () => {
+      sound.setVolume(Number(pickVolume.value));
+      pickVolume.blur();
+    });
+  }
   const helpEl = document.getElementById('help');
   const toggleHelp = () => {
     if (helpEl) helpEl.style.display = helpEl.style.display === 'block' ? 'none' : 'block';
@@ -390,6 +405,8 @@ async function start(): Promise<void> {
     const dt = Math.min(dtMs / 1000, 0.1);
     rts.update(dt);
     units.zoom = rts.distance;
+    const cm = rts.camera.matrixWorld.elements;
+    sound.listen(rts.focus.x, rts.focus.z, rts.distance, cm[0], cm[2]);
     units.update(now, dt, rts.camera);
     structures.update(now / 1000, dt);
     works.update(now / 1000);
@@ -444,6 +461,7 @@ async function start(): Promise<void> {
   // Read by automated performance checks.
   (window as unknown as { __revolution: unknown }).__revolution = {
     stats: hud.stats,
+    sound,
     units,
     structures,
     works,

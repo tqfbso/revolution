@@ -69,6 +69,17 @@ import {
 } from './models';
 import type { StructureView } from './structures';
 import type { Scars } from './scars';
+import {
+  SND_AUTOCANNON,
+  SND_CANNON,
+  SND_COLLAPSE,
+  SND_EXPLOSION,
+  SND_HOWITZER,
+  SND_IMPACT,
+  SND_MISSILE,
+  SND_RIFLE,
+  type Sound,
+} from './sound';
 import type { Terrain } from './terrain';
 
 // Marking colours (linear RGB): red, blue, gold. Hulls stay in service paint.
@@ -368,6 +379,28 @@ export class UnitView {
       }
     }
     this.playEvents(s.events, now / 1000);
+    this.sound?.flush();
+  }
+
+  /** Set by the game once there is sound; without it the battle is silent. */
+  sound: Sound | null = null;
+
+  /** The noise unit `a` makes when it fires. */
+  private report(a: number): void {
+    const sound = this.sound;
+    if (sound === null) return;
+    const kind = this.kind[a];
+    const x = this.renderPos[3 * a];
+    const z = this.renderPos[3 * a + 2];
+    const snd =
+      kind === KIND_ATGM || kind === KIND_STRIKE
+        ? SND_MISSILE
+        : kind === KIND_IFV || kind === KIND_AD
+          ? SND_AUTOCANNON
+          : this.vehicles[kind]
+            ? SND_CANNON
+            : SND_RIFLE;
+    sound.at(snd, x, z, this.fog.sees(x, z));
   }
 
   /** Smoke screens standing on the field. */
@@ -396,7 +429,9 @@ export class UnitView {
       const b = ev[e + 2];
       if (ev[e] === EV_COLLAPSE) {
         const c = this.structures.centreOf(a);
-        if (this.fog.sees(c.x, c.z)) this.structures.collapse(a);
+        const seen = this.fog.sees(c.x, c.z);
+        this.sound?.at(SND_COLLAPSE, c.x, c.z, seen);
+        if (seen) this.structures.collapse(a);
         continue;
       }
       if (ev[e] === EV_UNLOAD) continue;
@@ -417,11 +452,19 @@ export class UnitView {
         const z = unpackY(a);
         this.scars.add(x, z, 1.2 + Math.random() * 0.9, false);
         this.terrain.stamp(x, z, 3.2, 110);
-        if (this.fog.sees(x, z)) fx.shellImpact(x, this.terrain.heightAt(x, z), z);
+        const seen = this.fog.sees(x, z);
+        this.sound?.at(SND_IMPACT, x, z, seen);
+        if (seen) fx.shellImpact(x, this.terrain.heightAt(x, z), z);
         continue;
       }
       if (ev[e] === EV_LAUNCH) {
         this.shotAt[a] = seconds;
+        this.sound?.at(
+          SND_HOWITZER,
+          pos[3 * a],
+          pos[3 * a + 2],
+          this.fog.sees(pos[3 * a], pos[3 * a + 2]),
+        );
         if (this.lodOf[a] === LOD_HIDDEN) continue;
         const m = this.vehicles[this.kind[a]]?.model;
         const d = Math.hypot(unpackX(b) - pos[3 * a], unpackY(b) - pos[3 * a + 2]) || 1;
@@ -445,6 +488,7 @@ export class UnitView {
       if (ev[e] === EV_SIEGE) {
         // Shelling a building or a bridge.
         this.shotAt[a] = seconds;
+        this.report(a);
         if (this.lodOf[a] === LOD_HIDDEN) continue;
         const p = this.structures.hit(b);
         fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
@@ -455,6 +499,8 @@ export class UnitView {
       if (ev[e] === EV_BREACH) {
         // Firing at a field work, or laying a charge against it.
         this.shotAt[a] = seconds;
+        if (KINDS[this.kind[a]].engineer) this.sound?.at(SND_IMPACT, ax, az, this.fog.sees(ax, az));
+        else this.report(a);
         if (this.lodOf[a] === LOD_HIDDEN) continue;
         const px = ((b % 256) + 0.5) * 4;
         const pz = (Math.floor(b / 256) + 0.5) * 4;
@@ -474,6 +520,7 @@ export class UnitView {
       fx.thin = near >= 2 ? 1 : 0;
       if (ev[e] === EV_SHOT) {
         this.shotAt[a] = seconds;
+        this.report(a);
         if (near === LOD_HIDDEN) continue;
         const by = pos[3 * b + 1] + (IS_VEHICLE[this.kind[b]] ? 0.7 : 0.35);
         this.shoot(a, ax, ay, az, pos[3 * b], by, pos[3 * b + 2]);
@@ -483,6 +530,7 @@ export class UnitView {
         if (veh && !air) {
           this.scars.add(ax, az, 2.3, true);
           this.terrain.stamp(ax, az, 2.6, 70);
+          this.sound?.at(SND_EXPLOSION, ax, az, this.fog.sees(ax, az));
         }
         if (near === LOD_HIDDEN) continue;
         if (veh && !air) fx.explosion(ax, ay, az);

@@ -38,14 +38,14 @@ function spriteMaterial(
     const t = texture(look.tex.puffs, at);
     if (additive) {
       // Fire: white-hot where it is thick, the tint's colour toward the ragged edge.
-      m.colorNode = mix(tint.xyz, vec3(1, 0.95, 0.8), t.x.mul(t.x).mul(0.3)).mul(
-        t.y.mul(0.5).add(0.75),
+      m.colorNode = mix(tint.xyz, vec3(1, 0.95, 0.8), t.x.mul(t.x).mul(0.15)).mul(
+        t.y.mul(0.5).add(0.6),
       );
-      m.opacityNode = alpha.mul(t.x);
+      m.opacityNode = alpha.mul(t.x).mul(0.7);
     } else {
       // Smoke: darker in its folds, and in the shadow of a cloud like everything else.
-      m.colorNode = tint.xyz.mul(t.y.mul(0.7).add(0.62)).mul(cloud);
-      m.opacityNode = alpha.mul(t.x);
+      m.colorNode = tint.xyz.mul(t.y.mul(0.5).add(0.5)).mul(cloud);
+      m.opacityNode = alpha.mul(t.x).mul(0.62);
     }
   }
   m.depthWrite = false;
