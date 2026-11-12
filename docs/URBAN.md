@@ -97,12 +97,12 @@ instead of removing it; and the only way to truly take a block is to send infant
 
 ### 4.1 Four states instead of one collapse
 
-| State | How it gets there | Garrison protection | Height and sight | Vehicles |
-| --- | --- | --- | --- | --- |
-| Intact | start | takes 25% of damage (as today) | full: upper floors see and shoot further | blocked |
-| Damaged | structure below 70% | takes 35% | full | blocked |
-| Gutted (shell) | structure below 35% | takes 45% | ground floor only; no height bonus | blocked |
-| Ruin | structure at zero | takes 50%, or 35% once dug in (4.3) | none; concealed like forest | blocked; tracks may cross slowly after engineers clear a lane |
+| State          | How it gets there   | Garrison protection                 | Height and sight                         | Vehicles                                                      |
+| -------------- | ------------------- | ----------------------------------- | ---------------------------------------- | ------------------------------------------------------------- |
+| Intact         | start               | takes 25% of damage (as today)      | full: upper floors see and shoot further | blocked                                                       |
+| Damaged        | structure below 70% | takes 35%                           | full                                     | blocked                                                       |
+| Gutted (shell) | structure below 35% | takes 45%                           | ground floor only; no height bonus       | blocked                                                       |
+| Ruin           | structure at zero   | takes 50%, or 35% once dug in (4.3) | none; concealed like forest              | blocked; tracks may cross slowly after engineers clear a lane |
 
 A ruin cannot be damaged further. That single rule is what makes rubble a fortress: once a
 block is flat, artillery has nothing left to take away, and the men in it have to be dug
@@ -116,8 +116,7 @@ when it becomes a ruin, instead of half at once.
 
 - Three building classes with their own structure: house (brick or timber, 2 to 3 floors,
   450 per cell), apartment or office block (concrete, 4 to 8 floors, 900 per cell),
-  industrial and public (hall, station, town hall, 1,300 per cell). Today everything is
-  220.
+  industrial and public (hall, station, town hall, 1,300 per cell). Today everything is 220.
 - **Wall damage** (new): each building keeps a strength for each of its four faces.
   Direct fire (tank guns, vehicle cannon, rockets) mostly breaks the face it hits and does
   only a quarter of its damage to the structure. A broken face gives the garrison no extra
@@ -272,24 +271,23 @@ are inside), so the target is: **Metropolis at 2,500 units, normal graphics, no 
 the ridge map at 3,000.** None of this can be measured in the cloud (no graphics card), so
 each line below needs Fabio's overlay numbers before it is believed.
 
-| Item | Today | Budget for the city |
-| --- | --- | --- |
-| Building draw calls | one mesh per building (38) | one merged mesh per block and state, 150 at most in view |
-| Building triangles in view | small | 1.5 million on normal, half on low |
-| Props | none | one instanced batch per kind, 25 kinds at most, 10,000 instances, culled by distance |
-| Shadows | every building | buildings always; props only within about 80 m |
-| Far detail | full | beyond about 400 m a block is a box with its facade painted on |
-| Sim tick | about 4 ms at 3,000 units | under 8 ms; the 50 ms budget is not at risk |
-| Map change (a collapse) | rebuilds all passability, drops every flowfield, "a handful of times per game" | hundreds of times per game: must become local and batched once per second |
-| Fog of war rays | open ground | many more blockers; measure before committing |
+| Item                       | Today                                                                          | Budget for the city                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Building draw calls        | one mesh per building (38)                                                     | one merged mesh per block and state, 150 at most in view                             |
+| Building triangles in view | small                                                                          | 1.5 million on normal, half on low                                                   |
+| Props                      | none                                                                           | one instanced batch per kind, 25 kinds at most, 10,000 instances, culled by distance |
+| Shadows                    | every building                                                                 | buildings always; props only within about 80 m                                       |
+| Far detail                 | full                                                                           | beyond about 400 m a block is a box with its facade painted on                       |
+| Sim tick                   | about 4 ms at 3,000 units                                                      | under 8 ms; the 50 ms budget is not at risk                                          |
+| Map change (a collapse)    | rebuilds all passability, drops every flowfield, "a handful of times per game" | hundreds of times per game: must become local and batched once per second            |
+| Fog of war rays            | open ground                                                                    | many more blockers; measure before committing                                        |
 
 ### 5.5 Technical risks, in order
 
 1. **Thousands of units in 12 m streets.** Flowfields move crowds well on open ground and
    may jam in corridors three cells wide. Formations have to fold into columns. This is
    the first thing to prototype, before any art, because it decides street widths.
-2. **Map changes at city frequency.** The full passability rebuild per collapse (decision
-   021) was a sound shortcut for 38 buildings and is not for 800.
+2. **Map changes at city frequency.** The full passability rebuild per collapse (decision 021) was a sound shortcut for 38 buildings and is not for 800.
 3. **Renderer load when zoomed in.** Decision 068 already found fill and shadows to be the
    cost up close; a street canyon is the worst case for both.
 4. **The AI.** It garrisons houses facing a crossing and shells houses before going in. It
@@ -303,14 +301,14 @@ each line below needs Fabio's overlay numbers before it is believed.
 Weights follow the usual scale (light, medium, heavy). Models follow the agreed split:
 Fable 5.2 for core systems, Sonnet 5.5 for features, interface and balance.
 
-| Phase | What Fabio gets | Weight | Model |
-| --- | --- | --- | --- |
+| Phase                        | What Fabio gets                                                                                                                                                                                       | Weight | Model                                                                                                            |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------- |
 | U1 Buildings that die slowly | Four states, building classes, wall and structural damage, ruins that cannot be destroyed further, staged collapse losses, damage looks. On the existing maps. Directly answers "too easy to destroy" | Medium | Sonnet 5.5 (the rules sit in code paths that exist); Fable 5.2 only if the per-face line of sight proves awkward |
-| U2 Hold and take a block | Fortify, repair, barricades, linked buildings and mouseholes, "garrison this block", storming | Heavy | Fable 5.2 for storming and links; Sonnet 5.5 for commands and the command card |
-| U3 Streets | Street and alley terrain, column movement in corridors, local map updates, rubble spill and clearing, a grey-box city generator with districts and sites. Playable but ugly | Heavy | Fable 5.2 |
-| U4 The city's look | Block meshes per state, the prop kit, far-distance facades, roof fade, fires and dust, performance work against the budget | Heavy | Fable 5.2 for the renderer structure; Sonnet 5.5 for the prop kit |
-| U5 Urban AI and urban units | AI that holds blocks, fortifies, storms, routes by street, keeps armour out of unscreened streets; marksman team; top attack; drone rules | Heavy | Fable 5.2 |
-| U6 Tuning after play | Numbers, from Fabio's games | Light | Sonnet 5.5 |
+| U2 Hold and take a block     | Fortify, repair, barricades, linked buildings and mouseholes, "garrison this block", storming                                                                                                         | Heavy  | Fable 5.2 for storming and links; Sonnet 5.5 for commands and the command card                                   |
+| U3 Streets                   | Street and alley terrain, column movement in corridors, local map updates, rubble spill and clearing, a grey-box city generator with districts and sites. Playable but ugly                           | Heavy  | Fable 5.2                                                                                                        |
+| U4 The city's look           | Block meshes per state, the prop kit, far-distance facades, roof fade, fires and dust, performance work against the budget                                                                            | Heavy  | Fable 5.2 for the renderer structure; Sonnet 5.5 for the prop kit                                                |
+| U5 Urban AI and urban units  | AI that holds blocks, fortifies, storms, routes by street, keeps armour out of unscreened streets; marksman team; top attack; drone rules                                                             | Heavy  | Fable 5.2                                                                                                        |
+| U6 Tuning after play         | Numbers, from Fabio's games                                                                                                                                                                           | Light  | Sonnet 5.5                                                                                                       |
 
 U1 is independent and small enough to go next. U2 needs U1. U3 needs neither and can run
 beside U2. U4 needs U3. U5 needs U2 and U3.
