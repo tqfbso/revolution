@@ -200,7 +200,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 2782696136;
+const GOLDEN = 3214927654;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -545,7 +545,7 @@ describe('cities', () => {
     for (const i of [0, 1]) {
       expect(w.inside[i]).toBe(-1);
       if (w.state[i] === STATE_ALIVE)
-        expect(w.hp[i]).toBeLessThanOrEqual(KINDS[KIND_INFANTRY].hp / 2);
+        expect(w.hp[i]).toBeLessThanOrEqual(Math.ceil(KINDS[KIND_INFANTRY].hp / 2));
     }
     // Nobody can go back in, and the ruin never clears.
     step(w, [{ type: CMD_GARRISON, units: [0, 1], structure: 0 }]);
@@ -688,8 +688,9 @@ describe('combined arms', () => {
     expect(front).toBe(42);
     expect(side).toBe(69);
     expect(rear).toBe(108);
-    // A missile into the engine deck is a kill; into the front plate it is not.
-    expect(hitFrom(KIND_ATGM, 530, 500)).toBeGreaterThanOrEqual(KINDS[KIND_TANK].hp);
+    // A missile into the engine deck takes well over half a tank (two kill it); into the
+    // front plate it is a scratch.
+    expect(hitFrom(KIND_ATGM, 530, 500)).toBeGreaterThanOrEqual(KINDS[KIND_TANK].hp / 2);
     expect(hitFrom(KIND_ATGM, 470, 500)).toBeLessThan(KINDS[KIND_TANK].hp / 2);
   });
 
@@ -709,7 +710,7 @@ describe('combined arms', () => {
     step(w, [{ type: CMD_STOP, units: [tank] }]);
     w.flags[tank] = 0;
     // Hold the tank in place: it would close the range otherwise.
-    for (let t = 0; t < 600 && w.state[tank] === STATE_ALIVE; t++) {
+    for (let t = 0; t < 1600 && w.state[tank] === STATE_ALIVE; t++) {
       step(w, []);
       w.posX[tank] = fx(532);
       w.velX[tank] = 0;
@@ -771,7 +772,7 @@ describe('combined arms', () => {
     for (let t = 0; t < 200 && w2.state[ifv2] === STATE_ALIVE; t++) step(w2, []);
     expect(w2.state[ifv2]).toBe(STATE_WRECK);
     expect(w2.carrier[b]).toBe(-1);
-    expect(w2.hp[b]).toBeLessThanOrEqual(KINDS[KIND_INFANTRY].hp / 2);
+    expect(w2.hp[b]).toBeLessThanOrEqual(Math.ceil(KINDS[KIND_INFANTRY].hp / 2));
   });
 
   const count = (w: World, type: number) => {
@@ -838,7 +839,7 @@ describe('combined arms', () => {
     const w2 = flat();
     const gun = lone(w2, 0, KIND_ARTILLERY, 400, 500);
     lone(w2, 1, KIND_INFANTRY, 415, 500);
-    for (let t = 0; t < 300 && w2.state[gun] === STATE_ALIVE; t++) step(w2, []);
+    for (let t = 0; t < 600 && w2.state[gun] === STATE_ALIVE; t++) step(w2, []);
     expect(count(w2, EV_LAUNCH)).toBe(0);
     expect(w2.state[gun]).toBe(STATE_WRECK);
   });

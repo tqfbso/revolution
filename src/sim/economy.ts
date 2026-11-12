@@ -190,11 +190,11 @@ export const UNIT_PRICE: readonly UnitPrice[] = (() => {
   t[KIND_RECON] = price(B_BARRACKS, 1, 50, 0, 30, 12);
   t[KIND_ATGM] = price(B_BARRACKS, 2, 110, 0, 20, 14);
   t[KIND_ENGINEER] = price(B_BARRACKS, 1, 90, 0, 0, 12);
-  t[KIND_IFV] = price(B_WORKS, 1, 130, 60, 0, 16);
-  t[KIND_TANK] = price(B_WORKS, 2, 220, 100, 0, 22);
-  t[KIND_AD] = price(B_WORKS, 2, 160, 60, 60, 18);
-  t[KIND_ARTILLERY] = price(B_WORKS, 3, 200, 80, 100, 26);
-  t[KIND_EW] = price(B_WORKS, 3, 150, 60, 200, 24);
+  t[KIND_IFV] = price(B_WORKS, 1, 130, 60, 0, 20);
+  t[KIND_TANK] = price(B_WORKS, 2, 220, 100, 0, 32);
+  t[KIND_AD] = price(B_WORKS, 2, 160, 60, 60, 22);
+  t[KIND_ARTILLERY] = price(B_WORKS, 3, 200, 80, 100, 38);
+  t[KIND_EW] = price(B_WORKS, 3, 150, 60, 200, 32);
   t[KIND_DRONE] = price(B_DRONES, 2, 40, 0, 60, 10);
   t[KIND_STRIKE] = price(B_DRONES, 3, 60, 10, 80, 10);
   return t;

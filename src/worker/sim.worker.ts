@@ -50,6 +50,8 @@ let lastTime = 0;
 let accumulator = 0;
 /** Game speed: simulated ticks per real tick interval (`?speed=`). */
 let speed = 1;
+/** Paused: no ticks run and orders wait in `pending`; they all start on the first tick after. */
+let paused = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 /** The state of the field works (World.worksRev) the client was last told about. */
 let worksSent = -1;
@@ -73,19 +75,29 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       // `?demo=1`: the AI plays red as well, to watch it at work.
       if (msg.demo) ais.push(createAi(0, msg.ai, msg.seed));
     }
-    speed = Math.min(Math.max(msg.speed, 1), 16);
+    speed = Math.min(Math.max(msg.speed, 0.5), 16);
+    paused = false;
     accumulator = TICK_MS; // run the first tick immediately
     lastTime = performance.now();
     if (timer === undefined) timer = setInterval(pump, 5);
   } else if (msg.type === 'command') {
     // Single player: apply on the next tick. Lockstep will schedule a few ticks ahead instead.
     pending.push(msg.command);
+  } else if (msg.type === 'speed') {
+    speed = Math.min(Math.max(msg.speed, 0.5), 16);
+  } else if (msg.type === 'pause') {
+    paused = msg.paused;
+    lastTime = performance.now();
   }
 };
 
 function pump(): void {
   if (!world) return;
   const now = performance.now();
+  if (paused) {
+    lastTime = now;
+    return;
+  }
   accumulator += (now - lastTime) * speed;
   lastTime = now;
   if (accumulator < TICK_MS) return;
