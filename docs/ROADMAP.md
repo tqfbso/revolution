@@ -159,7 +159,7 @@ units 1.7x tougher), works build twice as fast, heavy units slower to produce, l
 smaller first AI attacks on easy and normal, game speed 0.75x/1x and Space to pause with
 orders allowed. Decision 058.
 
-## M9 Visual realism (in progress)
+## M9 Visual realism (built, awaiting Fabio's test)
 
 Moved ahead of the factions on 2026-11-12 (Fabio agreed). The look was the furthest thing
 from the goal while the game underneath was already fun; textures, lighting and effects
@@ -180,6 +180,10 @@ factions built on placeholder looks would have to be painted twice. Decision 059
 
 All textures and sounds are made in code at start-up (decision 060): nothing to download,
 no licences to track.
+
+Not verified in the cloud, where the browser has no graphics card: the frame rate at
+3,000 and 4,000 units on each graphics level, the WebGPU path, bloom on `high`, and what
+the sounds are like to the ear. The sounds were written without being heard.
 
 ## M10 Factions
 
