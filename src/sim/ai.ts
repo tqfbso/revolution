@@ -1976,7 +1976,7 @@ function chooseObjective(ai: Ai, w: World, x: number, y: number, power: number):
   // enemy who still holds towns pays for a new army while it burns.
   const need = Math.max(
     ai.grudge[MAX_TOWNS],
-    100 + 40 * foeTowns + expect(ai, w, ai.foeX, ai.foeY, 4, 60 + 10 * minute),
+    100 + 40 * foeTowns + expect(ai, w, ai.foeX, ai.foeY, 4, Math.min(300, 60 + 10 * minute)),
   );
   let value = 60;
   if (foeTowns === 0) value += 150;
@@ -1986,7 +1986,9 @@ function chooseObjective(ai: Ai, w: World, x: number, y: number, power: number):
   if (best !== null) return best;
   // Nothing it is sure of. An army that has grown large and has sat for four minutes goes
   // anyway, for the best of what it at least matches: waiting only helps the defender.
-  if (power >= 3 * ai.tune.minArmy && w.tick - ai.lastAttack > 4 * MINUTE) return fallback;
+  // (For the small armies of the lower levels "large" is most of what they may keep.)
+  const large = Math.min(3 * ai.tune.minArmy, 4 * ai.tune.size);
+  if (power >= large && w.tick - ai.lastAttack > 4 * MINUTE) return fallback;
   return null;
 }
 
