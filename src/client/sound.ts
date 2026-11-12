@@ -1,8 +1,13 @@
-// Sound, first pass. Every sample is synthesised at start-up from noise and sine waves (no
+// Sound. Every sample is synthesised at start-up from noise and sine waves (no
 // files, no licences). What makes it sound like a battlefield is what happens between the
 // source and the ear: sound takes time to arrive, loses its top end with distance, and is
 // quieter from the far side of the map, so a gun close by cracks and a barrage three
 // kilometres off is a late, dull rumble.
+//
+// Second pass (decision 072): every shot is layers (crack, body, thump, tail) so that the
+// distance filter has something to strip; an echo off the land that grows with distance; a
+// bed of far-off firing that carries the shots there are no voices for; birds and wind
+// that give way to it.
 
 export const SND_RIFLE = 0;
 export const SND_AUTOCANNON = 1;
@@ -26,6 +31,8 @@ const MAX_VOICES = 36;
 /** Voices in use above which a kind no longer starts: small arms never crowd out a blast. */
 const ROOM = [20, 24, 30, 36, 28, 36, 36, 36];
 const VARIANTS = 3;
+/** The level of the far-battle bed with the whole map firing. */
+const BED = 0.3;
 
 type Shape = (t: number, noise: () => number, state: number[]) => number;
 
@@ -46,7 +53,7 @@ function render(
     s = (Math.imul(s, 1664525) + 1013904223) | 0;
     return s / 2147483648;
   };
-  const state = [0, 0, 0, 0];
+  const state = [0, 0, 0, 0, 0, 0, 0, 0];
   let peak = 0;
   for (let i = 0; i < n; i++) {
     const v = shape(i / rate, noise, state);
@@ -69,22 +76,17 @@ function low(state: number[], slot: number, x: number, k: number): number {
   return (state[slot] += (x - state[slot]) * k);
 }
 
-function makeBuffers(ctx: AudioContext): AudioBuffer[][] {
+export function makeBuffers(ctx: AudioContext): AudioBuffer[][] {
   const out: AudioBuffer[][] = [];
   for (let k = 0; k < SOUNDS; k++) out.push([]);
   for (let v = 0; v < VARIANTS; v++) {
     const j = 1 + (v - 1) * 0.12; // each take a little different in pitch and timing
-    // A rifle squad: a ragged burst of three or four rounds.
+    // A rifle squad: a ragged burst of three or four rounds. Each round is a crack, the
+    // body of the report, a thump you only get close by, and a short tail.
     out[SND_RIFLE].push(
-      render(ctx, 0.6, 11 + v, (t, noise, st) => {
-        let e = 0;
-        for (let r = 0; r < 3 + (v & 1); r++) {
-          const u = t - r * 0.085 * j - (r === 2 ? 0.03 : 0);
-          if (u >= 0) e += Math.exp(-u / 0.018) + 0.25 * Math.exp(-u / 0.09);
-        }
-        const x = noise() * e;
-        return x - low(st, 0, x, 0.08) * 0.9 + low(st, 1, x, 0.02) * 2;
-      }),
+      render(ctx, 0.75, 11 + v, (t, noise, st) =>
+        rounds(t, noise, st, 3 + (v & 1), 0.085 * j, v === 1 ? 0.03 : 0.012),
+      ),
     );
     // An autocannon: three heavy, evenly spaced thumps.
     out[SND_AUTOCANNON].push(
@@ -178,13 +180,150 @@ function makeBuffers(ctx: AudioContext): AudioBuffer[][] {
       }),
     );
   }
+  // More takes of small arms than of anything else, since it is what is heard most: a
+  // pair of aimed shots, one alone, and a machine gun's long burst.
+  out[SND_RIFLE].push(
+    render(ctx, 0.6, 131, (t, noise, st) => rounds(t, noise, st, 2, 0.21, 0)),
+    render(ctx, 0.5, 137, (t, noise, st) => rounds(t, noise, st, 1, 0.1, 0)),
+    render(ctx, 1.0, 139, (t, noise, st) => rounds(t, noise, st, 7, 0.072, 0.004)),
+    render(ctx, 0.9, 149, (t, noise, st) => rounds(t, noise, st, 5, 0.1, 0.02)),
+  );
   return out;
+}
+
+/** `count` small-arms rounds `gap` seconds apart, each a little off the beat by `ragged`. */
+function rounds(
+  t: number,
+  noise: () => number,
+  st: number[],
+  count: number,
+  gap: number,
+  ragged: number,
+): number {
+  let crack = 0;
+  let body = 0;
+  let tail = 0;
+  let thump = 0;
+  for (let r = 0; r < count; r++) {
+    const u = t - r * gap - ragged * ((r * 7) % 3);
+    if (u < 0) continue;
+    crack += Math.exp(-u / 0.004);
+    body += Math.exp(-u / 0.022);
+    tail += Math.exp(-u / 0.11);
+    thump += Math.exp(-u / 0.028) * Math.sin(2 * Math.PI * 150 * u);
+  }
+  const x = noise();
+  // Band-limited body: what is left between a bright and a dark low-pass.
+  const mid = low(st, 0, x, 0.45) - low(st, 1, x, 0.06);
+  return x * crack * 0.9 + mid * body * 1.3 + low(st, 2, x, 0.035) * tail * 1.1 + thump * 0.55;
+}
+
+/** What the land gives back: a few slaps off woods and slopes, then a dark, thinning wash. */
+export function echo(ctx: AudioContext): AudioBuffer {
+  const rate = ctx.sampleRate;
+  const n = Math.floor(rate * 2.4);
+  const buffer = ctx.createBuffer(2, n, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const out = buffer.getChannelData(ch);
+    let s = 7919 + ch * 104729;
+    const noise = () => {
+      s = (Math.imul(s, 1664525) + 1013904223) | 0;
+      return s / 2147483648;
+    };
+    const slaps = ch === 0 ? [0.11, 0.26, 0.43, 0.71] : [0.14, 0.23, 0.49, 0.64];
+    let dark = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / rate;
+      // The wash loses its top end as it dies away.
+      dark += (noise() - dark) * (0.02 + 0.3 * Math.exp(-t / 0.25));
+      let v = dark * Math.exp(-t / 0.55) * Math.min(1, t * 30) * 0.5;
+      for (let k = 0; k < slaps.length; k++) {
+        const u = t - slaps[k];
+        if (u >= 0) v += noise() * Math.exp(-u / 0.012) * (0.55 - k * 0.11);
+      }
+      out[i] = v * (i > n - 2000 ? (n - i) / 2000 : 1);
+    }
+  }
+  return buffer;
+}
+
+/** A battle too far or too crowded to hear shot by shot: crackle over a low rolling thud. */
+export function battle(ctx: AudioContext): AudioBuffer {
+  const shots: number[] = [];
+  const thuds: number[] = [];
+  let s = 4241;
+  const rnd = () => {
+    s = (Math.imul(s, 1664525) + 1013904223) | 0;
+    return (s >>> 8) / 16777216;
+  };
+  // Firing comes in flurries, not evenly.
+  for (let t = 0; t < 9;) {
+    const flurry = 2 + Math.floor(rnd() * 7);
+    for (let k = 0; k < flurry; k++) shots.push(t + k * (0.05 + rnd() * 0.07), 0.3 + rnd() * 0.7);
+    t += 0.12 + rnd() * 0.5;
+  }
+  // Flurries overlap, and the loop below wants them in order.
+  const order = shots.map((_, i) => i).filter((i) => i % 2 === 0);
+  order.sort((a, b) => shots[a] - shots[b]);
+  const sorted = order.flatMap((i) => [shots[i], shots[i + 1]]);
+  shots.length = 0;
+  shots.push(...sorted);
+  for (let t = 0.4; t < 8.2; t += 0.7 + rnd() * 1.6) thuds.push(t, 0.5 + rnd() * 0.5);
+  let first = 0;
+  return render(ctx, 9, 151, (t, noise, st) => {
+    while (first < shots.length && t - shots[first] > 0.25) first += 2;
+    let e = 0;
+    for (let k = first; k < shots.length && shots[k] <= t; k += 2) {
+      e += shots[k + 1] * Math.exp(-(t - shots[k]) / 0.03);
+    }
+    let low2 = 0;
+    for (let k = 0; k < thuds.length; k += 2) {
+      const u = t - thuds[k];
+      if (u >= 0 && u < 2)
+        low2 += thuds[k + 1] * Math.exp(-u / 0.35) * Math.sin(2 * Math.PI * 48 * u);
+    }
+    const x = noise();
+    // Heard through a kilometre of air: nothing above the middle of the band survives.
+    const crackle = (low(st, 0, x, 0.12) - low(st, 1, x, 0.02)) * e;
+    const roll = low(st, 2, x, 0.006) * 3 * (0.5 + low2 * low2);
+    return crackle * 1.6 + low2 * 0.8 + roll;
+  });
+}
+
+/** A few small birds, for when nobody is shooting. */
+export function birds(ctx: AudioContext): AudioBuffer {
+  const calls: number[] = [];
+  let s = 977;
+  const rnd = () => {
+    s = (Math.imul(s, 1664525) + 1013904223) | 0;
+    return (s >>> 8) / 16777216;
+  };
+  for (let t = 0.6; t < 15; t += 1.4 + rnd() * 3.2) {
+    const notes = 2 + Math.floor(rnd() * 5);
+    const pitch = 2600 + rnd() * 2400;
+    const step = 0.09 + rnd() * 0.08;
+    const level = 0.3 + rnd() * 0.7;
+    for (let k = 0; k < notes; k++) calls.push(t + k * step, pitch * (1 + (k % 2) * 0.12), level);
+  }
+  return render(ctx, 16, 157, (t) => {
+    let v = 0;
+    for (let k = 0; k < calls.length; k += 3) {
+      const u = t - calls[k];
+      if (u < 0 || u > 0.07) continue;
+      // Each note slides up and is shaped like a small bell.
+      const f = calls[k + 1] * (1 + u * 4);
+      v += calls[k + 2] * Math.sin(Math.PI * (u / 0.07)) ** 2 * Math.sin(2 * Math.PI * f * u);
+    }
+    return v;
+  });
 }
 
 interface Pending {
   kind: number;
   gain: number;
   delay: number;
+  /** Share of the level sent to the echo as well. */
+  echo: number;
   pan: number;
   cutoff: number;
 }
@@ -198,6 +337,13 @@ export class Sound {
   private voices = 0;
   private pending: Pending[] = [];
   private seq = 0;
+  private wet: GainNode | null = null;
+  private bed: GainNode | null = null;
+  private song: GainNode | null = null;
+  private air: GainNode | null = null;
+  /** How much firing went unvoiced lately: too far, or more than there are voices for. */
+  private heat = 0;
+  private unheard = 0;
   // Where the ear is: the point the camera looks at, raised with the zoom.
   private earX = 0;
   private earZ = 0;
@@ -240,22 +386,57 @@ export class Sound {
     this.master.gain.value = this.volume;
     this.master.connect(squash).connect(ctx.destination);
     this.buffers = makeBuffers(ctx);
+    // One shared echo; each voice sends more of itself there the further off it is.
+    const land = ctx.createConvolver();
+    land.buffer = echo(ctx);
+    this.wet = ctx.createGain();
+    this.wet.gain.value = 0.7;
+    this.wet.connect(land).connect(this.master);
     this.wind(ctx);
+    this.bed = this.loop(ctx, battle(ctx), 0);
+    this.song = this.loop(ctx, birds(ctx), 0);
   }
 
-  /** A bed of wind, so that silence is not digital silence. */
-  private wind(ctx: AudioContext): void {
-    const buffer = render(ctx, 6, 97, (t, noise, st) => {
-      const gust = 0.6 + 0.4 * Math.sin((2 * Math.PI * t) / 6) * Math.sin((2 * Math.PI * t) / 3);
-      return low(st, 1, low(st, 0, noise(), 0.03), 0.03) * gust;
-    });
+  private loop(ctx: AudioContext, buffer: AudioBuffer, level: number): GainNode {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
     const gain = ctx.createGain();
-    gain.gain.value = 0.05;
+    gain.gain.value = level;
     source.connect(gain).connect(this.master!);
     source.start();
+    return gain;
+  }
+
+  /**
+   * A bed of wind, so that silence is not digital silence: two loops of different length,
+   * a dull one and a hissing one, so the gusts never line up the same way twice.
+   */
+  private wind(ctx: AudioContext): void {
+    const dull = render(ctx, 6, 97, (t, noise, st) => {
+      const gust = 0.6 + 0.4 * Math.sin((2 * Math.PI * t) / 6) * Math.sin((2 * Math.PI * t) / 3);
+      return low(st, 1, low(st, 0, noise(), 0.03), 0.03) * gust;
+    });
+    const hiss = render(ctx, 9.7, 101, (t, noise, st) => {
+      const gust = 0.35 + 0.65 * Math.sin((Math.PI * t) / 9.7) ** 2;
+      const x = noise();
+      return (low(st, 0, x, 0.2) - low(st, 1, x, 0.05)) * gust;
+    });
+    this.air = ctx.createGain();
+    this.air.gain.value = 1;
+    this.air.connect(this.master!);
+    for (const [buffer, level] of [
+      [dull, 0.05],
+      [hiss, 0.012],
+    ] as const) {
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = level;
+      source.connect(gain).connect(this.air);
+      source.start();
+    }
   }
 
   setVolume(v: number): void {
@@ -289,11 +470,15 @@ export class Sound {
     const flat = Math.hypot(dx, dz);
     const d = Math.hypot(flat, this.earUp);
     const gain = ((LEVEL[kind] * HALF_LEVEL[kind]) / (HALF_LEVEL[kind] + d)) * (seen ? 1 : 0.5);
-    if (gain < 0.012) return;
+    if (gain < 0.012) {
+      this.unheard += 0.02 * LEVEL[kind];
+      return;
+    }
     this.pending.push({
       kind,
       gain,
       delay: d / SPEED_OF_SOUND,
+      echo: Math.min(0.9, 0.12 + d / 180),
       pan: Math.max(-0.85, Math.min(0.85, (dx * this.rightX + dz * this.rightZ) / (60 + d * 0.6))),
       // Air eats the high frequencies first.
       cutoff: Math.max(180, (seen ? 16000 : 5000) / (1 + (d / 55) ** 1.5)),
@@ -304,37 +489,58 @@ export class Sound {
   flush(): void {
     const ctx = this.ctx;
     const pending = this.pending;
-    if (ctx === null || this.master === null || pending.length === 0) {
+    if (ctx === null || this.master === null) {
       pending.length = 0;
       return;
     }
-    if (ctx.state === 'suspended') void ctx.resume();
-    pending.sort((a, b) => b.gain - a.gain);
-    const started = new Array<number>(SOUNDS).fill(0);
     const now = ctx.currentTime;
-    for (const p of pending) {
-      if (this.voices >= MAX_VOICES) break;
-      if (this.voices >= ROOM[p.kind]) continue;
-      if (started[p.kind] >= PER_TICK[p.kind]) continue;
-      started[p.kind]++;
-      const source = ctx.createBufferSource();
-      source.buffer = this.buffers[p.kind][this.seq++ % VARIANTS];
-      source.playbackRate.value = 0.92 + Math.random() * 0.16;
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = p.cutoff;
-      const gain = ctx.createGain();
-      gain.gain.value = p.gain;
-      const pan = ctx.createStereoPanner();
-      pan.pan.value = p.pan;
-      source.connect(filter).connect(gain).connect(pan).connect(this.master);
-      this.voices++;
-      source.onended = () => {
-        this.voices--;
-        pan.disconnect();
-      };
-      source.start(now + p.delay);
+    if (pending.length > 0) {
+      if (ctx.state === 'suspended') void ctx.resume();
+      pending.sort((a, b) => b.gain - a.gain);
+      const started = new Array<number>(SOUNDS).fill(0);
+      for (const p of pending) {
+        if (
+          this.voices >= MAX_VOICES ||
+          this.voices >= ROOM[p.kind] ||
+          started[p.kind] >= PER_TICK[p.kind]
+        ) {
+          this.unheard += p.gain * 0.35;
+          continue;
+        }
+        started[p.kind]++;
+        const takes = this.buffers[p.kind];
+        const source = ctx.createBufferSource();
+        source.buffer = takes[(this.seq++ * 7) % takes.length];
+        source.playbackRate.value = 0.92 + Math.random() * 0.16;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = p.cutoff;
+        const gain = ctx.createGain();
+        gain.gain.value = p.gain;
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = p.pan;
+        source.connect(filter).connect(gain).connect(pan).connect(this.master);
+        const send = ctx.createGain();
+        send.gain.value = p.echo;
+        gain.connect(send).connect(this.wet!);
+        this.voices++;
+        source.onended = () => {
+          this.voices--;
+          pan.disconnect();
+          send.disconnect();
+        };
+        source.start(now + p.delay);
+      }
+      pending.length = 0;
     }
-    pending.length = 0;
+    // The bed follows the firing that had no voice, rising fast and settling slowly; the
+    // birds stop for it, and are only heard from near the ground in any case.
+    this.heat = this.heat * 0.96 + this.unheard;
+    this.unheard = 0;
+    const battle = 1 - Math.exp(-this.heat / 3);
+    this.bed?.gain.setTargetAtTime(BED * battle, now, 0.4);
+    const near = 1 / (1 + this.earUp / 45);
+    this.song?.gain.setTargetAtTime(0.035 * near * Math.max(0, 1 - battle * 4), now, 1.5);
+    this.air?.gain.setTargetAtTime(0.7 + Math.min(1.3, this.earUp / 90), now, 0.5);
   }
 }
