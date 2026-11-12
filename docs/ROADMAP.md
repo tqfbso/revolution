@@ -191,8 +191,13 @@ Fabio, 2026-11-12: battles were decided by tank count; wants soldiers and drones
 free and fast, vehicles slower, tanks slower still, aircraft slowest. Decision 067: army
 points instead of unit slots, new prices and times, missile teams and drones at tier 1,
 close-range rockets for infantry, a Repeat toggle, a rewritten AI mix. A new map without
-bridge chokepoints and a fix for the slowdown when zoomed in follow in the same thread
-(parts B and C), before M10 Factions.
+bridge chokepoints and a fix for the slowdown when zoomed in followed in the same thread:
+
+- Zoomed-in slowdown (decision 068): puffs at the lens fade out, full-detail units have a
+  budget, soldiers cast fewer shadows, the stats overlay shows where CPU time goes.
+- The ridge map (decision 069): no river, four ways across (road over a ridge, forest
+  belt, ravine, farmland), mirror-symmetric, seven towns. Default for the skirmish; the
+  river map is on the Map menu.
 
 ## M10 Factions
 

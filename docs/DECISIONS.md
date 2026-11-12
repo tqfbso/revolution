@@ -761,3 +761,38 @@ camera distance. Three changes, none of them visible at normal play:
   the near distance shrinks until the count fits and grows back when there is room.
 - Soldiers cast shadows only at full detail (five meshes a squad); vehicles keep theirs one
   level further out.
+
+## 069 A second map with no river: the ridge
+
+Fabio, 2026-11-12: on the river map the battle is too direct, the bridges decide it and
+the ending is obvious. The ridge map (`generateMap(seed, 'ridge')`, the default for the
+skirmish; `?map=river` or the Map menu brings the old one back) has no water at all. The
+armies start in the south-west and north-east corners, 800 m apart, and four ways lead
+across, mostly out of sight of each other:
+
+- the road, through a town on each side and over a ridge in the middle with a town on top;
+  the ridge is a plateau 8 m high with cliffs, a ramp on each long side and a slope at its
+  south-east end, and whoever stands on it sees far;
+- a forest belt in the north-west: infantry cross it anywhere, unseen; vehicles only on two
+  tracks and the rides that join them;
+- open farmland in the south-east: fast, cut by hedgerows with gaps, overlooked by the ridge
+  and by a knoll on each side;
+- a dry ravine between forest and ridge, sunk five metres between sheer walls, hidden
+  behind a berm.
+
+Seven towns (three a side and the one on the ridge) and 22 resource sites; the richer sites
+and half the wells are on the flanks or shared on the centre line, so holding a flank pays
+in fuel, which is what tanks cost (decision 067).
+
+The map is laid out in two axes, A from the north-west corner to the south-east and B from
+one army to the other, and every rule depends on A and |B| only, with symmetric noise: it is
+an exact mirror image of itself across the diagonal. That ends "which side you start on
+matters" for this map. Only the town on the ridge is not mirrored.
+
+The AI needed no new machinery: the map lists its four ways as `lanes`, in the shape of
+the river map's crossings (a forming-up point at each end, the settlement there if any),
+and the AI uses them as it used fords: it picks one by distance, known enemy and enemy
+towns, plus a large random part on this map so that no two attacks need come the same way,
+and it sends raids by a way the army did not take. It pickets and wires its ends of the
+ravine and the farmland like bare fords. Without a river, "its bank" is the half of the map
+nearer its headquarters.

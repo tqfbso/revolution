@@ -3,7 +3,7 @@ import { pass } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
-import { generateMap } from './sim/map';
+import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS } from './sim/world';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
@@ -116,7 +116,11 @@ async function start(): Promise<void> {
     scene.environmentIntensity = 0.55;
     pmrem.dispose();
   }
-  const map = generateMap(seed);
+  // The skirmish is fought on the ridge map unless `?map=river` asks for the old one; the
+  // other scenarios are laid out for the river.
+  const layout: Layout =
+    scenario === 'skirmish' && params.get('map') !== 'river' ? 'ridge' : 'river';
+  const map = generateMap(seed, layout);
   fog.setMap(map);
   const terrain = new Terrain(map, fog, look);
   const effects = new Effects(look, fog.cloud());
@@ -210,7 +214,7 @@ async function start(): Promise<void> {
     // storage may be blocked; the default is fine
   }
   const speed = Number(params.get('speed') ?? saved ?? 1) || 1;
-  post({ type: 'init', seed, units: unitCount, scenario, ai, demo, speed });
+  post({ type: 'init', seed, layout, units: unitCount, scenario, ai, demo, speed });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
   if (speedEl) {
     if (speed === 0.75 || speed === 1) speedEl.value = String(speed);
@@ -246,6 +250,14 @@ async function start(): Promise<void> {
     pickAi.value = ai;
     pickAi.addEventListener('change', () => {
       params.set('ai', pickAi.value);
+      location.search = params.toString();
+    });
+  }
+  const pickMap = document.getElementById('map-pick') as HTMLSelectElement | null;
+  if (pickMap) {
+    pickMap.value = layout;
+    pickMap.addEventListener('change', () => {
+      params.set('map', pickMap.value);
       location.search = params.toString();
     });
   }

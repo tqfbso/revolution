@@ -414,7 +414,11 @@ export class Terrain {
       for (let t = 0; t < map.townCount; t++) {
         const tx = map.townX[t] / 1024;
         const hq = map.startX[side] * CELL;
-        if (tx < MAP_SIZE / 2 !== hq < MAP_SIZE / 2) continue;
+        // Only to the settlements nearer this headquarters than the other one.
+        const ty0 = map.townY[t] / 1024;
+        const near = (k: number) =>
+          Math.hypot(tx - map.startX[k] * CELL, ty0 - map.startY[k] * CELL);
+        if (near(side) > near(1 - side)) continue;
         // Aim for the outer end of the main street.
         const out = hq < tx ? -1 : 1;
         const ex = Math.round((tx + out * (map.townR[t] / 1024 + 8)) / CELL);

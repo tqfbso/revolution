@@ -1,5 +1,6 @@
 import type { AiLevel } from '../sim/ai';
 import type { Command } from '../sim/commands';
+import type { Layout } from '../sim/map';
 
 /** assault: storm a held town. clash: two armies meet head on. roam: stress test. */
 /** skirmish: build a base and beat the AI, which starts with what you start with. */
@@ -32,6 +33,8 @@ export type ToWorker =
   | {
       type: 'init';
       seed: number;
+      /** Which battlefield (see generateMap). */
+      layout: Layout;
       units: number;
       scenario: Scenario;
       /** Who plays blue in the skirmish. */

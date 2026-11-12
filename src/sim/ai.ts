@@ -340,6 +340,10 @@ export interface Ai {
   foeX: number;
   foeY: number;
   crossings: Crossing[];
+  /** The crossings are the map's lanes (no river). */
+  lanes: boolean;
+  /** The crossing its army last marched by, or -1. */
+  armyLane: number;
   /** Per cell row: the cell column of the river, or -1. */
   riverX: Int16Array;
   /** Per town: its houses, the ones facing the crossing first. */
@@ -438,6 +442,8 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     foeX: 0,
     foeY: 0,
     crossings: [],
+    lanes: false,
+    armyLane: -1,
     riverX: new Int16Array(MAP_CELLS).fill(-1),
     houses: [],
     role: new Int8Array(MAX_UNITS).fill(R_NONE),
@@ -648,7 +654,7 @@ function bankOf(ai: Ai, x: number, y: number): number {
   const rx = ai.riverX[clampInt(y >> CELL_SHIFT, 0, MAP_CELLS - 1)];
   if (rx < 0) {
     // No river: the half of the map nearer its own headquarters is "its bank".
-    const near = Math.abs(x - ai.homeX) <= Math.abs(x - ai.foeX);
+    const near = dist(x, y, ai.homeX, ai.homeY) <= dist(x, y, ai.foeX, ai.foeY);
     return near ? ai.side : 1 - ai.side;
   }
   return x >> CELL_SHIFT < rx ? 0 : 1;
@@ -674,7 +680,9 @@ function setUp(ai: Ai, w: World): boolean {
   ai.foeY = structY(map, foe);
   ai.side = ai.homeX < ai.foeX ? 0 : 1;
   ai.fwd = ai.side === 0 ? 1 : -1;
-  ai.crossings = findCrossings(map, ai.riverX);
+  // A map without a river says itself which ways lead across; they are used like fords.
+  ai.crossings = map.lanes.length > 0 ? map.lanes : findCrossings(map, ai.riverX);
+  ai.lanes = map.lanes.length > 0;
   ai.houses = [];
   ai.garr = [];
   for (let t = 0; t < map.townCount; t++) {
@@ -1758,12 +1766,19 @@ function route(ai: Ai, w: World, x: number, y: number, obj: Objective, raid: boo
     // Raiders keep clear of settlements altogether; the hard AI varies its line of march.
     if (raid && town >= 0) cost += 400;
     if (ai.level === 'hard') cost += nextInt(ai.rng, 40);
+    if (ai.lanes) {
+      // Several ways, none of them obvious: no two attacks need come the same way, and a
+      // raid goes where the army does not.
+      cost += nextInt(ai.rng, 220);
+      if (raid && k === ai.armyLane) cost += 300;
+    }
     if (best < 0 || cost < bestCost) {
       best = k;
       bestCost = cost;
     }
   }
   const c = ai.crossings[best];
+  if (!raid) ai.armyLane = best;
   // The way points end short of the objective: the last leg is the assault itself. A
   // town that is its own bridgehead is assaulted straight from the near bank.
   if (dist(c.bankX[to], c.bankY[to], obj.x, obj.y) < fx(60)) return [c.bankX[from], c.bankY[from]];

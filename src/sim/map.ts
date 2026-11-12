@@ -1,7 +1,7 @@
 // The battlefield: an integer heightfield plus a terrain type per 4-unit cell. Generated
 // from the seed with integer arithmetic only, so the simulation (passability) and every
 // client (what is drawn) derive the identical map without sending it over the wire.
-import { FP_SHIFT, clampInt, fx } from './fixed';
+import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
 
 // Map is a square of MAP_SIZE world units. Sim (x, y) maps to render (x, z).
 export const MAP_SIZE = 1024;
@@ -109,6 +109,11 @@ export interface GameMap {
   sEast: Int32Array;
   /** Structure occupying each cell, or -1. Stays set after the structure is destroyed. */
   structAt: Int16Array;
+  /**
+   * Ways between the two halves of a map without a river, for the AI to choose from (see
+   * Lane). Empty on the river map, where it finds the fords itself.
+   */
+  lanes: Lane[];
   /** Towns: capture zones, each a circle (centre and radius, fixed-point). */
   townCount: number;
   townX: Int32Array;
@@ -164,6 +169,21 @@ export interface GameMap {
   startY: Int32Array;
 }
 
+/** Which battlefield: the river with its fords and bridges, or the ridge with its four ways. */
+export type Layout = 'river' | 'ridge';
+
+/**
+ * One way from the west half of a map to the east half: where an army forms up at its west
+ * and its east end, the point half way, and the settlement at each end (-1 for none).
+ */
+export interface Lane {
+  x: number;
+  y: number;
+  bankX: [number, number];
+  bankY: [number, number];
+  town: [number, number];
+}
+
 function lattice(x: number, y: number, seed: number): number {
   let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(seed, 0x9e3779b1);
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
@@ -197,8 +217,12 @@ const RIVER_HALF_WIDTH = fx(7);
 const MESA_HEIGHT = fx(9);
 const HALF = fx(MAP_SIZE / 2);
 
-/** Build the map for a seed: rolling ground, a river with fords, mesas, lakes, forests. */
-export function generateMap(seed: number): GameMap {
+/**
+ * Build the map for a seed. `river`: rolling ground, a river with fords, mesas, lakes,
+ * forests. `ridge`: see generateRidge.
+ */
+export function generateMap(seed: number, layout: Layout = 'river'): GameMap {
+  if (layout === 'ridge') return generateRidge(seed);
   const s = seed | 0;
   const heights = new Int32Array(MAP_VERTS * MAP_VERTS);
   const fords: number[] = [];
@@ -294,6 +318,334 @@ export function generateMap(seed: number): GameMap {
   placeCrossing(map, s, fords[3] - 9, 3, 1, 'South');
   finishMap(map);
   placeSites(map);
+  return map;
+}
+
+// ------------------------------------------------------------------ the ridge map
+//
+// No river and no bridges (Fabio, 2026-11-12: the river map was too direct). The armies set
+// up in the south-west and the north-east corner. Everything is laid out along two axes:
+// A = x + y - 1024 runs from the north-west corner (negative) to the south-east one, and
+// B = x - y runs from the west army (negative) to the east army. Every rule below depends on
+// A and |B| only, and the noise is made symmetric, so the map is an exact mirror image of
+// itself across the north-west to south-east diagonal: neither side has the better ground.
+// (A and B are 1.41 times a distance in metres.)
+//
+// Four ways lead across, mostly out of sight of each other:
+//  - the road over a ridge in the centre, through the town on top of it;
+//  - a forest belt in the north-west that men cross anywhere, unseen, and vehicles only on
+//    two tracks;
+//  - open farmland in the south-east, fast, cut by hedgerows, in view of the ridge;
+//  - a dry ravine between the ridge and the forest, sunk below the ground around it.
+
+const RIDGE_A0 = -134;
+const RIDGE_A1 = 177;
+const RIDGE_B = 110;
+const RIDGE_TOP = fx(12.5);
+const RAVINE_A = -205;
+const RAVINE_FLOOR = 11;
+const RAVINE_WALL = 5;
+const RAVINE_MOUTH0 = 290;
+const RAVINE_MOUTH1 = 350;
+const TRACK_A = -410;
+const TRACK2_A = -545;
+/** The west army's headquarters, in A and B. The east army's is its mirror image. */
+const BASE_B = 566;
+
+/** World position (fixed point) of the point at A and B. */
+function ab(a: number, b: number): [number, number] {
+  return [fx(512) + ((a + b) << (FP_SHIFT - 1)), fx(512) + ((a - b) << (FP_SHIFT - 1))];
+}
+
+const symNoise = (x: number, y: number, shift: number, seed: number) =>
+  (noise(x, y, shift, seed) + noise(y, x, shift, seed)) >> 1;
+
+/** How much of the ridge's plateau a point is on, 0..1024. */
+function ridgePlateau(a: number, b: number): number {
+  // The long sides are cliffs, except where the road climbs them on a ramp.
+  const ramp = smooth(clampInt((44 - Math.abs(a - 20)) * 102, 0, 1024));
+  const wB = 6 + ((56 * ramp) >> 10);
+  const eB = clampInt(Math.trunc(((RIDGE_B + wB - b) * 1024) / wB), 0, 1024);
+  // The north-west end drops sheer toward the ravine; the south-east end slopes into the fields.
+  const eN = clampInt(Math.trunc(((a - RIDGE_A0) * 1024) / 6), 0, 1024);
+  const eS = clampInt(Math.trunc(((RIDGE_A1 - a) * 1024) / 64), 0, 1024);
+  return (((smooth(eB) * smooth(eN)) >> 10) * smooth(eS)) >> 10;
+}
+
+function ridgeHeight(vx: number, vy: number, s: number): number {
+  const a = (vx + vy) * 4 - MAP_SIZE;
+  const b = Math.abs(vx - vy) * 4;
+  const base = Math.trunc(
+    (symNoise(vx, vy, 6, s) * 8 +
+      symNoise(vx, vy, 5, s + 3) * 4 +
+      symNoise(vx, vy, 4, s + 4) * 2 +
+      symNoise(vx, vy, 3, s + 5)) /
+      15,
+  );
+  // Rolling ground, flatter in the farmland.
+  const flat = clampInt((a - 150) * 4, 0, 512);
+  let h = fx(4.5) + (((base - 512) * 9 * (1024 - flat)) >> 10);
+  // A knoll on each side that overlooks the fields and that side's end of the road.
+  const ka = a - 240;
+  const kb = b - 285;
+  const knoll = clampInt(1024 - Math.trunc((isqrt(ka * ka + kb * kb) * 1024) / 120), 0, 1024);
+  h += (fx(5) * smooth(knoll)) >> 10;
+  const plateau = ridgePlateau(a, b);
+  h += ((RIDGE_TOP - h) * plateau) >> 10;
+  // The ravine: a berm of spoil along it, then a flat floor between sheer walls, rising to
+  // the ground at both mouths.
+  const dA = Math.abs(a - RAVINE_A);
+  if (b < RAVINE_MOUTH1 && dA < 60) {
+    const e = smooth(
+      clampInt(Math.trunc(((b - RAVINE_MOUTH0) * 1024) / (RAVINE_MOUTH1 - RAVINE_MOUTH0)), 0, 1024),
+    );
+    h += (((fx(2) * clampInt((60 - dA) * 34, 0, 1024)) >> 10) * (1024 - e)) >> 10;
+    if (dA < RAVINE_FLOOR + RAVINE_WALL) {
+      const t =
+        dA <= RAVINE_FLOOR ? 0 : smooth(Math.trunc(((dA - RAVINE_FLOOR) * 1024) / RAVINE_WALL));
+      const floor = fx(0.8) + (((h - fx(0.8)) * e) >> 10);
+      const carved = floor + (((h - floor) * t) >> 10);
+      if (carved < h) h = carved;
+    }
+  }
+  return h;
+}
+
+/** Whether trees stand on the cell at (cx, cy) of the ridge map. */
+function ridgeForest(cx: number, cy: number, s: number): boolean {
+  const a = (cx + cy) * 4 + 4 - MAP_SIZE;
+  const b = Math.abs(cx - cy) * 4;
+  // Nothing on the ridge, along the ravine, on the road, or around the two bases.
+  if (ridgePlateau(a, b) > 0) return false;
+  if (Math.abs(a - RAVINE_A) < 70 && b < RAVINE_MOUTH1 + 20) return false;
+  if (Math.abs(a - 15) < 16) return false;
+  const db = b - BASE_B;
+  if (a * a + db * db < 2 * 85 * 85) return false;
+  const f = Math.trunc(
+    (symNoise(cx, cy, 5, s + 21) * 2 + symNoise(cx, cy, 4, s + 22) + symNoise(cx, cy, 3, s + 23)) /
+      4,
+  );
+  if (a < -240) {
+    // Two tracks lead through the forest belt, and out through whatever stands beyond it.
+    const wig = (noise(b >> 3, 7, 3, s + 40) - 512) >> 5;
+    if (Math.abs(a - TRACK_A + wig) < 9) return false;
+    if (Math.abs(a - TRACK2_A - wig) < 9) return false;
+    // The second track would end at the map's edge: rides join it to the first and to the
+    // open ground, one on each army's side and one down the middle.
+    if (a > TRACK2_A - 20 && Math.abs(b - 420) < 8) return false;
+    if (a > TRACK2_A - 20 && a < TRACK_A + 10 && b < 8) return false;
+  }
+  if (a < -240 && b < 480) {
+    // The forest belt: dense, thinning toward its edges.
+    const edge = Math.min(-240 - a, 480 - b);
+    return f > 330 + Math.max(0, 60 - edge) * 5;
+  }
+  if (a > 210) {
+    // Farmland: hedgerows across the line of advance, with a gap every sixty metres or so.
+    const row = Math.trunc(b / 112);
+    return b > 60 && b % 112 < 6 && (a + row * 47) % 96 >= 30;
+  }
+  // Elsewhere a copse here and there.
+  return f > 645;
+}
+
+/**
+ * A settlement around cell (cx, cy): `cols` by 2 x `rows` lots either side of a main street.
+ * `flip` mirrors it across the diagonal (the street then runs north-south), so that the
+ * two armies' towns are exact mirror images.
+ */
+function placeSettlement(
+  map: GameMap,
+  seed: number,
+  cx: number,
+  cy: number,
+  cols: number,
+  rows: number,
+  name: string,
+  flip: boolean,
+): number {
+  const type = map.type;
+  const at = (x: number, y: number): [number, number] => (flip ? [y, x] : [x, y]);
+  const x0 = cx - ((cols * LOT) >> 1);
+  const y0 = cy - 2;
+  const [tx, ty] = at(cx, cy);
+  const town = addTown(
+    map,
+    (tx << CELL_SHIFT) + (CELL_FX >> 1),
+    (ty << CELL_SHIFT) + (CELL_FX >> 1),
+    fx(cols * LOT * 2 + 10),
+    name,
+  );
+  for (let y = y0 - rows * LOT - 2; y <= y0 + 5 + rows * LOT; y++) {
+    for (let x = x0 - 2; x <= x0 + cols * LOT + 2; x++) {
+      const [px, py] = at(x, y);
+      if (px < 0 || py < 0 || px >= MAP_CELLS || py >= MAP_CELLS) continue;
+      if (type[py * MAP_CELLS + px] === T_FOREST) type[py * MAP_CELLS + px] = T_OPEN;
+    }
+  }
+  for (let i = 0; i < cols; i++) {
+    for (let j = 0; j < 2 * rows; j++) {
+      // Lots north of the street (four rows stay free) and south of it.
+      const ly = j < rows ? y0 - LOT * (j + 1) : y0 + 4 + LOT * (j - rows);
+      const lx = x0 + i * LOT;
+      const h = lattice(lx, ly, seed + 31);
+      if (h % 100 < 14) continue;
+      const w = 2 + ((h >> 8) & 1);
+      const d = 2 + ((h >> 9) & 1);
+      const bx = lx + 1 + (w === 2 ? (h >> 7) & 1 : 0);
+      const by = ly + 1 + (d === 2 ? (h >> 6) & 1 : 0);
+      const [px, py] = at(bx, by);
+      const pw = flip ? d : w;
+      const pd = flip ? w : d;
+      if (px < 2 || py < 2 || px + pw > MAP_CELLS - 2 || py + pd > MAP_CELLS - 2) continue;
+      if (!levelPlot(map, px, py, pw, pd)) continue;
+      const floors = 2 + ((h >> 3) % 3) + (cols > 3 && j % rows === 0 ? 1 : 0);
+      addStructure(map, S_BUILDING, px, py, pw, pd, town, floors);
+    }
+  }
+  return town;
+}
+
+/** Put a resource site as near to world point (wx, wy) as open ground allows. */
+function addSite(map: GameMap, kind: number, stock: number, wx: number, wy: number): void {
+  if (map.siteCount >= MAX_SITES) return;
+  const open = (x: number, y: number) => {
+    if (x < 2 || y < 2 || x >= MAP_CELLS - 2 || y >= MAP_CELLS - 2) return false;
+    for (let j = y - 1; j <= y + 1; j++) {
+      for (let i = x - 1; i <= x + 1; i++) {
+        const c = j * MAP_CELLS + i;
+        if (map.type[c] !== T_OPEN || map.cost[CLASS_VEHICLE][c] === 0) return false;
+      }
+    }
+    for (let k = 0; k < map.siteCount; k++) {
+      const dx = (map.siteX[k] >> CELL_SHIFT) - x;
+      const dy = (map.siteY[k] >> CELL_SHIFT) - y;
+      if (dx * dx + dy * dy < 25) return false;
+    }
+    for (let t = 0; t < 2; t++) {
+      const dx = x - map.startX[t];
+      const dy = y - map.startY[t];
+      if (dx >= -3 && dx <= START_PLOT + 2 && dy >= -3 && dy <= START_PLOT + 2) return false;
+    }
+    return true;
+  };
+  const c = findCell(
+    clampInt(wx >> CELL_SHIFT, 2, MAP_CELLS - 3),
+    clampInt(wy >> CELL_SHIFT, 2, MAP_CELLS - 3),
+    30,
+    open,
+  );
+  if (c < 0) return;
+  const k = map.siteCount++;
+  map.siteX[k] = ((c % MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
+  map.siteY[k] = (Math.trunc(c / MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
+  map.siteKind[k] = kind;
+  map.siteStock[k] = stock;
+}
+
+/** What there is to haul on the ridge map, in metres for the west army; mirrored for the east. */
+const RIDGE_SITES: readonly (readonly [kind: number, stock: number, x: number, y: number])[] = [
+  // By the headquarters.
+  [SITE_SUPPLIES, 8000, 190, 832],
+  [SITE_SUPPLIES, 8000, 262, 846],
+  [SITE_FUEL, 200, 196, 758],
+  // Behind the town on its end of the road: the richest, and nearest the fighting.
+  [SITE_SUPPLIES, 16000, 306, 704],
+  [SITE_FUEL, 200, 330, 734],
+  // In the forest and out in the fields: a long drive, and away from the road.
+  [SITE_SUPPLIES, 12000, 134, 492],
+  [SITE_FUEL, 200, 178, 484],
+  [SITE_SUPPLIES, 12000, 618, 892],
+  [SITE_FUEL, 200, 672, 898],
+];
+/** On the diagonal, as far from one army as from the other: whoever holds the flank has them. */
+const RIDGE_SHARED: readonly (readonly [kind: number, stock: number, a: number])[] = [
+  [SITE_SUPPLIES, 10000, TRACK_A],
+  [SITE_FUEL, 200, TRACK_A - 60],
+  [SITE_SUPPLIES, 10000, 520],
+  [SITE_FUEL, 200, 580],
+];
+
+/** The ridge map (see the notes above). */
+function generateRidge(seed: number): GameMap {
+  const s = seed | 0;
+  const heights = new Int32Array(MAP_VERTS * MAP_VERTS);
+  for (let vy = 0; vy < MAP_VERTS; vy++) {
+    for (let vx = vy; vx < MAP_VERTS; vx++) {
+      const h = ridgeHeight(vx, vy, s);
+      heights[vy * MAP_VERTS + vx] = h;
+      heights[vx * MAP_VERTS + vy] = h;
+    }
+  }
+  const type = new Uint8Array(CELL_COUNT);
+  for (let cy = 0; cy < MAP_CELLS; cy++) {
+    for (let cx = cy; cx < MAP_CELLS; cx++) {
+      const v = cy * MAP_VERTS + cx;
+      const a = heights[v];
+      const b = heights[v + 1];
+      const c = heights[v + MAP_VERTS];
+      const d = heights[v + MAP_VERTS + 1];
+      let t = T_OPEN;
+      if (Math.max(a, b, c, d) - Math.min(a, b, c, d) > fx(2.6)) t = T_CLIFF;
+      else if (ridgeForest(cx, cy, s)) t = T_FOREST;
+      type[cy * MAP_CELLS + cx] = t;
+      type[cx * MAP_CELLS + cy] = t;
+    }
+  }
+  // Room for the resource sites that lie among the trees.
+  const clear = (wx: number, wy: number) => {
+    const cx = wx >> 2;
+    const cy = wy >> 2;
+    for (let y = cy - 3; y <= cy + 3; y++) {
+      for (let x = cx - 3; x <= cx + 3; x++) {
+        if (x < 0 || y < 0 || x >= MAP_CELLS || y >= MAP_CELLS) continue;
+        if (type[y * MAP_CELLS + x] === T_FOREST) type[y * MAP_CELLS + x] = T_OPEN;
+      }
+    }
+  };
+  for (const [, , x, y] of RIDGE_SITES) {
+    clear(x, y);
+    clear(y, x);
+  }
+  for (const [, , a] of RIDGE_SHARED) clear((a + MAP_SIZE) >> 1, (a + MAP_SIZE) >> 1);
+
+  const map = newMap(heights, type);
+  // Towns in pairs, the west army's first (the AI counts on that), the one on the ridge last.
+  placeSettlement(map, s, 89, 170, 3, 1, 'Westgate', false);
+  placeSettlement(map, s, 89, 170, 3, 1, 'Eastgate', true);
+  placeSettlement(map, s, 161, 214, 2, 1, 'Lower Field', false);
+  placeSettlement(map, s, 161, 214, 2, 1, 'Upper Field', true);
+  placeSettlement(map, s, 38, 114, 2, 1, 'West Timber', false);
+  placeSettlement(map, s, 38, 114, 2, 1, 'East Timber', true);
+  placeSettlement(map, s, 130, 130, 4, 2, 'Ridgetop', false);
+  finishMap(map);
+
+  const west = findCell(57, 198, 30, (x, y) => canPlace(map, x, y, START_PLOT, START_PLOT));
+  if (west >= 0) {
+    map.startX[0] = west % MAP_CELLS;
+    map.startY[0] = Math.trunc(west / MAP_CELLS);
+    // The mirror image of a plot is a plot: the map is symmetric.
+    map.startX[1] = map.startY[0];
+    map.startY[1] = map.startX[0];
+  }
+  for (const [kind, stock, x, y] of RIDGE_SITES) {
+    addSite(map, kind, stock, fx(x), fx(y));
+    addSite(map, kind, stock, fx(y), fx(x));
+  }
+  for (const [kind, stock, a] of RIDGE_SHARED) addSite(map, kind, stock, ...ab(a, 0));
+
+  const lane = (a: number, b: number, townW: number, townE: number): Lane => {
+    const [wx, wy] = townW >= 0 ? [map.townX[townW], map.townY[townW]] : ab(a, -b);
+    const [ex, ey] = townE >= 0 ? [map.townX[townE], map.townY[townE]] : ab(a, b);
+    const [x, y] = ab(a, 0);
+    return { x, y, bankX: [wx, ex], bankY: [wy, ey], town: [townW, townE] };
+  };
+  map.lanes = [
+    lane(20, 325, 0, 1), // the road over the ridge
+    lane(TRACK_A, 305, 4, 5), // the forest track
+    lane(RAVINE_A, RAVINE_MOUTH1 + 30, -1, -1), // the ravine
+    lane(430, 330, -1, -1), // the farmland
+  ];
   return map;
 }
 
@@ -453,6 +805,7 @@ function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     sBase: new Int32Array(MAX_STRUCTS),
     sEast: new Int32Array(MAX_STRUCTS),
     structAt: new Int16Array(CELL_COUNT).fill(-1),
+    lanes: [],
     townCount: 0,
     townX: new Int32Array(MAX_TOWNS),
     townY: new Int32Array(MAX_TOWNS),

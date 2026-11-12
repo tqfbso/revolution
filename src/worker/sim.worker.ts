@@ -3,6 +3,7 @@
 import { aiThink, createAi, type Ai } from '../sim/ai';
 import type { Command } from '../sim/commands';
 import { fromFx } from '../sim/fixed';
+import { generateMap } from '../sim/map';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, UNIT_PRICE } from '../sim/economy';
 import {
   assaultCommands,
@@ -59,7 +60,7 @@ let worksSent = -1;
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   if (msg.type === 'init') {
-    world = createWorld(msg.seed);
+    world = createWorld(msg.seed, generateMap(msg.seed, msg.layout));
     worksSent = -1;
     pending =
       msg.scenario === 'roam'
