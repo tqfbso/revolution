@@ -11,6 +11,7 @@ import {
   stressTestCommands,
 } from '../sim/scenarios';
 import { KINDS } from '../sim/units';
+import { WORKS } from '../sim/works';
 import { step } from '../sim/sim';
 import {
   FLAG_MOVING,
@@ -50,11 +51,14 @@ let accumulator = 0;
 /** Game speed: simulated ticks per real tick interval (`?speed=`). */
 let speed = 1;
 let timer: ReturnType<typeof setInterval> | undefined;
+/** The state of the field works (World.worksRev) the client was last told about. */
+let worksSent = -1;
 
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   if (msg.type === 'init') {
     world = createWorld(msg.seed);
+    worksSent = -1;
     pending =
       msg.scenario === 'roam'
         ? stressTestCommands(msg.units)
@@ -199,6 +203,23 @@ function postSnapshot(w: World, simMs: number): void {
     bases: Int32Array.from(bases),
     simMs,
   };
+  if (w.worksRev !== worksSent && w.tick % 2 === 0) {
+    worksSent = w.worksRev;
+    const works = new Int32Array(w.workCount * 2);
+    for (let k = 0; k < w.workCount; k++) {
+      const c = w.workCells[k];
+      const work = WORKS[w.wKind[c]];
+      const done = w.wBuild[c] >= work.ticks;
+      const value = done
+        ? work.hp > 0
+          ? Math.ceil((w.wHp[c] * 255) / work.hp)
+          : 255
+        : Math.floor((w.wBuild[c] * 100) / work.ticks);
+      works[2 * k] = c;
+      works[2 * k + 1] = w.wKind[c] | (w.wTeam[c] << 4) | (done ? 128 : 0) | (value << 8);
+    }
+    snapshot.works = works;
+  }
   if (w.tick % TICK_RATE === 0) snapshot.hash = hashWorld(w);
   self.postMessage(snapshot, {
     transfer: [

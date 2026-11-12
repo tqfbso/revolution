@@ -6,12 +6,15 @@ import {
   T_CLIFF,
   T_FORD,
   T_FOREST,
+  T_GATE,
+  T_WALL,
   T_WATER,
   type GameMap,
 } from '../sim/map';
 import type { Fog } from './fog';
 import type { StructureView } from './structures';
 import type { UnitView } from './units';
+import type { WorksView } from './works';
 
 const N = MAP_CELLS;
 const TERRAIN_RGB: Record<number, [number, number, number]> = {
@@ -52,6 +55,7 @@ export class Minimap {
     order: (x: number, z: number, attack: boolean) => void,
     private readonly structures: StructureView,
     private readonly map: GameMap,
+    private readonly works: WorksView,
   ) {
     canvas.width = canvas.height = N;
     this.ctx = canvas.getContext('2d')!;
@@ -89,7 +93,7 @@ export class Minimap {
   /** Terrain colours. Redone when a building falls or a bridge is cut: the map changes. */
   private paintBase(): void {
     const map = this.map;
-    this.baseVersion = this.structures.version;
+    this.baseVersion = this.structures.version + this.works.version;
     for (let c = 0; c < N * N; c++) {
       let rgb = TERRAIN_RGB[map.baseType[c]] ?? OPEN_RGB;
       const s = map.structAt[c];
@@ -101,6 +105,10 @@ export class Minimap {
           if (paint) rgb = [paint[0], paint[1], paint[2]];
         } else rgb = standing ? [168, 162, 150] : [74, 70, 66];
       }
+      // Field works you know of: walls and gates light, the rest a dark line.
+      if (map.type[c] >= T_WALL && this.works.workAt((c % N) * 4 + 2, ((c / N) | 0) * 4 + 2)) {
+        rgb = map.type[c] === T_WALL || map.type[c] === T_GATE ? [200, 198, 190] : [58, 52, 44];
+      }
       // Lighter on high ground, so mesas read on the minimap too.
       const lift = Math.min(1.25, Math.max(0.85, 0.95 + map.heights[c + ((c / N) | 0)] / 40000));
       for (let k = 0; k < 3; k++) this.base[3 * c + k] = rgb[k] * lift;
@@ -111,7 +119,7 @@ export class Minimap {
   update(now: number): void {
     if (now - this.lastDraw < 100) return;
     this.lastDraw = now;
-    if (this.baseVersion !== this.structures.version) this.paintBase();
+    if (this.baseVersion !== this.structures.version + this.works.version) this.paintBase();
     const px = this.image.data;
     const base = this.base;
     const { visible, explored } = this.fog;

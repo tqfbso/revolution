@@ -19,6 +19,7 @@ import {
 } from '../sim/units';
 import { CLASS_AIR } from '../sim/map';
 import {
+  EV_BREACH,
   EV_COLLAPSE,
   EV_DEATH,
   EV_IMPACT,
@@ -412,6 +413,21 @@ export class UnitView {
         fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
         this.shoot(a, ax, ay, az, p.x, p.y, p.z);
         fx.squadHit(p.x, p.y, p.z);
+        continue;
+      }
+      if (ev[e] === EV_BREACH) {
+        // Firing at a field work, or laying a charge against it.
+        this.shotAt[a] = seconds;
+        if (this.lodOf[a] === LOD_HIDDEN) continue;
+        const px = ((b % 256) + 0.5) * 4;
+        const pz = (Math.floor(b / 256) + 0.5) * 4;
+        const py = this.terrain.heightAt(px, pz) + 1;
+        fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
+        if (KINDS[this.kind[a]].engineer) fx.shellImpact(px, py - 0.8, pz);
+        else {
+          this.shoot(a, ax, ay, az, px, py, pz);
+          fx.squadHit(px, py, pz);
+        }
         continue;
       }
       if (ev[e] !== EV_SHOT && ev[e] !== EV_DEATH) continue;

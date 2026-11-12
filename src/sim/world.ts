@@ -1,9 +1,17 @@
-import { CLASS_COUNT, MAX_STRUCTS, MAX_TOWNS, generateMap, type GameMap } from './map';
+import {
+  CELL_COUNT,
+  CLASS_COUNT,
+  MAX_STRUCTS,
+  MAX_TEAMS,
+  MAX_TOWNS,
+  generateMap,
+  type GameMap,
+} from './map';
 import { seedRng } from './rng';
 
 export { MAP_SIZE, MAP_SIZE_FX } from './map';
 export const MAX_UNITS = 16384;
-export const MAX_TEAMS = 3;
+export { MAX_TEAMS } from './map';
 export const TICK_RATE = 20;
 export const TICK_MS = 1000 / TICK_RATE;
 
@@ -28,6 +36,11 @@ export const FLAG_SMOKE = 256;
 export const FLAG_HOLD = 512;
 /** Ordered to attack the unit `orderUnit`: chase it and shoot it until it is gone. */
 export const FLAG_FOCUS = 1024;
+/**
+ * Breaching the field work on the cell under (`aimX`, `aimY`): by order, or because it
+ * stands in the way of a move order (which then goes on once it is down).
+ */
+export const FLAG_BREACH = 2048;
 /** Cells that can hold smoke at once. */
 export const MAX_SMOKE = 4096;
 
@@ -42,6 +55,10 @@ export const JOB_GATHER = 1;
 export const JOB_LOAD = 2;
 export const JOB_RETURN = 3;
 export const JOB_BUILD = 4;
+/** Putting up the field work on cell `jobCell`, then the next one near it. */
+export const JOB_WORK = 5;
+/** Field works (planned and standing) on the map at once. */
+export const MAX_WORKS = 4096;
 /** Stances: fire at will (the default), or hold fire until told otherwise. */
 export const STANCE_FREE = 0;
 export const STANCE_HOLD_FIRE = 1;
@@ -75,6 +92,9 @@ export const EV_SMOKE = 10; // a = where (see packPoint), b = how many ticks it 
 export const EV_BUILT = 11; // a = structure, b = team
 export const EV_TRAINED = 12; // a = unit, b = structure
 export const EV_TIER = 13; // a = team, b = the tier reached
+export const EV_WORK = 14; // a = cell, b = kind of field work | team << 8: finished
+export const EV_WORK_LOST = 15; // a = cell, b = kind of field work: destroyed
+export const EV_BREACH = 16; // a = unit, b = cell of the field work it hit
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
 export function packPoint(x: number, y: number): number {
@@ -206,6 +226,24 @@ export interface World {
   jobTimer: Int16Array;
   /** STANCE_*. Unlike an order, a stance stays until it is changed. */
   stance: Uint8Array;
+  /** Builders: the cell of the field work a JOB_WORK refers to. */
+  jobCell: Int32Array;
+  /**
+   * Field works (see src/sim/works.ts), one per cell: the cells in the order they were
+   * planned, and per cell the kind (0 = none), the owner, the health and the work done.
+   * A work is planned (paid for, without effect) until its work is done; then it is
+   * stamped into the terrain of the map.
+   */
+  workCount: number;
+  workCells: Int32Array;
+  wKind: Uint8Array;
+  wTeam: Uint8Array;
+  wHp: Int16Array;
+  wBuild: Int16Array;
+  /** Where each cell is in `workCells`. */
+  wIndex: Int32Array;
+  /** Counts changes to the field works, for whoever draws them. Not part of the state. */
+  worksRev: number;
   /** Flowfields for move orders: goal cell (-1 = unused), movement class, cost-to-goal. */
   fieldGoal: Int32Array;
   fieldClass: Uint8Array;
@@ -299,6 +337,15 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     cargoKind: new Uint8Array(MAX_UNITS),
     jobTimer: new Int16Array(MAX_UNITS),
     stance: new Uint8Array(MAX_UNITS),
+    jobCell: new Int32Array(MAX_UNITS),
+    workCount: 0,
+    workCells: new Int32Array(MAX_WORKS),
+    wKind: new Uint8Array(CELL_COUNT),
+    wTeam: new Uint8Array(CELL_COUNT),
+    wHp: new Int16Array(CELL_COUNT),
+    wBuild: new Int16Array(CELL_COUNT),
+    wIndex: new Int32Array(CELL_COUNT),
+    worksRev: 0,
     fieldGoal: new Int32Array(MAX_FIELDS).fill(-1),
     fieldClass: new Uint8Array(MAX_FIELDS),
     fieldDist: new Array<Uint16Array | null>(MAX_FIELDS).fill(null),
@@ -364,8 +411,15 @@ export function hashWorld(w: World): number {
     mix(w.smokeCells[k]);
     mix(w.map.smoke[w.smokeCells[k]]);
   }
+  mix(w.workCount);
+  for (let k = 0; k < w.workCount; k++) {
+    const c = w.workCells[k];
+    mix(c | (w.wKind[c] << 16) | (w.wTeam[c] << 24));
+    mix((w.wHp[c] & 0xffff) | (w.wBuild[c] << 16));
+  }
   const n = w.count;
   for (let i = 0; i < n; i++) {
+    mix(w.jobCell[i]);
     mix(w.inside[i] ^ (w.orderStruct[i] << 12) ^ (w.los[i] << 28));
     mix(w.reveal[i]);
     mix(w.posX[i]);

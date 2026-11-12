@@ -27,6 +27,21 @@ export const T_BRIDGE = 6;
 /** A collapsed building. Infantry can pick its way through and finds cover; vehicles cannot. */
 export const T_RUBBLE = 7;
 
+/**
+ * Field works (see src/sim/works.ts): one cell each, put up by an army during the game.
+ * A wall stops everyone and every line of sight below its top; a gate is a wall to all but
+ * its owner. Wire stops men, obstacles stop vehicles. A trench and a sandbag position stop
+ * nobody: they are cover for infantry standing in them.
+ */
+export const T_WALL = 8;
+export const T_GATE = 9;
+export const T_WIRE = 10;
+export const T_TRAP = 11;
+export const T_TRENCH = 12;
+export const T_SANDBAG = 13;
+/** How high a wall stands: eyes above it (a hill, an upper floor) see over it. */
+export const WALL_HEIGHT = fx(2.6);
+
 export const S_BUILDING = 0;
 export const S_BRIDGE = 1;
 /** A base building put up by an army during the game (see src/sim/economy.ts). */
@@ -46,6 +61,20 @@ export const CLASS_FOOT = 1;
 /** Flies: goes anywhere, in a straight line. */
 export const CLASS_AIR = 2;
 export const CLASS_COUNT = 3;
+export const MAX_TEAMS = 3;
+/**
+ * Passability is kept per layer: one per army and movement class, because a gate lets only
+ * its owner through. Armies without gates share the tables of their class.
+ */
+export const LAYER_COUNT = MAX_TEAMS * CLASS_COUNT;
+/** Owner of a cell nobody has built on. */
+export const NO_OWNER = 255;
+/**
+ * Path cost of a cell with a field work in the way: so high that a route goes through one
+ * only when there is no way round on the whole map. Units that arrive at it breach it or
+ * wait (see steer in the sim), so a sealed fortress can still be given as a destination.
+ */
+export const WORK_COST = 255;
 
 /** Height of the water surface, for drawing. */
 export const WATER_LEVEL = fx(-0.4);
@@ -86,14 +115,34 @@ export interface GameMap {
   townY: Int32Array;
   townR: Int32Array;
   townName: string[];
+  /** Army that owns the field work on each cell, or NO_OWNER. */
+  workTeam: Uint8Array;
+  /** Gates standing, per army: an army with none shares the passability of its class. */
+  gates: Int32Array;
   /**
-   * Per movement class and cell: 0 = cannot enter, otherwise the cost multiplier of
-   * crossing it. Cells cut off from the main connected area count as impassable, so any
-   * two passable cells of a class are always connected.
+   * Per movement class and cell, from the terrain alone (field works left out): 0 = cannot
+   * enter, otherwise the cost multiplier of crossing it. Cells cut off from the main
+   * connected area count as impassable, so without field works any two passable cells of a
+   * class are connected.
+   */
+  natural: Uint8Array[];
+  /**
+   * Per layer (army and movement class, see layerOf) and cell: 0 = cannot enter, otherwise
+   * the cost multiplier of crossing it. This is `natural` with the field works on top.
    */
   cost: Uint8Array[];
-  /** Per class and cell: the nearest passable cell (itself when passable). */
+  /**
+   * Per layer and cell, for route finding: as `cost`, but a field work in the way costs
+   * WORK_COST instead of being impassable.
+   */
+  pathCost: Uint8Array[];
+  /** Per layer and cell: the nearest passable cell (itself when passable). */
   snap: Int32Array[];
+  /**
+   * Per layer: the layer whose tables it shares (itself, or the layer of army 0 for the
+   * class). Flowfields are kept per shared layer.
+   */
+  shared: Uint8Array;
   /**
    * Smoke: per cell, the tick until which it stands there, and the current tick (kept here
    * by the sim so that lineOfSight can tell). Smoke more than a cell deep stops the eye.
@@ -409,8 +458,13 @@ function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     townY: new Int32Array(MAX_TOWNS),
     townR: new Int32Array(MAX_TOWNS),
     townName: [],
+    workTeam: new Uint8Array(CELL_COUNT).fill(NO_OWNER),
+    gates: new Int32Array(MAX_TEAMS),
+    natural: [],
     cost: [],
+    pathCost: [],
     snap: [],
+    shared: new Uint8Array(LAYER_COUNT),
     smoke: new Int32Array(CELL_COUNT),
     now: 0,
     hash: 0,
@@ -435,13 +489,31 @@ function finishMap(map: GameMap): GameMap {
   return map;
 }
 
+/** The layer of an army's units of a movement class. */
+export function layerOf(team: number, cls: number): number {
+  return team * CLASS_COUNT + cls;
+}
+
+/** True for the terrain types that are field works. */
+export function isWork(t: number): boolean {
+  return t >= T_WALL;
+}
+
+/** Does a field work of terrain type `t` stop movement class `cls`? (Gates: see refreshWorks.) */
+function stops(t: number, cls: number): boolean {
+  if (cls === CLASS_AIR) return false;
+  if (t === T_WALL || t === T_GATE) return true;
+  return t === T_WIRE ? cls === CLASS_FOOT : t === T_TRAP && cls === CLASS_VEHICLE;
+}
+
 /** Recompute who can walk where from the terrain types. Call after changing `type`. */
 export function refreshPassability(map: GameMap): void {
   const type = map.type;
   for (let cls = 0; cls < CLASS_COUNT; cls++) {
-    const c = (map.cost[cls] ??= new Uint8Array(CELL_COUNT));
+    const c = (map.natural[cls] ??= new Uint8Array(CELL_COUNT));
     for (let i = 0; i < CELL_COUNT; i++) {
-      const t = type[i];
+      // Under a field work lies the ground it was built on.
+      const t = type[i] >= T_WALL ? map.baseType[i] : type[i];
       let v = 0;
       if (t === T_OPEN || t === T_BRIDGE) v = 1;
       else if (t === T_FORD) v = 2;
@@ -449,7 +521,52 @@ export function refreshPassability(map: GameMap): void {
       c[i] = cls === CLASS_AIR ? 1 : v;
     }
     keepMainArea(c);
-    map.snap[cls] = nearestPassable(c);
+  }
+  refreshWorks(map);
+}
+
+/**
+ * Lay the field works over the natural passability. Cheaper than refreshPassability: call
+ * this when only field works changed.
+ */
+export function refreshWorks(map: GameMap): void {
+  const type = map.type;
+  const owner = map.workTeam;
+  let gates = 0;
+  for (let team = 0; team < MAX_TEAMS; team++) gates += map.gates[team];
+  for (let cls = 0; cls < CLASS_COUNT; cls++) {
+    const natural = map.natural[cls];
+    const first = layerOf(0, cls);
+    for (let team = 0; team < MAX_TEAMS; team++) {
+      const layer = layerOf(team, cls);
+      if (team > 0 && (cls === CLASS_AIR || gates === 0)) {
+        // No gate anywhere: what stops one army stops them all.
+        map.shared[layer] = first;
+        map.cost[layer] = map.cost[first];
+        map.pathCost[layer] = map.pathCost[first];
+        map.snap[layer] = map.snap[first];
+        continue;
+      }
+      map.shared[layer] = layer;
+      if (map.cost[layer] === undefined || (team > 0 && map.cost[layer] === map.cost[first])) {
+        map.cost[layer] = new Uint8Array(CELL_COUNT);
+        map.pathCost[layer] = new Uint8Array(CELL_COUNT);
+      }
+      const cost = map.cost[layer];
+      const path = map.pathCost[layer];
+      for (let i = 0; i < CELL_COUNT; i++) {
+        const v = natural[i];
+        const t = type[i];
+        if (v === 0 || t < T_WALL || !stops(t, cls) || (t === T_GATE && owner[i] === team)) {
+          cost[i] = v;
+          path[i] = v;
+        } else {
+          cost[i] = 0;
+          path[i] = WORK_COST;
+        }
+      }
+      map.snap[layer] = nearestPassable(cost);
+    }
   }
 }
 
@@ -667,7 +784,8 @@ const FOREST_SIGHT_STEPS = 6;
 /**
  * True line of sight between two eye points (z0 and z1 are eye heights). Blocked by
  * standing buildings, by more than a thin belt of forest, and by ground that rises above
- * the line. `skipA` and `skipB` are structures to ignore: the ones the two ends are in.
+ * the line. `skipA` and `skipB` are structures to ignore: the ones the two ends are in;
+ * `ignoreCell` is a wall cell to ignore: the one being shot at.
  */
 export function lineOfSight(
   map: GameMap,
@@ -679,6 +797,7 @@ export function lineOfSight(
   z1: number,
   skipA: number,
   skipB: number,
+  ignoreCell = -1,
 ): boolean {
   const dx = x1 - x0;
   const dy = y1 - y0;
@@ -702,6 +821,14 @@ export function lineOfSight(
     if (t === T_BUILDING) {
       const s = map.structAt[c];
       if (s !== skipA && s !== skipB) return false;
+      continue;
+    }
+    if (t === T_WALL || t === T_GATE) {
+      // A wall stops the eye unless the line passes over its top (or it is the thing aimed at).
+      if (c !== ignoreCell) {
+        const top = heightAt(map, x, y) + WALL_HEIGHT;
+        if (top > z0 + Math.trunc((dz * k) / steps)) return false;
+      }
       continue;
     }
     if (t === T_FOREST && ++forest > FOREST_SIGHT_STEPS) return false;

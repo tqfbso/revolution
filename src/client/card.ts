@@ -3,6 +3,8 @@ import {
   CMD_ASSIST,
   CMD_BUILD,
   CMD_CANCEL,
+  CMD_DEMOLISH,
+  CMD_FORTIFY,
   CMD_GATHER,
   CMD_HOLD,
   CMD_RALLY,
@@ -22,8 +24,9 @@ import {
   type Price,
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
-import { canPlace, type GameMap } from '../sim/map';
+import { MAP_CELLS, canPlace, type GameMap } from '../sim/map';
 import { KINDS, KIND_TRUCK } from '../sim/units';
+import { MAX_ORDER, WORKS, WORK_COUNT, canFortify } from '../sim/works';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
 import {
   BASE_STRIDE,
@@ -35,8 +38,11 @@ import {
 import type { StructureView } from './structures';
 import type { Terrain } from './terrain';
 import type { UnitView } from './units';
+import type { WorksView } from './works';
 
 const CELL = 4;
+/** The tool after the kinds of field work: take works down. */
+export const TOOL_REMOVE = WORK_COUNT;
 const ME = 0;
 
 /**
@@ -50,6 +56,15 @@ export class CommandCard {
   building = -1;
   /** Building type being placed, or -1. */
   placing = -1;
+  /**
+   * Field-work tool in hand: 0 = none, a kind of work (drag draws a line of it), or
+   * TOOL_REMOVE (drag a box over works of yours to take them down).
+   */
+  tool = 0;
+  /** Cell where the drag with the tool started, or -1. */
+  private dragFrom = -1;
+  private dragCells: number[] = [];
+  private dragCost = 0;
   readonly group = new THREE.Group();
   private readonly ghost: THREE.Mesh;
   private readonly ghostMaterial: THREE.MeshBasicNodeMaterial;
@@ -79,6 +94,7 @@ export class CommandCard {
     private readonly structures: StructureView,
     private readonly send: (command: Command) => void,
     private readonly lookAt: (x: number, z: number) => void,
+    private readonly works: WorksView,
   ) {
     this.ghostMaterial = new THREE.MeshBasicNodeMaterial({
       color: 0x7dff8a,
@@ -182,8 +198,14 @@ export class CommandCard {
     if (act === 'train') this.send({ type: CMD_TRAIN, structure: s, kind: k });
     else if (act === 'tier') this.send({ type: CMD_RESEARCH, structure: s });
     else if (act === 'cancel') this.send({ type: CMD_CANCEL, structure: s });
-    else if (act === 'place') this.placing = k;
-    else if (act === 'stop') this.send({ type: CMD_STOP, units: ids });
+    else if (act === 'place') {
+      this.placing = k;
+      this.cancelTool();
+    } else if (act === 'work') {
+      this.placing = -1;
+      this.cancelTool();
+      this.tool = k;
+    } else if (act === 'stop') this.send({ type: CMD_STOP, units: ids });
     else if (act === 'hold') this.send({ type: CMD_HOLD, units: ids });
     else if (act === 'fire') this.toggleFire();
     this.render();
@@ -227,6 +249,115 @@ export class CommandCard {
     this.placing = -1;
   }
 
+  /** Your selected units that can put up field works: trucks and engineers. */
+  private builders(): number[] {
+    const u = this.units;
+    return u.selectedIds().filter((id) => {
+      const kind = u.kindOf(id);
+      return u.isMine(id) && (kind === KIND_TRUCK || KINDS[kind].engineer);
+    });
+  }
+
+  private cellAt(x: number, z: number): number {
+    const cx = Math.min(MAP_CELLS - 1, Math.max(0, Math.floor(x / CELL)));
+    const cy = Math.min(MAP_CELLS - 1, Math.max(0, Math.floor(z / CELL)));
+    return cy * MAP_CELLS + cx;
+  }
+
+  /** With a tool in hand: the pointer is over (x, z). Draws what a click or drag would do. */
+  toolHover(x: number, z: number): void {
+    if (this.tool === 0) return;
+    const to = this.cellAt(x, z);
+    const from = this.dragFrom < 0 ? to : this.dragFrom;
+    const x0 = from % MAP_CELLS;
+    const y0 = Math.floor(from / MAP_CELLS);
+    const x1 = to % MAP_CELLS;
+    const y1 = Math.floor(to / MAP_CELLS);
+    if (this.tool === TOOL_REMOVE) {
+      this.dragCells = this.works.inRect(
+        Math.min(x0, x1),
+        Math.min(y0, y1),
+        Math.max(x0, x1),
+        Math.max(y0, y1),
+        ME,
+      );
+      this.works.setPreview(
+        this.dragCells,
+        this.dragCells.map(() => false),
+      );
+      return;
+    }
+    // A line of cells joined edge to edge: a wall that only touched at corners would leak.
+    const cells: number[] = [];
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x1 > x0 ? 1 : -1;
+    const sy = y1 > y0 ? 1 : -1;
+    let cx = x0;
+    let cy = y0;
+    let err = dx - dy;
+    cells.push(cy * MAP_CELLS + cx);
+    while ((cx !== x1 || cy !== y1) && cells.length < MAX_ORDER) {
+      if (2 * err > -dy && cx !== x1) {
+        err -= dy;
+        cx += sx;
+      } else {
+        err += dx;
+        cy += sy;
+      }
+      cells.push(cy * MAP_CELLS + cx);
+    }
+    const price = WORKS[this.tool].supplies;
+    let left = this.supplies;
+    this.dragCost = 0;
+    const ok = cells.map((c) => {
+      const rec = this.works.at[c];
+      // One of yours, planned and not yet built: the builders will simply work on it.
+      if (rec !== 0) return ((rec >> 4) & 7) === ME && (rec & 128) === 0;
+      if (!canFortify(this.map, this.tool, c) || left < price) return false;
+      left -= price;
+      this.dragCost += price;
+      return true;
+    });
+    this.dragCells = cells.filter((_, k) => ok[k]);
+    this.works.setPreview(cells, ok);
+  }
+
+  /** With a tool in hand: the button went down over (x, z). */
+  toolDown(x: number, z: number): void {
+    if (this.tool === 0) return;
+    this.dragFrom = this.cellAt(x, z);
+    this.toolHover(x, z);
+  }
+
+  /** The button came up: order what was drawn. `keep` leaves the tool in hand. */
+  toolUp(keep: boolean): void {
+    if (this.tool === 0 || this.dragFrom < 0) return;
+    const cells = this.dragCells;
+    if (cells.length > 0) {
+      if (this.tool === TOOL_REMOVE) this.send({ type: CMD_DEMOLISH, team: ME, cells });
+      else {
+        const crew = this.builders();
+        if (crew.length > 0) {
+          this.send({ type: CMD_FORTIFY, units: crew, work: this.tool, cells });
+        }
+      }
+    }
+    this.dragFrom = -1;
+    this.dragCells = [];
+    this.dragCost = 0;
+    this.works.setPreview([], []);
+    if (!keep) this.tool = 0;
+    this.render();
+  }
+
+  cancelTool(): void {
+    this.tool = 0;
+    this.dragFrom = -1;
+    this.dragCells = [];
+    this.works.setPreview([], []);
+  }
+
   /**
    * A right click with this card's context. Returns true if it used the click: a rally
    * point for the selected building, or trucks sent to a site or to work on a building.
@@ -237,6 +368,13 @@ export class CommandCard {
       const rx = site >= 0 ? this.map.siteX[site] : fx(x);
       const ry = site >= 0 ? this.map.siteY[site] : fx(z);
       this.send({ type: CMD_RALLY, structure: this.building, x: rx, y: ry });
+      return true;
+    }
+    // Builders on a planned work of yours: go and build it.
+    const sappers = this.builders();
+    const work = this.works.workAt(x, z);
+    if (sappers.length > 0 && work && !work.done && work.team === ME) {
+      this.send({ type: CMD_FORTIFY, units: sappers, work: work.kind, cells: [work.cell] });
       return true;
     }
     const crew = this.trucks();
@@ -296,11 +434,18 @@ export class CommandCard {
     );
   }
 
-  private button(act: string, k: number, label: string, p: Price | null, note = ''): string {
+  private button(
+    act: string,
+    k: number,
+    label: string,
+    p: Price | null,
+    note = '',
+    on = false,
+  ): string {
     const locked = p !== null && this.tier < p.tier;
     const off = p !== null && !this.can(p);
     const sub = locked ? `<i class="short">tier ${p.tier}</i>` : p ? this.cost(p) : note;
-    return `<button data-act="${act}" data-k="${k}" class="${off ? 'off' : ''}">${label}<span>${sub}</span></button>`;
+    return `<button data-act="${act}" data-k="${k}" class="${off ? 'off' : ''}${on ? ' on' : ''}">${label}<span>${sub}</span></button>`;
   }
 
   private render(): void {
@@ -360,13 +505,43 @@ export class CommandCard {
             ? `<div class="hint">Click to place the ${BUILDINGS[this.placing].name.toLowerCase()} (Shift: place several) · right click or Esc: cancel</div>`
             : `<div class="hint">Right click a stockpile or a well: haul from it · right click one of your buildings: build or repair it</div>`;
       }
+      if (mine && this.builders().length > 0) {
+        html += '<div class="row works">';
+        for (let k = 1; k < WORK_COUNT; k++) {
+          const w = WORKS[k];
+          const p = { supplies: w.supplies, fuel: 0, credits: 0, ticks: w.ticks, tier: 1 };
+          html += this.button('work', k, w.name, p, '', this.tool === k);
+        }
+        html += this.button(
+          'work',
+          TOOL_REMOVE,
+          'Remove',
+          null,
+          'yours',
+          this.tool === TOOL_REMOVE,
+        );
+        html += '</div>';
+        if (this.tool === TOOL_REMOVE) {
+          html += `<div class="hint">Drag a box over field works of yours to take them down (planned ones are refunded) · right click or Esc: done</div>`;
+        } else if (this.tool > 0) {
+          const n = this.dragFrom >= 0 ? this.dragCells.length : 0;
+          const what = WORKS[this.tool].name.toLowerCase();
+          html +=
+            n > 0
+              ? `<div class="hint">${n} × ${what}: <i class="sup">${this.dragCost}</i> · release to order · right click: cancel</div>`
+              : `<div class="hint">Drag on the ground to draw a line of ${what} (price is per 4 m) · Shift: keep drawing · right click or Esc: done</div>`;
+        }
+      } else if (this.tool !== 0) this.cancelTool();
       const held = ids.every((id) => (this.units.task[id] & TASK_HOLD_FIRE) !== 0);
       html += '<div class="row">';
       html += this.button('stop', 0, 'Stop', null, 'X');
       html += this.button('hold', 0, 'Hold position', null, 'H');
       html += this.button('fire', 0, held ? 'Fire at will' : 'Hold fire', null, 'G');
       html += '</div>';
-    } else if (this.placing >= 0) this.placing = -1;
+    } else {
+      if (this.placing >= 0) this.placing = -1;
+      if (this.tool !== 0) this.cancelTool();
+    }
     if (html !== this.html) {
       this.el.innerHTML = this.html = html;
       this.el.style.display = html === '' ? 'none' : 'block';

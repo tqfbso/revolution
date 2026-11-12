@@ -13,6 +13,7 @@ import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
 import { Scars } from './client/scars';
 import { StructureView } from './client/structures';
+import { WorksView } from './client/works';
 import { UnitView } from './client/units';
 import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
 import {
@@ -103,6 +104,7 @@ async function start(): Promise<void> {
   const terrain = new Terrain(map, fog, shadows);
   const effects = new Effects();
   const structures = new StructureView(map, terrain, fog, effects, shadows);
+  const works = new WorksView(map, terrain, fog, effects, shadows);
   const scars = new Scars(fog, terrain);
   const units = new UnitView(terrain, effects, fog, shadows, structures, scars);
   units.lodNear *= lodScale;
@@ -118,6 +120,7 @@ async function start(): Promise<void> {
   const send = (command: Command) => post({ type: 'command', command });
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
     structures.applySnapshot(e.data, performance.now() / 1000);
+    works.applySnapshot(e.data);
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
     hud.simTick(e.data.simMs);
@@ -135,8 +138,19 @@ async function start(): Promise<void> {
     structures,
     send,
     lookAt,
+    works,
   );
-  const input = new Input(canvas, rts.camera, terrain, units, send, lookAt, structures, card);
+  const input = new Input(
+    canvas,
+    rts.camera,
+    terrain,
+    units,
+    send,
+    lookAt,
+    structures,
+    card,
+    works,
+  );
   // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
   // default: the first playtest found normal hard to beat.
   const level = params.get('ai');
@@ -153,6 +167,7 @@ async function start(): Promise<void> {
   }
   input.controlAll = params.get('control') === 'all';
   structures.revealAll = input.controlAll || demo;
+  works.revealAll = input.controlAll || demo || params.get('fog') === '0';
   // The opponent is chosen on screen; a new choice starts a new game.
   const pickAi = document.getElementById('ai-level') as HTMLSelectElement | null;
   if (pickAi) {
@@ -172,12 +187,14 @@ async function start(): Promise<void> {
     (x, z, attack) => input.orderTo(x, z, attack),
     structures,
     map,
+    works,
   );
   scene.add(
     terrain.mesh,
     terrain.water,
     terrain.trees,
     structures.group,
+    works.group,
     scars.mesh,
     units.group,
     effects.group,
@@ -281,6 +298,7 @@ async function start(): Promise<void> {
     rts.update(dt);
     units.update(now, dt, rts.camera);
     structures.update(now / 1000, dt);
+    works.update(now / 1000);
     effects.update(dt, rts.camera);
     input.update(dt);
     card.update();
@@ -332,6 +350,8 @@ async function start(): Promise<void> {
     stats: hud.stats,
     units,
     structures,
+    works,
+    card,
     map,
     send,
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),

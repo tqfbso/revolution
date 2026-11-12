@@ -200,7 +200,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 1451419592;
+const GOLDEN = 2782696136;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -398,12 +398,9 @@ describe('terrain and pathfinding', () => {
     // A world that is all forest for x < 500 and open ground beyond.
     const woods = flatMap();
     for (let c = 0; c < MAP_CELLS * MAP_CELLS; c++) {
-      if (c % MAP_CELLS < 125) {
-        woods.type[c] = T_FOREST;
-        woods.cost[CLASS_VEHICLE][c] = 0;
-        woods.cost[CLASS_FOOT][c] = 2;
-      }
+      if (c % MAP_CELLS < 125) woods.type[c] = T_FOREST;
     }
+    refreshPassability(woods);
     const w = createWorld(4, woods);
     step(w, [spawnAt(0, KIND_INFANTRY, 1, 490, 500), spawnAt(1, KIND_TANK, 1, 520, 500)]);
     // Spawning scatters units, so place the two exactly.

@@ -88,6 +88,12 @@ export interface Snapshot {
    * entries, rally x and y in world units.
    */
   bases: Int32Array;
+  /**
+   * Field works, sent whenever one changed: two integers each, the cell and
+   * kind | team << 4 | finished << 7 | value << 8, where value is the health as 0..255 of
+   * the maximum for a finished one and the work done as 0..100 for a planned one.
+   */
+  works?: Int32Array;
   /** Wall-clock cost of the last sim tick, in milliseconds. */
   simMs: number;
   /** State hash, sent once per second. Two clients in sync show the same value. */
