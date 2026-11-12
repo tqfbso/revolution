@@ -4,7 +4,20 @@ import type { Terrain } from './terrain';
 
 const MIN_DIST = 14;
 const MAX_DIST = 900;
-const PITCH = THREE.MathUtils.degToRad(52);
+/**
+ * The camera looks down steeply from far off, where the map matters, and tilts toward the
+ * horizontal as it closes in, where the things on it do: walls, hulls and men are seen from
+ * the side instead of from the roof. It never tilts far enough to show the sky.
+ */
+const PITCH_FAR = THREE.MathUtils.degToRad(56);
+const PITCH_NEAR = THREE.MathUtils.degToRad(35);
+const TILT_FROM = 22;
+const TILT_TO = 260;
+
+function pitchAt(dist: number): number {
+  const t = THREE.MathUtils.clamp(Math.log(dist / TILT_FROM) / Math.log(TILT_TO / TILT_FROM), 0, 1);
+  return PITCH_NEAR + (PITCH_FAR - PITCH_NEAR) * t * t * (3 - 2 * t);
+}
 const EDGE_PX = 6;
 
 /** Classic RTS camera: looks at a point on the ground, pans, zooms and rotates around it. */
@@ -120,10 +133,11 @@ export class RtsCamera {
     c.yaw += (g.yaw - c.yaw) * a;
 
     const groundY = this.terrain.heightAt(c.x, c.z);
-    const horizontal = Math.cos(PITCH) * c.dist;
+    const pitch = pitchAt(c.dist);
+    const horizontal = Math.cos(pitch) * c.dist;
     this.camera.position.set(
       c.x + Math.sin(c.yaw) * horizontal,
-      groundY + Math.sin(PITCH) * c.dist,
+      groundY + Math.sin(pitch) * c.dist,
       c.z + Math.cos(c.yaw) * horizontal,
     );
     this.focus.set(c.x, groundY, c.z);

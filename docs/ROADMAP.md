@@ -204,6 +204,12 @@ Fabio, 2026-11-12: easy is still too hard. Decision 070: a smaller, later, more 
 easy and recruit; the AI builds depots beside its stockpiles (it was starved of supplies
 on the ridge map); its squads ride to the attack in carriers.
 
+## Graphics sprint 2 (built, awaiting Fabio's test)
+
+- Dressed ground: fields, streets, yards, dirt roads, props; pitched roofs and roof
+  clutter; camera angle that changes with zoom; land past the map edge (decision 071).
+- Sound pass 2: see below once built.
+
 ## Urban warfare (planned, not built; order awaits Fabio)
 
 Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,
