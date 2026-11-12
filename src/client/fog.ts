@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { positionWorld, texture } from 'three/tsl';
+import { positionWorld, smoothstep, texture, time, vec2 } from 'three/tsl';
 import { MAP_CELLS, MAP_SIZE, T_FOREST, type GameMap } from '../sim/map';
 
 const BRIGHT_VISIBLE = 255;
@@ -57,9 +57,20 @@ export class Fog {
     }
   }
 
-  /** Brightness (0..1) of the world at the fragment being shaded. Multiply colours by it. */
+  /** Noise texture whose first channel is the cloud cover; null = a cloudless sky. */
+  clouds: THREE.Texture | null = null;
+
+  /**
+   * Brightness (0..1) of the world at the fragment being shaded. Multiply colours by it.
+   * Besides the fog of war it carries the shadows of the clouds, which drift east: every
+   * surface in the world uses this, so they fall on ground, roofs and hulls alike.
+   */
   shade() {
-    return texture(this.texture, positionWorld.xz.div(MAP_SIZE)).r;
+    const seen = texture(this.texture, positionWorld.xz.div(MAP_SIZE)).r;
+    if (this.clouds === null) return seen;
+    const drift = vec2(time.mul(0.0032), time.mul(0.0013));
+    const cover = texture(this.clouds, positionWorld.xz.div(640).sub(drift)).r;
+    return seen.mul(smoothstep(0.4, 0.6, cover).mul(0.32).add(0.68));
   }
 
   /** Seconds, set by whoever calls update: smoke is timed against it. */

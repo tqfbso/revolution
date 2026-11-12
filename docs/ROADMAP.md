@@ -159,15 +159,36 @@ units 1.7x tougher), works build twice as fast, heavy units slower to produce, l
 smaller first AI attacks on easy and normal, game speed 0.75x/1x and Space to pause with
 orders allowed. Decision 058.
 
-## M9 Factions
+## M9 Visual realism (in progress)
+
+Moved ahead of the factions on 2026-11-12 (Fabio agreed). The look was the furthest thing
+from the goal while the game underneath was already fun; textures, lighting and effects
+are what put the frame rate at risk, so better to find out before three rosters exist; and
+factions built on placeholder looks would have to be painted twice. Decision 059.
+
+- Ground of four blended surfaces (grass, earth, rock, asphalt) with detail and relief,
+  cart tracks between the bases and the towns, and wear that the battle writes into it:
+  vehicles churn their routes to mud, shells tear the turf
+- A river with depth, ripples and a reflected sky; light from the whole sky; cloud
+  shadows drifting over everything; two kinds of tree
+- Worn paint, camouflage, mud and rust on vehicles; stained plaster and reflecting
+  windows on houses
+- Smoke, fire and explosions with shape and light
+- A first pass at sound: gunfire, explosions, artillery heard from far off
+- Unit symbols that fade in when zoomed out, so camouflage does not cost readability
+- Three graphics levels, chosen on screen (`?quality=low|normal|high`)
+
+All textures and sounds are made in code at start-up (decision 060): nothing to download,
+no licences to track.
+
+## M10 Factions
 
 - Three asymmetric factions with distinct units and tech
 - Original names, per-faction equipment and paint, audio
 
-## M10 Polish for v1
+## M11 Polish for v1
 
-- Authored or CC0 models and textures replacing procedural ones, animation, sky and terrain
-  materials, sound
+- Authored or CC0 models replacing procedural ones, animation
 - Menus, settings, save/replay
 
 ## Later

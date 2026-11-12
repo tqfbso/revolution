@@ -331,6 +331,18 @@ export class UnitView {
         (id) => (IS_AIR[this.kind[id]] && this.load[id] > 0 ? 0 : FOG_SIGHT[this.kind[id]]),
       );
     }
+    // Vehicles wear the ground they drive over (where the player can see it happen): a
+    // column's route turns to mud. Five times a second is plenty at these speeds.
+    if (this.fogAge % 4 === 0) {
+      for (let i = 0; i < n; i++) {
+        const k = this.kind[i];
+        if (this.moving[i] === 0 || !IS_VEHICLE[k] || IS_AIR[k]) continue;
+        const x = curr[2 * i];
+        const z = curr[2 * i + 1];
+        if (this.teamOf(i) !== this.playerTeam && !this.fog.sees(x, z)) continue;
+        this.terrain.stamp(x, z, 1.2, 3, 190);
+      }
+    }
     this.playEvents(s.events, now / 1000);
   }
 
@@ -380,6 +392,7 @@ export class UnitView {
         const x = unpackX(a);
         const z = unpackY(a);
         this.scars.add(x, z, 1.2 + Math.random() * 0.9, false);
+        this.terrain.stamp(x, z, 3.2, 110);
         if (this.fog.sees(x, z)) fx.shellImpact(x, this.terrain.heightAt(x, z), z);
         continue;
       }
@@ -443,7 +456,10 @@ export class UnitView {
       } else if (ev[e] === EV_DEATH) {
         this.diedAt[a] = seconds;
         const air = IS_AIR[this.kind[a]];
-        if (veh && !air) this.scars.add(ax, az, 2.3, true);
+        if (veh && !air) {
+          this.scars.add(ax, az, 2.3, true);
+          this.terrain.stamp(ax, az, 2.6, 70);
+        }
         if (near === LOD_HIDDEN) continue;
         if (veh && !air) fx.explosion(ax, ay, az);
         else fx.squadHit(ax, ay, az);
