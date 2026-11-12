@@ -199,6 +199,30 @@ bridge chokepoints and a fix for the slowdown when zoomed in followed in the sam
   belt, ravine, farmland), mirror-symmetric, seven towns. Default for the skirmish; the
   river map is on the Map menu.
 
+## Urban warfare (planned, not built; order awaits Fabio)
+
+Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,
+something like building buildings, fighting through a city as it is destroyed, and a
+dense city map with streets, bus stops and lots of detail. The full plan, with the
+research behind it, the performance budget and the open questions, is in `URBAN.md`.
+
+- U1 Buildings that die slowly (medium, Sonnet 5.5): four states (intact, damaged, gutted,
+  ruin), each still a position; building classes two to six times tougher; tank guns break
+  walls, artillery brings structures down; a ruin cannot be destroyed further
+- U2 Hold and take a block (heavy, Fable 5.2 with Sonnet 5.5 for the interface): fortify,
+  repair, barricades, linked buildings with mouseholes, storming an enemy-held building
+- U3 Streets (heavy, Fable 5.2): street terrain, columns in corridors, local map updates,
+  rubble that shuts streets and engineers that clear it, a grey-box city generator
+- U4 The city's look (heavy, Fable 5.2 with Sonnet 5.5 for props): block meshes per state,
+  the prop kit, far facades, roof fade, against a stated budget
+- U5 Urban AI and urban units (heavy, Fable 5.2): an AI that holds, fortifies and storms
+  blocks; marksman team; top attack on tanks in streets; drone rules
+- U6 Tuning after play (light, Sonnet 5.5)
+
+Recommended order: U1 next, the rest before the factions, so that each faction's roster
+can be designed around the urban rules instead of being redesigned for them. Not decided;
+the milestone numbers below stay as they are until it is.
+
 ## M10 Factions
 
 - Three asymmetric factions with distinct units and tech
