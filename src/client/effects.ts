@@ -735,6 +735,11 @@ export class Effects {
     const ux = e[4],
       uy = e[5],
       uz = e[6];
+    // Camera position, to fade out puffs the lens is inside of or right up against: a
+    // sprite that fills the screen costs a full-screen blend per layer and shows nothing.
+    const cx = e[12],
+      cy = e[13],
+      cz = e[14];
     for (let kind = 0; kind < 2; kind++) {
       const p = this.p[kind];
       const batch = this.sprites[kind];
@@ -770,7 +775,14 @@ export class Effects {
         const y = (p[o + 1] += p[o + 4] * dt);
         const z = (p[o + 2] += p[o + 5] * dt);
         const k = age / life;
-        const s = size0 + (p[o + 9] - size0) * (1 - (1 - k) * (1 - k));
+        const grown = size0 + (p[o + 9] - size0) * (1 - (1 - k) * (1 - k));
+        const dcx = x - cx;
+        const dcy = y - cy;
+        const dcz = z - cz;
+        const lens = Math.sqrt(dcx * dcx + dcy * dcy + dcz * dcz);
+        // 0 when the camera is within half a puff's size of it, 1 beyond two sizes.
+        const near = Math.min(1, Math.max(0, (lens - grown * 0.5) / (grown * 1.5)));
+        const s = near > 0 ? grown : 0;
         const q = i * 16;
         // Each sprite turns slowly about the line of sight.
         const turn = (p[o + 14] += p[o + 15] * dt);
@@ -812,7 +824,7 @@ export class Effects {
               : 1 - k * k;
         t[c + 3] =
           (((Math.abs(p[o + 15]) * 1e4) | 0) & 3) +
-          Math.min(1, p[o + 13] * fade) * ALPHA_SCALE * 0.999 +
+          Math.min(1, p[o + 13] * fade * near) * ALPHA_SCALE * 0.999 +
           0.0005;
         i++;
       }

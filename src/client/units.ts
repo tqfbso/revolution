@@ -150,6 +150,13 @@ export class UnitView {
   /** Distances (world units) at which units drop to LOD 1 and LOD 2. */
   lodNear = 120;
   lodFar = 340;
+  /**
+   * Full-detail units drawn at most this many (the nearest distance shrinks until it is so,
+   * and grows back when there is room): looking down into a battle from close by must not
+   * mean thousands of soldiers modelled in full. Set from the graphics level.
+   */
+  nearBudget = 300;
+  private nearScale = 1;
 
   private prev = new Float32Array(MAX_UNITS * 2);
   private curr = new Float32Array(MAX_UNITS * 2);
@@ -211,10 +218,12 @@ export class UnitView {
     } else material.colorNode = mix(painted, vec3(0.022, 0.02, 0.019), burn);
 
     const shadows = look.shadows;
-    const batch = (g: THREE.BufferGeometry, cap: number, lod: number) => {
+    this.nearBudget = look.quality === 'low' ? 120 : look.quality === 'high' ? 500 : 300;
+    const batch = (g: THREE.BufferGeometry, cap: number, lod: number, men = false) => {
       const b = new Batch(g, material, cap);
-      // Far LOD is a few pixels: no shadow work for it.
-      b.mesh.castShadow = shadows && lod < 2;
+      // Far LOD is a few pixels: no shadow work for it. Soldiers are five meshes a squad, so
+      // only the nearest cast any; a vehicle keeps its shadow one level further out.
+      b.mesh.castShadow = shadows && lod < (men ? 1 : 2);
       b.mesh.receiveShadow = shadows && lod === 0;
       this.group.add(b.mesh);
       this.batches.push(b);
@@ -235,13 +244,13 @@ export class UnitView {
     this.vehicles[KIND_DRONE] = vehicle(buildReconDrone(), MAX_UNITS >> 2);
     this.vehicles[KIND_STRIKE] = vehicle(buildStrikeDrone(), MAX_UNITS >> 1);
     const infantry = buildInfantry();
-    const soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * 5, lod));
+    const soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * 5, lod, true));
     this.squads[KIND_INFANTRY] = {
       figures: SQUAD_OFFSETS.map(([x, z]) => ({ batch: soldier, x, z })),
       far: batch(infantry.far, MAX_UNITS, 2),
     };
     const team = buildLauncher();
-    const launcher = [0, 1].map((lod) => batch(team.launcher.clone(), MAX_UNITS >> 2, lod));
+    const launcher = [0, 1].map((lod) => batch(team.launcher.clone(), MAX_UNITS >> 2, lod, true));
     this.squads[KIND_ATGM] = {
       figures: [
         { batch: launcher, x: 0, z: 0.25 },
@@ -656,7 +665,8 @@ export class UnitView {
     this.frustum.setFromProjectionMatrix(this.projScreen);
     const planes = this.frustum.planes;
     const cam = camera.position;
-    const near2 = this.lodNear * this.lodNear;
+    const nearNow = this.lodNear * this.nearScale;
+    const near2 = nearNow * nearNow;
     const far2 = this.lodFar * this.lodFar;
 
     const batches = this.batches;
@@ -872,6 +882,14 @@ export class UnitView {
     this.jamRings.flush();
     icons.batch.flush();
     this.rings.count = ringCount;
+    // Hold the number of full-detail units near the budget for the next frame.
+    if (lodCount[0] > this.nearBudget) {
+      this.nearScale = Math.max(
+        0.25,
+        this.nearScale * Math.max(0.5, Math.sqrt(this.nearBudget / lodCount[0])),
+      );
+    } else if (lodCount[0] < this.nearBudget * 0.7)
+      this.nearScale = Math.min(1, this.nearScale * 1.03);
     if (ringCount > 0) {
       const attr = this.rings.instanceMatrix;
       attr.clearUpdateRanges();
