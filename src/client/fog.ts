@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { positionWorld, smoothstep, texture, time, vec2 } from 'three/tsl';
+import { float, positionWorld, smoothstep, texture, time, vec2 } from 'three/tsl';
 import { MAP_CELLS, MAP_SIZE, T_FOREST, type GameMap } from '../sim/map';
 
 const BRIGHT_VISIBLE = 255;
@@ -67,10 +67,15 @@ export class Fog {
    */
   shade() {
     const seen = texture(this.texture, positionWorld.xz.div(MAP_SIZE)).r;
-    if (this.clouds === null) return seen;
+    return this.clouds === null ? seen : seen.mul(this.cloud());
+  }
+
+  /** The cloud shadows alone (1 = in the sun), for things drawn only where they are seen. */
+  cloud() {
+    if (this.clouds === null) return float(1);
     const drift = vec2(time.mul(0.0032), time.mul(0.0013));
     const cover = texture(this.clouds, positionWorld.xz.div(640).sub(drift)).r;
-    return seen.mul(smoothstep(0.4, 0.6, cover).mul(0.32).add(0.68));
+    return smoothstep(0.4, 0.6, cover).mul(0.32).add(0.68);
   }
 
   /** Seconds, set by whoever calls update: smoke is timed against it. */

@@ -667,3 +667,24 @@ surface detail, no cloud shadows, no reflections, small shadow map. `normal` is 
 default. `high` adds what only strong graphics cards should pay for. The level is chosen
 on screen, remembered, and applied by reloading, because every material is built for it.
 `?shadows=0` and `?lod=` still work on top.
+
+## 063 Paint without texture coordinates
+
+Vehicles, men, houses and field works are merged boxes with a colour per vertex and no
+texture coordinates. Their detail is laid on from position instead
+(`src/client/surface.ts`). Buildings and works use world position: across a wall and up
+it, so streaks run down, and flat over roofs. Units use the model's own space with an
+offset per unit, so each of sixteen patterns travels with its vehicle: three-tone
+camouflage on whatever is paint (told from rubber and steel by its brightness), chips
+and grime, mud thrown over the running gear, dust on top, and rust and ash when it
+burns out. The per-unit number rides in the whole part of the tint's fourth value, whose
+fraction is still the burn. Window glass is a vertex flag that lowers roughness, so the
+sky shows in it.
+
+## 064 Camouflage for the eye, symbols for the player
+
+Hulls in camouflage and mud are harder to see, which is the point of them and bad for
+play. So the readability layer grows with the realism: past a camera distance of 250 a
+map symbol fades in over every visible unit (frame in the army's colour, glyph per type,
+brighter when selected), a constant size on screen, one draw call. Close up there are
+none and the markings on the vehicles do the work.

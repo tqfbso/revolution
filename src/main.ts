@@ -117,10 +117,10 @@ async function start(): Promise<void> {
   fog.setMap(map);
   const terrain = new Terrain(map, fog, look);
   const effects = new Effects();
-  const structures = new StructureView(map, terrain, fog, effects, shadows);
-  const works = new WorksView(map, terrain, fog, effects, shadows);
+  const structures = new StructureView(map, terrain, fog, effects, look);
+  const works = new WorksView(map, terrain, fog, effects, look);
   const scars = new Scars(fog, terrain);
-  const units = new UnitView(terrain, effects, fog, shadows, structures, scars);
+  const units = new UnitView(terrain, effects, fog, look, structures, scars);
   units.lodNear *= lodScale;
   units.lodFar *= lodScale;
   const rts = new RtsCamera(canvas, terrain);
@@ -378,6 +378,7 @@ async function start(): Promise<void> {
     last = now;
     const dt = Math.min(dtMs / 1000, 0.1);
     rts.update(dt);
+    units.zoom = rts.distance;
     units.update(now, dt, rts.camera);
     structures.update(now / 1000, dt);
     works.update(now / 1000);
