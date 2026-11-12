@@ -8,6 +8,7 @@ import { CommandCard } from './client/card';
 import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
+import { makeLook, readQuality, skyScene } from './client/look';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
@@ -31,7 +32,8 @@ import {
   KIND_TANK,
 } from './sim/units';
 
-const SKY = 0x9db4c4;
+/** The haze at the horizon: what distance fades into. */
+const SKY = 0xa9b6bd;
 
 /**
  * WebGPU where available, WebGL2 otherwise (Three.js picks). If WebGPU is advertised but
@@ -76,6 +78,7 @@ async function start(): Promise<void> {
   let windowFrames = 0;
   renderer.setPixelRatio(ratio);
 
+  const quality = readQuality(params);
   const shadows = params.get('shadows') !== '0';
   const lodScale = Math.min(Math.max(Number(params.get('lod') ?? 1) || 1, 0.25), 4);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -86,11 +89,13 @@ async function start(): Promise<void> {
   scene.background = new THREE.Color(SKY);
   scene.fog = new THREE.Fog(SKY, 500, 2200);
   // Overcast-bright sky light plus a low, warm sun: long readable shadows, muted colours.
-  scene.add(new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, 1.25));
-  const sun = new THREE.DirectionalLight(0xffe8c4, 3.4);
+  // With reflections on, most of the sky's light comes from the environment map instead.
+  scene.add(new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.95));
+  const sun = new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 3.7);
   const sunDir = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
   sun.castShadow = shadows;
-  sun.shadow.mapSize.set(2048, 2048);
+  const shadowSize = quality === 'high' ? 4096 : quality === 'low' ? 1024 : 2048;
+  sun.shadow.mapSize.set(shadowSize, shadowSize);
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
@@ -98,10 +103,19 @@ async function start(): Promise<void> {
   // The same generator the sim worker runs: both derive the map from the seed.
   // You command the red army (team 0) and see what it sees. `?fog=0` lifts the fog,
   // `?control=all` lets you select and order every army.
+  const look = makeLook(quality, shadows);
   const fog = new Fog(params.get('fog') !== '0');
+  if (look.rich) {
+    fog.clouds = look.tex.noise;
+    // What shiny things reflect, and the light that comes from the whole sky.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(skyScene(sunDir), 0.02).texture;
+    scene.environmentIntensity = 0.55;
+    pmrem.dispose();
+  }
   const map = generateMap(seed);
   fog.setMap(map);
-  const terrain = new Terrain(map, fog, shadows);
+  const terrain = new Terrain(map, fog, look);
   const effects = new Effects();
   const structures = new StructureView(map, terrain, fog, effects, shadows);
   const works = new WorksView(map, terrain, fog, effects, shadows);
@@ -111,7 +125,7 @@ async function start(): Promise<void> {
   units.lodFar *= lodScale;
   const rts = new RtsCamera(canvas, terrain);
   const hud = new Hud();
-  hud.stats.backend = backend + (shadows ? '' : ' (no shadows)');
+  hud.stats.backend = `${backend}, ${quality} detail${shadows ? '' : ', no shadows'}`;
 
   const worker = new Worker(new URL('./worker/sim.worker.ts', import.meta.url), {
     type: 'module',
@@ -322,6 +336,21 @@ async function start(): Promise<void> {
       }
     }
   });
+  // Graphics detail is chosen on screen and remembered; it takes a reload to rebuild
+  // every material.
+  const pickQuality = document.getElementById('quality') as HTMLSelectElement | null;
+  if (pickQuality) {
+    pickQuality.value = quality;
+    pickQuality.addEventListener('change', () => {
+      try {
+        localStorage.setItem('revolution.quality', pickQuality.value);
+      } catch {
+        // not remembered; the address still carries it
+      }
+      params.set('quality', pickQuality.value);
+      location.search = params.toString();
+    });
+  }
   const helpEl = document.getElementById('help');
   const toggleHelp = () => {
     if (helpEl) helpEl.style.display = helpEl.style.display === 'block' ? 'none' : 'block';
@@ -353,6 +382,7 @@ async function start(): Promise<void> {
     structures.update(now / 1000, dt);
     works.update(now / 1000);
     effects.update(dt, rts.camera);
+    terrain.update(dt);
     input.update(dt);
     card.update();
     minimap.update(now);

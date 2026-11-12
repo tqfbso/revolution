@@ -631,3 +631,39 @@ stay as they are; what changes is how fast things die and how soon fights begin.
   often ticks run, never what a tick does, so lockstep is unaffected. Orders given while
   paused wait in the queue and all start on the first tick after resuming; the screen
   counts them.
+
+## 059 The look before the factions
+
+Fabio, 2026-11-12, on the coordinator's proposal: the visual realism pass moves ahead of
+the factions (it was the first half of the old "M10 Polish"). Three reasons. The look is
+the biggest gap to the goal now that the game underneath is fun. Surface detail, lighting
+and effects are the frame-rate risk, and it is cheaper to meet it with one roster than
+with three. And three rosters built on placeholder paint would be painted twice. Menus,
+save/replay and authored models stay last, as M11.
+
+## 060 Textures and sounds are made in code
+
+Every texture is baked at start-up from tileable noise (`src/client/textures.ts`): a
+height field per surface, its slopes as the normal map, a tone and a roughness channel.
+They only add detail; colour still comes from vertices, so one texture serves every
+building or every vehicle. No downloads, no licences, nothing to keep in the repository,
+and a quality level can ask for smaller ones. The price is that they are plausible
+rather than photographic. Photo textures (CC0, from ambientCG or Poly Haven) can replace
+any one of them later behind the same four channels.
+
+## 061 One function shades the world
+
+`Fog.shade()` already multiplied every surface by the fog of war. Cloud shadows live in
+the same function, so ground, roofs, hulls and trees darken together as a cloud passes,
+at the cost of one texture read. The ground keeps a second, writable texture of wear
+(512 x 512, one texel per two world units): tracks are drawn into it at start-up, and
+the battle adds to it. It is display only; the sim does not know it and replays do not
+need it.
+
+## 062 Three graphics levels instead of a list of switches
+
+`low` keeps the flat look from before this milestone and costs about what it did: no
+surface detail, no cloud shadows, no reflections, small shadow map. `normal` is the
+default. `high` adds what only strong graphics cards should pay for. The level is chosen
+on screen, remembered, and applied by reloading, because every material is built for it.
+`?shadows=0` and `?lod=` still work on top.
