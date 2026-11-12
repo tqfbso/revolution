@@ -6,7 +6,7 @@ import type { Command } from '../sim/commands';
 export type Scenario = 'skirmish' | 'assault' | 'clash' | 'roam';
 
 /** Integers per base building in Snapshot.bases. */
-export const BASE_STRIDE = 18;
+export const BASE_STRIDE = 19;
 /** Bits of Snapshot.task: the truck's job (JOB_*), then the stance. */
 export const TASK_JOB_MASK = 7;
 export const TASK_HOLD_FIRE = 8;
@@ -88,7 +88,7 @@ export interface Snapshot {
   /**
    * Base buildings, BASE_STRIDE integers each: structure id, type, team, cell x, cell y,
    * construction 0..100, entries queued, progress of the first 0..100, the eight queue
-   * entries, rally x and y in world units.
+   * entries, rally x and y in world units, repeat on (0 or 1).
    */
   bases: Int32Array;
   /**

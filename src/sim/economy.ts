@@ -8,6 +8,7 @@ import {
   CMD_FOUND,
   CMD_GATHER,
   CMD_RALLY,
+  CMD_REPEAT,
   CMD_RESEARCH,
   CMD_STANCE,
   CMD_TRAIN,
@@ -42,6 +43,7 @@ import {
   KIND_STRIKE,
   KIND_TANK,
   KIND_TRUCK,
+  POINTS,
 } from './units';
 import {
   EV_BUILT,
@@ -164,7 +166,7 @@ export const BUILDINGS: readonly Building[] = [
     fuel: 0,
     credits: 150,
     ticks: 600,
-    tier: 2,
+    tier: 1,
   },
 ];
 
@@ -186,17 +188,17 @@ const price = (
 export const UNIT_PRICE: readonly UnitPrice[] = (() => {
   const t = new Array<UnitPrice>(KIND_COUNT);
   t[KIND_TRUCK] = price(B_HQ, 1, 60, 0, 0, 10);
-  t[KIND_INFANTRY] = price(B_BARRACKS, 1, 80, 0, 0, 10);
-  t[KIND_RECON] = price(B_BARRACKS, 1, 50, 0, 30, 12);
-  t[KIND_ATGM] = price(B_BARRACKS, 2, 110, 0, 20, 14);
-  t[KIND_ENGINEER] = price(B_BARRACKS, 1, 90, 0, 0, 12);
-  t[KIND_IFV] = price(B_WORKS, 1, 130, 60, 0, 20);
-  t[KIND_TANK] = price(B_WORKS, 2, 220, 100, 0, 32);
-  t[KIND_AD] = price(B_WORKS, 2, 160, 60, 60, 22);
-  t[KIND_ARTILLERY] = price(B_WORKS, 3, 200, 80, 100, 38);
-  t[KIND_EW] = price(B_WORKS, 3, 150, 60, 200, 32);
-  t[KIND_DRONE] = price(B_DRONES, 2, 40, 0, 60, 10);
-  t[KIND_STRIKE] = price(B_DRONES, 3, 60, 10, 80, 10);
+  t[KIND_INFANTRY] = price(B_BARRACKS, 1, 40, 0, 0, 5);
+  t[KIND_RECON] = price(B_BARRACKS, 1, 40, 0, 20, 8);
+  t[KIND_ATGM] = price(B_BARRACKS, 1, 70, 0, 10, 8);
+  t[KIND_ENGINEER] = price(B_BARRACKS, 1, 50, 0, 0, 7);
+  t[KIND_IFV] = price(B_WORKS, 1, 150, 60, 0, 25);
+  t[KIND_TANK] = price(B_WORKS, 2, 320, 160, 0, 55);
+  t[KIND_AD] = price(B_WORKS, 2, 160, 60, 60, 28);
+  t[KIND_ARTILLERY] = price(B_WORKS, 3, 240, 100, 120, 50);
+  t[KIND_EW] = price(B_WORKS, 3, 150, 60, 200, 35);
+  t[KIND_DRONE] = price(B_DRONES, 1, 30, 0, 30, 6);
+  t[KIND_STRIKE] = price(B_DRONES, 2, 50, 0, 60, 8);
   return t;
 })();
 
@@ -216,8 +218,8 @@ export const LOAD_TICKS = 100;
 /** A well pumps this much a second into a tank this big; trucks take what is in it. */
 export const WELL_RATE = 3;
 export const WELL_TANK = 300;
-/** No army fields more than this, however many depots it builds. */
-export const POP_MAX = 600;
+/** No army fields more than this many army points (see POINTS), however many depots it builds. */
+export const POP_MAX = 800;
 /** Trucks that can usefully work on one building at once. */
 export const MAX_BUILDERS = 5;
 /** Health a truck restores per tick on a finished building of its own army. */
@@ -262,6 +264,8 @@ function place(w: World, team: number, type: number, x: number, y: number, done:
   w.sType[s] = type;
   w.sBuild[s] = done ? b.ticks : 0;
   w.sQueueLen[s] = 0;
+  w.sRepeat[s] = 0;
+  w.sLast[s] = 255;
   w.sProgress[s] = 0;
   // New units gather just south of the building until the player says otherwise.
   w.sRallyX[s] = ((2 * x + b.w) << CELL_SHIFT) >> 1;
@@ -334,6 +338,11 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       if (!canPay(w, team, p)) return true;
       pay(w, team, p, 1);
       w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = kind;
+      w.sLast[s] = kind;
+      return true;
+    }
+    case CMD_REPEAT: {
+      if (ownBase(w, cmd.structure, true)) w.sRepeat[cmd.structure] = cmd.on ? 1 : 0;
       return true;
     }
     case CMD_RESEARCH: {
@@ -536,10 +545,24 @@ function updateTrucks(w: World): void {
   }
 }
 
+/** A building on repeat puts its last unit on the queue again, if the army can pay for it. */
+function repeatTrain(w: World, s: number): void {
+  const p = UNIT_PRICE[w.sLast[s]];
+  const team = w.sTeam[s];
+  if (p === undefined || p.from !== w.sType[s] || w.tier[team] < p.tier) return;
+  if (!canPay(w, team, p)) return;
+  pay(w, team, p, 1);
+  w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = w.sLast[s];
+}
+
 function updateProduction(w: World): void {
   const map = w.map;
   for (let s = 0; s < map.structCount; s++) {
-    if (w.sQueueLen[s] === 0 || w.sTeam[s] === NO_TEAM) continue;
+    if (w.sTeam[s] === NO_TEAM) continue;
+    if (w.sQueueLen[s] === 0) {
+      if (w.sRepeat[s] === 1 && w.sHp[s] > 0 && w.sLast[s] !== 255) repeatTrain(w, s);
+      continue;
+    }
     if (w.sHp[s] <= 0) {
       w.sQueueLen[s] = 0;
       continue;
@@ -553,7 +576,7 @@ function updateProduction(w: World): void {
     }
     const unit = item !== TIER_ITEM;
     // An army at its limit builds nothing more until it has lost something or grown.
-    if (unit && w.pop[team] >= w.popCap[team]) continue;
+    if (unit && w.pop[team] + POINTS[item] > w.popCap[team]) continue;
     if (w.sProgress[s] < p.ticks) w.sProgress[s]++;
     if (w.sProgress[s] < p.ticks) continue;
     if (unit) {
@@ -562,7 +585,7 @@ function updateProduction(w: World): void {
       const oy = ((map.sY[s] + map.sH[s]) << CELL_SHIFT) + (CELL_FX >> 1);
       const id = spawnUnit(w, item, team, ox, oy);
       if (id < 0) continue;
-      w.pop[team]++;
+      w.pop[team] += POINTS[item];
       w.events.push(EV_TRAINED, id, s);
       rally(w, id, s);
     } else {
@@ -600,7 +623,8 @@ function rally(w: World, id: number, s: number): void {
 function countForces(w: World): void {
   w.pop.fill(0);
   w.popCap.fill(0);
-  for (let i = 0; i < w.count; i++) if (w.state[i] === STATE_ALIVE) w.pop[w.team[i]]++;
+  for (let i = 0; i < w.count; i++)
+    if (w.state[i] === STATE_ALIVE) w.pop[w.team[i]] += POINTS[w.kind[i]];
   for (let s = 0; s < w.map.structCount; s++) {
     const team = w.sTeam[s];
     if (team === NO_TEAM || w.sHp[s] <= 0) continue;

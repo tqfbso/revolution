@@ -5,6 +5,7 @@ import {
   CMD_FOUND,
   CMD_GATHER,
   CMD_MOVE,
+  CMD_REPEAT,
   CMD_RESEARCH,
   CMD_SPAWN,
   CMD_STANCE,
@@ -36,7 +37,7 @@ import {
 } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
-import { KIND_INFANTRY, KIND_TANK, KIND_TRUCK } from '../src/sim/units';
+import { KIND_INFANTRY, KIND_TANK, KIND_TRUCK, POINTS } from '../src/sim/units';
 import {
   EV_SHOT,
   JOB_NONE,
@@ -228,6 +229,55 @@ describe('production', () => {
     expect(w.sQueueLen[s]).toBe(1);
   });
 
+  it('counts army points: a tank takes five slots, a squad one', () => {
+    expect(POINTS[KIND_TANK]).toBe(5);
+    expect(POINTS[KIND_INFANTRY]).toBe(1);
+    const w = base();
+    w.tier[0] = 2;
+    step(w, [
+      { type: CMD_FOUND, team: 0, building: B_WORKS, x: 70, y: 50 },
+      {
+        type: CMD_SPAWN,
+        count: 55,
+        team: 0,
+        kind: KIND_INFANTRY,
+        x: cell(40),
+        y: cell(40),
+        radius: fx(10),
+        wander: false,
+      },
+    ]);
+    const works = w.map.structCount - 1;
+    w.supplies[0] = 2000;
+    w.fuel[0] = 500;
+    // 2 trucks + 55 squads = 57 of 60 points: a tank (5) must wait, though slots remain.
+    run(w, 40, [{ type: CMD_TRAIN, structure: works, kind: KIND_TANK }]);
+    expect(w.pop[0]).toBe(57);
+    run(w, UNIT_PRICE[KIND_TANK].ticks + 40);
+    expect(unitsOf(w, KIND_TANK).length).toBe(0);
+    expect(w.sQueueLen[works]).toBe(1);
+  });
+
+  it('repeats the last unit while the building is on repeat', () => {
+    const w = base();
+    const s = hq(w);
+    step(w, [{ type: CMD_FOUND, team: 0, building: B_BARRACKS, x: 70, y: 50 }]);
+    const barracks = w.map.structCount - 1;
+    w.supplies[0] = 1000;
+    const t = UNIT_PRICE[KIND_INFANTRY].ticks;
+    step(w, [
+      { type: CMD_TRAIN, structure: barracks, kind: KIND_INFANTRY },
+      { type: CMD_REPEAT, structure: barracks, on: true },
+    ]);
+    run(w, t * 4 + 10);
+    expect(unitsOf(w, KIND_INFANTRY).length).toBeGreaterThanOrEqual(4);
+    step(w, [{ type: CMD_REPEAT, structure: barracks, on: false }]);
+    const n = unitsOf(w, KIND_INFANTRY).length;
+    run(w, t * 3);
+    expect(unitsOf(w, KIND_INFANTRY).length).toBeLessThanOrEqual(n + 1);
+    expect(s).toBeGreaterThanOrEqual(0);
+  });
+
   it('opens up with the technology tier', () => {
     const w = base();
     const s = hq(w);
@@ -261,7 +311,7 @@ describe('the skirmish', () => {
       expect(w.sTeam.filter((t) => t === team).length).toBe(1);
       expect(unitsOf(w, KIND_TRUCK, team).length).toBe(6);
       expect(w.popCap[team]).toBe(60);
-      expect(w.pop[team]).toBe(24);
+      expect(w.pop[team]).toBe(28);
     }
     // A truck sent to the nearest stockpile comes back with a load.
     const before = w.supplies[0];

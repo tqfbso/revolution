@@ -182,7 +182,7 @@ function postSnapshot(w: World, simMs: number): void {
       Math.floor((w.sProgress[s] * 100) / need),
     );
     for (let q = 0; q < QUEUE_MAX; q++) bases.push(w.sQueue[s * QUEUE_MAX + q]);
-    bases.push(Math.round(fromFx(w.sRallyX[s])), Math.round(fromFx(w.sRallyY[s])));
+    bases.push(Math.round(fromFx(w.sRallyX[s])), Math.round(fromFx(w.sRallyY[s])), w.sRepeat[s]);
   }
   if (bases.length % BASE_STRIDE !== 0) throw new Error('base record size');
   const events = Int32Array.from(w.events);

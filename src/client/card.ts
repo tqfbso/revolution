@@ -3,6 +3,7 @@ import {
   CMD_ASSIST,
   CMD_BUILD,
   CMD_CANCEL,
+  CMD_REPEAT,
   CMD_DEMOLISH,
   CMD_FORTIFY,
   CMD_GATHER,
@@ -25,7 +26,7 @@ import {
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
 import { MAP_CELLS, canPlace, type GameMap } from '../sim/map';
-import { KINDS, KIND_TRUCK } from '../sim/units';
+import { KINDS, KIND_TRUCK, POINTS } from '../sim/units';
 import { MAX_ORDER, WORKS, WORK_COUNT, canFortify } from '../sim/works';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
 import {
@@ -198,7 +199,11 @@ export class CommandCard {
     if (act === 'train') this.send({ type: CMD_TRAIN, structure: s, kind: k });
     else if (act === 'tier') this.send({ type: CMD_RESEARCH, structure: s });
     else if (act === 'cancel') this.send({ type: CMD_CANCEL, structure: s });
-    else if (act === 'place') {
+    else if (act === 'repeat') {
+      const rec = this.record(s);
+      const on = rec >= 0 && this.structures.bases[rec + 18] === 1;
+      this.send({ type: CMD_REPEAT, structure: s, on: !on });
+    } else if (act === 'place') {
       this.placing = k;
       this.cancelTool();
     } else if (act === 'work') {
@@ -451,7 +456,7 @@ export class CommandCard {
   private render(): void {
     let res =
       `<i class="sup">Supplies ${this.supplies}</i><i class="fuel">Fuel ${this.fuel}</i>` +
-      `<i class="cred">Credits ${this.credits}</i><i>Units ${this.pop}/${this.popCap}</i>` +
+      `<i class="cred">Credits ${this.credits}</i><i>Army ${this.pop}/${this.popCap}</i>` +
       `<i>Tier ${this.tier}</i>`;
     const idle = this.idle().length;
     if (idle > 0) res += `<button>Idle trucks ${idle} (.)</button>`;
@@ -479,17 +484,24 @@ export class CommandCard {
             const name = item === TIER_ITEM ? `Tier ${this.tier + 1}` : KINDS[item].name;
             names.push(q === 0 ? `<b>${name} ${bases[rec + 7]}%</b>` : name);
           }
-          const waiting = this.pop >= this.popCap && bases[rec + 8] !== TIER_ITEM;
-          html += `<div class="queue">${names.join(' · ')}${waiting ? ' <i class="short">unit limit reached: build depots</i>' : ''}</div>`;
+          const first = bases[rec + 8];
+          const waiting = first !== TIER_ITEM && this.pop + POINTS[first] > this.popCap;
+          html += `<div class="queue">${names.join(' · ')}${waiting ? ' <i class="short">army limit reached: build depots</i>' : ''}</div>`;
         }
         html += '<div class="row">';
         UNIT_PRICE.forEach((p, kind) => {
-          if (p.from === type) html += this.button('train', kind, KINDS[kind].name, p);
+          if (p.from === type) {
+            const pts = POINTS[kind] > 1 ? ` ${POINTS[kind]} pts` : '';
+            html += this.button('train', kind, KINDS[kind].name + pts, p);
+          }
         });
         const next = TIER_PRICE[this.tier];
         if (type === B_HQ && this.tier < MAX_TIER && next) {
           html += this.button('tier', 0, `Tier ${this.tier + 1}`, { ...next, tier: 0 });
         }
+        const repeating = bases[rec + 18] === 1;
+        if (type !== B_HQ)
+          html += this.button('repeat', 0, 'Repeat', null, repeating ? 'on' : 'off', repeating);
         if (queued > 0) html += this.button('cancel', 0, 'Cancel last', null, 'refund');
         html += '</div>';
         html += `<div class="hint">Right click the ground: rally point. On a stockpile or a well: new trucks start hauling.</div>`;

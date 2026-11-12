@@ -93,6 +93,7 @@ import {
   KIND_STRIKE,
   KIND_TANK,
   KIND_TRUCK,
+  POINTS,
 } from './units';
 import {
   FLAG_BOMBARD,
@@ -163,7 +164,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     period: 60,
     trucks: 9,
     factories: 2,
-    size: 70,
+    size: 100,
     queue: 1,
     builders: 1,
     garrison: 2,
@@ -183,7 +184,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     period: 40,
     trucks: 12,
     factories: 3,
-    size: 140,
+    size: 220,
     queue: 1,
     builders: 2,
     garrison: 3,
@@ -203,7 +204,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     period: 20,
     trucks: 26,
     factories: 10,
-    size: 600,
+    size: 800,
     queue: 2,
     builders: 2,
     garrison: 4,
@@ -223,7 +224,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     period: 20,
     trucks: 36,
     factories: 14,
-    size: 600,
+    size: 800,
     queue: 2,
     builders: 3,
     garrison: 5,
@@ -1032,7 +1033,7 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     hqDone &&
     trucksAll < truckTarget &&
     w.sQueueLen[ai.hq] < 2 &&
-    w.pop[team] < w.popCap[team] &&
+    w.pop[team] + POINTS[KIND_TRUCK] <= w.popCap[team] &&
     canPay(w, team, UNIT_PRICE[KIND_TRUCK], 0, 0, 0)
   ) {
     out.push({ type: CMD_TRAIN, structure: ai.hq, kind: KIND_TRUCK });
@@ -1084,7 +1085,7 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   if (count[B_BARRACKS] === 0) type = B_BARRACKS;
   else if (
     w.popCap[team] < Math.min(POP_MAX, ai.tune.size) &&
-    w.pop[team] + 25 >= w.popCap[team] + 40 * risingDepots
+    w.pop[team] + 40 >= w.popCap[team] + 40 * risingDepots
   ) {
     type = B_DEPOT;
     if (expand >= 0) atSite(expand);
@@ -1101,8 +1102,8 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   else if (count[B_BARRACKS] < 2 && minute >= 4) type = B_BARRACKS;
   else if (factories < tune.factories && busy && w.supplies[team] >= 500) {
     // More of whatever it can keep fed: a motor pool only where there is fuel for it.
-    type = 2 * count[B_WORKS] <= count[B_BARRACKS] && w.fuel[team] >= 250 ? B_WORKS : B_BARRACKS;
-    if (w.tier[team] >= 3 && count[B_DRONES] < 2 && w.credits[team] > 500) type = B_DRONES;
+    type = count[B_WORKS] <= count[B_BARRACKS] && w.fuel[team] >= 250 ? B_WORKS : B_BARRACKS;
+    if (w.tier[team] >= 2 && count[B_DRONES] < 2 && w.credits[team] > 400) type = B_DRONES;
   }
   // One building at a time, except that a depot never waits for another building.
   const free = type === B_DEPOT ? risingDepots === 0 : rising.length === risingDepots;
@@ -1152,19 +1153,22 @@ function economy(ai: Ai, w: World, out: Command[]): void {
 function wantedMix(ai: Ai, w: World): void {
   const tier = w.tier[ai.team];
   want.fill(0);
+  // Roughly by head count: a mass of rifles and missile teams, a few carriers, and tanks
+  // as the scarce asset (about one unit in ten) since they cost five army points each.
   if (tier === 1) {
-    want[KIND_INFANTRY] = 60;
-    want[KIND_IFV] = 40;
+    want[KIND_INFANTRY] = 62;
+    want[KIND_ATGM] = 18;
+    want[KIND_IFV] = 20;
   } else {
-    want[KIND_INFANTRY] = 32;
-    want[KIND_ATGM] = 14;
-    want[KIND_IFV] = 16;
-    want[KIND_TANK] = 30;
+    want[KIND_INFANTRY] = 48;
+    want[KIND_ATGM] = 18;
+    want[KIND_IFV] = 12;
+    want[KIND_TANK] = 10;
     want[KIND_AD] = 3;
+    want[KIND_STRIKE] = 6;
     if (tier >= 3) {
-      want[KIND_ARTILLERY] = 9;
+      want[KIND_ARTILLERY] = 4;
       want[KIND_EW] = 1;
-      want[KIND_STRIKE] = 8;
     }
   }
   if (!ai.tune.counter) return;
@@ -1177,14 +1181,14 @@ function wantedMix(ai: Ai, w: World): void {
   if (armour > foot && armour >= 4) {
     // Armour: missiles from cover, and drones on its roof.
     want[KIND_ATGM] += 10;
-    want[KIND_TANK] += 4;
+    want[KIND_TANK] += 2;
     want[KIND_STRIKE] += 4;
-    want[KIND_INFANTRY] -= 10;
+    want[KIND_INFANTRY] -= 8;
   } else if (foot > 2 * armour && foot >= 6) {
     // Infantry: autocannon and shells.
-    want[KIND_IFV] += 10;
-    want[KIND_ARTILLERY] += 4;
-    want[KIND_TANK] -= 6;
+    want[KIND_IFV] += 8;
+    want[KIND_ARTILLERY] += 3;
+    want[KIND_TANK] -= 4;
   }
   if (air >= 2) {
     want[KIND_AD] += 5;
@@ -1192,14 +1196,14 @@ function wantedMix(ai: Ai, w: World): void {
   }
   if (dug >= 3) {
     // A dug-in enemy (houses today, field works later) is a job for guns.
-    want[KIND_ARTILLERY] += 6;
-    want[KIND_TANK] += 4;
+    want[KIND_ARTILLERY] += 5;
+    want[KIND_TANK] += 2;
   }
   if (ai.foeWorks >= 6) {
     // Wire and walls in the way: charges, and guns to shoot the gaps.
     want[KIND_ENGINEER] += 5;
     want[KIND_ARTILLERY] += 4;
-    want[KIND_TANK] += 3;
+    want[KIND_TANK] += 2;
   }
   for (let k = 0; k < KIND_COUNT; k++) {
     if (want[k] < 0 || UNIT_PRICE[k].tier > tier) want[k] = 0;
@@ -1218,7 +1222,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
       const item = w.sQueue[s * QUEUE_MAX + q];
       if (item === TIER_ITEM) continue;
       have[item]++;
-      queued++;
+      queued += POINTS[item];
     }
     if (w.sType[s] !== B_HQ && w.sType[s] !== B_DEPOT) lines.push(s);
   }
@@ -1231,7 +1235,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
   }
   const tier = w.tier[team];
   const scouts = 2 + (tier >= 2 ? 1 : 0) + (ai.level === 'hard' ? 1 : 0);
-  const drones = tier >= 2 ? (ai.level === 'hard' ? 3 : 2) : 0;
+  const drones = tier >= 1 && ai.level !== 'recruit' ? (ai.level === 'hard' ? 3 : 2) : 0;
   // Under attack, everything goes into units: the plans can wait.
   const calm = ai.alarm === null;
   const sappers = calm && w.tick > 3 * MINUTE ? ai.tune.sappers : 0;
@@ -1247,6 +1251,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
     for (let k = 0; k < KIND_COUNT; k++) {
       const p = UNIT_PRICE[k];
       if (p.from !== w.sType[s] || p.tier > tier || !canPay(w, team, p, s0, f0, c0)) continue;
+      if (POINTS[k] > room) continue;
       let score = want[k] * (total + 10) - have[k] * sumWant;
       if (k === KIND_RECON || k === KIND_DRONE) {
         // Eyes are bought by the head, not as a share of the army.
@@ -1270,7 +1275,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
     c0 += p.credits;
     have[best]++;
     total++;
-    room--;
+    room -= POINTS[best];
   }
   // New units report to the staging area.
   for (const s of lines) {

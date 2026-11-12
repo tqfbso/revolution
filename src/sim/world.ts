@@ -214,6 +214,10 @@ export interface World {
   sBuild: Int32Array;
   sQueue: Uint8Array;
   sQueueLen: Uint8Array;
+  /** 1 while the building re-queues `sLast` whenever its queue is empty. */
+  sRepeat: Uint8Array;
+  /** Unit type last queued here (255 = none), for repeat. */
+  sLast: Uint8Array;
   sProgress: Int32Array;
   sRallyX: Int32Array;
   sRallyY: Int32Array;
@@ -327,6 +331,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     sBuild: new Int32Array(MAX_STRUCTS),
     sQueue: new Uint8Array(MAX_STRUCTS * QUEUE_MAX),
     sQueueLen: new Uint8Array(MAX_STRUCTS),
+    sRepeat: new Uint8Array(MAX_STRUCTS),
+    sLast: new Uint8Array(MAX_STRUCTS).fill(255),
     sProgress: new Int32Array(MAX_STRUCTS),
     sRallyX: new Int32Array(MAX_STRUCTS),
     sRallyY: new Int32Array(MAX_STRUCTS),
@@ -384,6 +390,7 @@ export function hashWorld(w: World): number {
     mix(w.map.sX[s] | (w.map.sY[s] << 8) | (w.sType[s] << 16) | (w.sTeam[s] << 24));
     mix(w.sBuild[s]);
     mix(w.sProgress[s] ^ (w.sQueueLen[s] << 24));
+    mix(w.sRepeat[s] | (w.sLast[s] << 8));
     mix(w.sRallyX[s]);
     mix(w.sRallyY[s]);
     for (let q = 0; q < w.sQueueLen[s]; q++) mix(w.sQueue[s * QUEUE_MAX + q]);

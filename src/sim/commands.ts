@@ -206,6 +206,7 @@ export const CMD_DEMOLISH = 22;
 export const CMD_BREACH = 23;
 export const CMD_OCCUPY = 24;
 export const CMD_FIELDWORK = 25;
+export const CMD_REPEAT = 26;
 
 /**
  * Trucks and engineers put up field works, one per cell, in the order given. Each is paid
@@ -259,7 +260,18 @@ export interface FieldworkCommand {
   cells: number[];
 }
 
+/**
+ * Switch a building's repeat on or off. While on, it queues the unit it last trained again
+ * whenever its queue runs dry and the army can pay: fast squads without constant clicking.
+ */
+export interface RepeatCommand {
+  type: typeof CMD_REPEAT;
+  structure: number;
+  on: boolean;
+}
+
 export type Command =
+  | RepeatCommand
   | FortifyCommand
   | DemolishCommand
   | BreachCommand

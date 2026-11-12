@@ -162,7 +162,7 @@ dropped, and in addition every unit standing on the plot is moved to the nearest
 cell. `canPlace` (in the map module, shared with the client's placement preview) demands
 open ground on the plot and one cell around it, which is what guarantees buildings can
 never disconnect the map. Production advances the first queue entry one tick at a time and
-spawns the unit south of the building (`spawnUnit`), unless the army is at its unit limit.
+spawns the unit south of the building (`spawnUnit`), unless the army is at its limit of army points (`POINTS` in units.ts).
 All of it is covered by the state hash.
 
 ## The AI (`src/sim/ai.ts`)

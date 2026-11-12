@@ -91,11 +91,11 @@ const BASE_KINDS: readonly UnitKind[] = [
   {
     name: 'Main battle tank',
     cls: CLASS_VEHICLE,
-    hp: 240,
+    hp: 280,
     speed: fx(0.3),
     range: fx(26),
     reload: 60,
-    damage: [60, 50, 50, 80, 90, 50, 0, 0, 90, 90, 90, 50],
+    damage: [60, 75, 75, 80, 90, 75, 0, 0, 90, 90, 90, 75],
     siege: 60,
     garrison: false,
     wreckTicks: 1800,
@@ -350,6 +350,21 @@ export const KINDS: readonly UnitKind[] = BASE_KINDS.map((k) => {
   }
   return { ...k, hp: scale(k.hp) };
 });
+
+/**
+ * Army points per unit type: what it counts against the army limit (decision 059b). Anyone
+ * on foot or in the air is 1, light vehicles 2, guns 4 and tanks 5, so the limit stops being
+ * a way to fit more tanks into the same slots.
+ */
+export const POINTS: readonly number[] = (() => {
+  const t = new Array<number>(KIND_COUNT).fill(1);
+  t[KIND_TANK] = 5;
+  t[KIND_ARTILLERY] = 4;
+  t[KIND_IFV] = 2;
+  t[KIND_AD] = 2;
+  t[KIND_EW] = 2;
+  return t;
+})();
 
 /** How close an engineer squad must be to what it blows up. */
 export const ENGINEER_REACH = fx(7);

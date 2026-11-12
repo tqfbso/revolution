@@ -404,7 +404,7 @@ destroyed building leaves rubble, like a house (decision 022).
 A headquarters lets an army field 60 units, each depot 40 more, up to 600: three times an
 Age of Empires population, which is the size of battle the game is built for. Depots are
 cheap; the point is that they are targets. An army that loses its depots keeps its units
-but cannot replace losses. One unit counts as one, whatever it is: prices already tell a
+but cannot replace losses. (Superseded by 067: units now count in army points.) One unit counts as one, whatever it is: prices already tell a
 tank from a rifle squad.
 
 ## 039 Technology is bought with credits, so territory pays for it
@@ -713,3 +713,35 @@ information a commander would have. Each tick only the loudest few of each kind 
 and small arms may not take the last voices, so a blast is never crowded out. Volume is
 on screen and remembered. These are first-pass sounds, written without being able to
 listen to them; recorded CC0 samples can replace any of the eight buffers.
+
+## 067 The army limit counts points, and tanks are scarce on purpose
+
+Fabio, 2026-11-12: battles were decided by tank count, so the only play was to build
+tanks. The cause was in the rules: every unit took one of the 600 slots, a tank was worth
+four rifle squads in a fight, and a motor pool turned out tank strength faster than a
+barracks turned out infantry strength. The fix is four rules that work together.
+
+- The limit is in army points, 800 at most (a headquarters 60, a depot 40). A squad, a
+  drone, a missile team, an engineer, a recon team and a truck are 1 point; carriers, air
+  defence and jammers 2; guns 4; a tank 5. A full limit holds at most 160 tanks, and a
+  mixed army of about 60 tanks, 65 other vehicles and 340 squads and drones.
+- Production time and price follow the weight of the thing, as in life: a squad 5 s and 40
+  supplies, an engineer 7 s, a missile team 8 s, a drone 6 s, a carrier 25 s, a tank 55 s
+  and 320 supplies plus 160 fuel, a gun 50 s. Fuel is the brake on armour: one well
+  sustains about one tank a minute.
+- Missile teams and recon drones are tier 1 (the drone workshop with them), strike drones
+  tier 2: the answer to armour exists from the first minute.
+- Rifle squads do 4 times their damage to a vehicle within 8 m: a tank that drives into a
+  town or a wood with no infantry of its own pays for it. The tank itself got a stronger
+  hull (280 base health, was 240) and a harder-hitting gun against men (75, was 50), since
+  at the new price it has to be worth having.
+- Buildings have a Repeat toggle (command 26): while it is on, the last unit queued is
+  queued again whenever the queue is empty and the army can pay, so 5 s squads do not mean
+  constant clicking.
+
+The AI wants a mix of roughly 48 rifles, 18 missile teams, 12 carriers and 10 tanks by
+head count at tier 2, builds a motor pool for every barracks, and counts the limit in
+points. In headless games an army at minute 14 on hard is about 175 rifle squads, 75
+missile teams, 50 carriers and 6 tanks. Duels on open ground (`tools/pointduel.ts`): one
+tank beats eight squads and loses to ten; three tanks beat fifteen; four tanks and twelve
+squads lose to twenty squads and six missile teams, which is the counter working.
