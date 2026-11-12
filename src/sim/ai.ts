@@ -21,11 +21,13 @@ import {
   CMD_FORTIFY,
   CMD_GARRISON,
   CMD_GATHER,
+  CMD_LOAD,
   CMD_MOVE,
   CMD_OCCUPY,
   CMD_RALLY,
   CMD_RESEARCH,
   CMD_TRAIN,
+  CMD_UNLOAD,
   type Command,
 } from './commands';
 import {
@@ -96,6 +98,7 @@ import {
   POINTS,
 } from './units';
 import {
+  FLAG_BOARD,
   FLAG_BOMBARD,
   FLAG_BREACH,
   FLAG_GARRISON,
@@ -153,6 +156,14 @@ interface Tuning {
   sappers: number;
   /** Its belts get tank obstacles behind the wire. */
   traps: boolean;
+  /** Ticks it lets pass after an attack has come home before it sets out again. */
+  rest: number;
+  /** Towns beyond the one at its gate it puts a garrison in before its first attack. */
+  reach: number;
+  /** Its infantry rides to the attack in the carriers it has. */
+  carriers: boolean;
+  /** It orders new units only on every so-many-th think: a slow hand on the production line. */
+  slow: number;
 }
 
 const MINUTE = 60 * TICK_RATE;
@@ -161,10 +172,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
   // A sparring partner for learning the game: a small economy, a long quiet opening,
   // and an attack only with overwhelming numbers.
   recruit: {
-    period: 60,
-    trucks: 9,
+    period: 80,
+    trucks: 6,
     factories: 2,
-    size: 100,
+    size: 70,
     queue: 1,
     builders: 1,
     garrison: 2,
@@ -179,26 +190,37 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     smoke: false,
     sappers: 0,
     traps: false,
+    rest: 8 * MINUTE,
+    reach: 0,
+    carriers: false,
+    slow: 5,
   },
+  // Decision 070: Fabio found this level too hard. It now keeps a small army, holds only
+  // its gate town and one more until it has attacked once, attacks late with what its
+  // carriers can lift, and waits five minutes between attacks.
   easy: {
-    period: 40,
-    trucks: 12,
-    factories: 3,
-    size: 220,
+    period: 60,
+    trucks: 7,
+    factories: 2,
+    size: 110,
     queue: 1,
-    builders: 2,
-    garrison: 3,
-    ratio: 230,
-    firstAttack: 20 * MINUTE,
-    minArmy: 280,
-    breakOff: 45,
-    odds: 20,
+    builders: 1,
+    garrison: 2,
+    ratio: 260,
+    firstAttack: 24 * MINUTE,
+    minArmy: 260,
+    breakOff: 55,
+    odds: 22,
     raids: 0,
     raidParty: 4,
     counter: false,
     smoke: false,
     sappers: 1,
     traps: false,
+    rest: 5 * MINUTE,
+    reach: 1,
+    carriers: true,
+    slow: 3,
   },
   normal: {
     period: 20,
@@ -219,6 +241,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     smoke: false,
     sappers: 2,
     traps: true,
+    rest: 45 * TICK_RATE,
+    reach: 99,
+    carriers: true,
+    slow: 1,
   },
   hard: {
     period: 20,
@@ -239,6 +265,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     smoke: true,
     sappers: 3,
     traps: true,
+    rest: 45 * TICK_RATE,
+    reach: 99,
+    carriers: true,
+    slow: 1,
   },
 };
 
@@ -302,6 +332,8 @@ interface Force {
   turned: boolean;
   /** Objectives taken on this outing. */
   done: number;
+  /** Carriers wait for the squads that are to ride until this tick. */
+  boardUntil: number;
 }
 
 /** A way over the river: a ford, with its bridge if it has one. */
@@ -401,6 +433,11 @@ export interface Ai {
   nest: Int32Array;
   /** Field works it has ordered so far. */
   laid: number;
+  /** Its carriers with squads aboard, and the strength riding with the army and the raid. */
+  loaded: number[];
+  aboard: [number, number];
+  /** Attacks it has launched over the middle of the map. */
+  attacks: number;
   /** One line on what it is up to, for tests and the debug overlay. */
   plan: string;
 }
@@ -426,6 +463,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     smoked: false,
     turned: false,
     done: 0,
+    boardUntil: 0,
   });
   const ai: Ai = {
     team,
@@ -483,6 +521,9 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     fortAt: new Int32Array(MAX_TOWNS + 16),
     nest: new Int32Array(MAX_TOWNS).fill(-1),
     laid: 0,
+    loaded: [],
+    aboard: [0, 0],
+    attacks: 0,
     plan: '',
   };
   seedRng(ai.rng, (seed ^ Math.imul(team + 1, 0x51ed27)) | 0);
@@ -660,6 +701,12 @@ function bankOf(ai: Ai, x: number, y: number): number {
   return x >> CELL_SHIFT < rx ? 0 : 1;
 }
 
+/** Over the middle of the map: on the enemy's bank, or no nearer its own base than his. */
+function across(ai: Ai, x: number, y: number): boolean {
+  if (bankOf(ai, x, y) !== ai.side) return true;
+  return dist(x, y, ai.homeX, ai.homeY) + fx(60) >= dist(x, y, ai.foeX, ai.foeY);
+}
+
 /** First think: find the two headquarters and read the map. False if there is no base. */
 function setUp(ai: Ai, w: World): boolean {
   const map = w.map;
@@ -729,6 +776,9 @@ function perceive(ai: Ai, w: World): void {
   ai.sappers.length = 0;
   ai.members[0].length = 0;
   ai.members[1].length = 0;
+  ai.loaded.length = 0;
+  ai.aboard[0] = 0;
+  ai.aboard[1] = 0;
   for (const g of ai.garr) g.length = 0;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE || w.team[i] !== ai.team) {
@@ -748,7 +798,15 @@ function perceive(ai: Ai, w: World): void {
       ai.post[i] = -1;
       ai.roleKind[i] = kind;
     }
-    if (w.carrier[i] >= 0) continue;
+    if (w.load[i] > 0) ai.loaded.push(i);
+    if (w.carrier[i] >= 0) {
+      // Riding: out of reach of orders, but still part of the body it set out with.
+      const r = ai.role[i];
+      if (r === R_ARMY || r === R_RAID) {
+        ai.aboard[r === R_ARMY ? 0 : 1] += Math.trunc((POWER[kind] * w.hp[i]) / KINDS[kind].hp);
+      }
+      continue;
+    }
     const role = ai.role[i];
     if (role === R_NONE) ai.fresh.push(i);
     else if (role === R_RESERVE) ai.reserve.push(i);
@@ -880,6 +938,8 @@ function centre(w: World, units: readonly number[]): [number, number] {
 // ---------------------------------------------------------------- economy
 
 const DEPOT_REACH = fx(60);
+/** A depot this near a stockpile makes the trucks' trips short. */
+const DEPOT_CLOSE = fx(30);
 
 function canPay(w: World, team: number, p: Price, s: number, f: number, c: number): boolean {
   return (
@@ -954,18 +1014,40 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   let capTotal = 0;
   let expand = -1;
   let expandD = 0;
+  let feeder = -1;
+  let feederStock = 0;
   for (let k = 0; k < map.siteCount; k++) {
     const fuel = map.siteKind[k] === SITE_FUEL;
     const sx = map.siteX[k];
     const sy = map.siteY[k];
     let served = false;
+    let close = false;
     for (const d of drops) {
-      if (structDist2(w, d, sx, sy) <= DEPOT_REACH * DEPOT_REACH) served = true;
+      const d2 = structDist2(w, d, sx, sy);
+      if (d2 <= DEPOT_REACH * DEPOT_REACH) served = true;
+      if (d2 <= DEPOT_CLOSE * DEPOT_CLOSE) close = true;
+    }
+    for (const d of rising) {
+      if (w.sType[d] !== B_DEPOT) continue;
+      if (structDist2(w, d, sx, sy) <= DEPOT_CLOSE * DEPOT_CLOSE) close = true;
     }
     const alive = fuel || w.siteStock[k] > 0;
     const safe = ai.siteBad[k] <= tick;
     ai.siteCap[k] = alive && served && safe ? (fuel ? (w.fuel[team] > 900 ? 1 : 3) : 8) : 0;
     capTotal += ai.siteCap[k];
+    // A stockpile it works from far off: most of each trip is the drive. A depot beside
+    // it pays for itself within a minute or two, so the richest such stockpile gets one.
+    if (
+      !fuel &&
+      served &&
+      safe &&
+      !close &&
+      w.siteStock[k] > 1500 &&
+      w.siteStock[k] > feederStock
+    ) {
+      feeder = k;
+      feederStock = w.siteStock[k];
+    }
     if (served || fuel || !alive || !safe || bankOf(ai, sx, sy) !== ai.side) continue;
     if (expect(ai, w, sx, sy, 2, 0) > 0) continue;
     const d = dist(sx, sy, ai.homeX, ai.homeY);
@@ -1075,6 +1157,7 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   let type = -1;
   let px = hx + ai.fwd * 9;
   let py = hy;
+  let reach = 30;
   const atSite = (k: number) => {
     // Between the stockpile and the well that goes with it, so one depot serves both.
     let mx = map.siteX[k] + (ai.homeX > map.siteX[k] ? fx(16) : -fx(16));
@@ -1091,7 +1174,12 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   // Short of fuel with supplies to spare: the next well is worth a depot.
   const dry = count[B_WORKS] > 0 && w.fuel[team] < 150 && w.supplies[team] > 400;
   if (count[B_BARRACKS] === 0) type = B_BARRACKS;
-  else if (
+  else if (feeder >= 0 && perSite[feeder] >= 2) {
+    type = B_DEPOT;
+    px = (map.siteX[feeder] >> CELL_SHIFT) - 1;
+    py = (map.siteY[feeder] >> CELL_SHIFT) - 1;
+    reach = 6;
+  } else if (
     w.popCap[team] < Math.min(POP_MAX, ai.tune.size) &&
     w.pop[team] + 40 >= w.popCap[team] + 40 * risingDepots
   ) {
@@ -1107,18 +1195,20 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     atSite(expand);
   } else if (count[B_WORKS] === 0 && ai.trucks.length >= 7) type = B_WORKS;
   else if (w.tier[team] >= 2 && count[B_DRONES] === 0) type = B_DRONES;
-  else if (count[B_BARRACKS] < 2 && minute >= 4) type = B_BARRACKS;
+  else if (count[B_BARRACKS] < 2 && minute >= 4 && factories < tune.factories) type = B_BARRACKS;
   else if (factories < tune.factories && busy && w.supplies[team] >= 500) {
     // More of whatever it can keep fed: a motor pool only where there is fuel for it.
     type = count[B_WORKS] <= count[B_BARRACKS] && w.fuel[team] >= 250 ? B_WORKS : B_BARRACKS;
     if (w.tier[team] >= 2 && count[B_DRONES] < 2 && w.credits[team] > 400) type = B_DRONES;
   }
   // One building at a time, except that a depot never waits for another building.
-  const free = type === B_DEPOT ? risingDepots === 0 : rising.length === risingDepots;
+  // A rich army held back only by its unit limit puts up two depots at a time.
+  const depotsAtOnce = w.supplies[team] > 800 ? 2 : 1;
+  const free = type === B_DEPOT ? risingDepots < depotsAtOnce : rising.length === risingDepots;
   if (type >= 0 && free && BUILDINGS[type].tier <= w.tier[team]) {
     const b = BUILDINGS[type];
     if (canPay(w, team, b, s0, 0, 0)) {
-      const plot = findPlot(w, type, px, py, 30);
+      const plot = findPlot(w, type, px, py, reach);
       if (plot >= 0) {
         const x = plot % MAP_CELLS;
         const y = Math.trunc(plot / MAP_CELLS);
@@ -1251,6 +1341,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
   let f0 = calm ? ai.resF : 0;
   let c0 = calm ? ai.resC : 0;
   let room = Math.min(w.popCap[team], ai.tune.size) - w.pop[team] - queued;
+  if (calm && Math.trunc(w.tick / ai.tune.period) % ai.tune.slow !== 0) room = 0;
   for (const s of lines) {
     if (room <= 0) break;
     if (w.sQueueLen[s] >= ai.tune.queue) continue;
@@ -1315,6 +1406,39 @@ function military(ai: Ai, w: World, out: Command[]): void {
   runReserve(ai, w, out);
   runForce(ai, w, out, 0);
   runForce(ai, w, out, 1);
+  dismount(ai, w, out);
+}
+
+/**
+ * Squads get down where the ride ends: at the objective once the assault is on (a carrier
+ * that meets the enemy on the way puts them down by itself), and at home after a retreat.
+ */
+/** A loaded carrier puts its squads down when enemy ground troops are this near. */
+const DISMOUNT = fx(52);
+function dismount(ai: Ai, w: World, out: Command[]): void {
+  const f = ai.forces[0];
+  const down: number[] = [];
+  for (const i of ai.loaded) {
+    const still = (w.flags[i] & FLAG_MOVING) === 0;
+    // Enemy ground troops close by: out, before a missile finds the vehicle full.
+    let danger = false;
+    for (const e of ai.seen) {
+      if (KINDS[w.kind[e]].cls === CLASS_AIR || POWER[w.kind[e]] <= 2) continue;
+      if (dist(w.posX[e], w.posY[e], w.posX[i], w.posY[i]) < DISMOUNT) {
+        danger = true;
+        break;
+      }
+    }
+    if (danger) {
+      down.push(i);
+      continue;
+    }
+    if (ai.role[i] === R_ARMY && f.state === F_MARCH) continue;
+    if (ai.role[i] === R_ARMY && f.state === F_ASSAULT && f.obj !== null) {
+      if (still || dist(w.posX[i], w.posY[i], f.obj.x, f.obj.y) < fx(70)) down.push(i);
+    } else if (still) down.push(i);
+  }
+  if (down.length > 0) out.push({ type: CMD_UNLOAD, units: down });
 }
 
 function order(out: Command[], type: number, units: number[], x: number, y: number): void {
@@ -1331,6 +1455,17 @@ function wantedIn(ai: Ai, w: World, t: number): number {
   if (t < 2) g += g >> 1;
   if (bankOf(ai, map.townX[t], map.townY[t]) !== ai.side) {
     return owner === ai.team ? Math.max(3, g >> 1) : 0;
+  }
+  // A cautious opponent holds the town at its gate and little else until it has attacked.
+  if (ai.attacks === 0 && owner !== ai.team && ai.tune.reach < 9) {
+    const d = dist(map.townX[t], map.townY[t], ai.homeX, ai.homeY);
+    let nearer = 0;
+    for (let o = 0; o < map.townCount; o++) {
+      if (o === t || bankOf(ai, map.townX[o], map.townY[o]) !== ai.side) continue;
+      const od = dist(map.townX[o], map.townY[o], ai.homeX, ai.homeY);
+      if (od < d || (od === d && o < t)) nearer++;
+    }
+    if (nearer > ai.tune.reach) return 0;
   }
   // Its own bank. A town the enemy has taken is the army's business, not the garrison's.
   if (owner === ai.enemy && expect(ai, w, map.townX[t], map.townY[t], 2, 0) > 16) return 0;
@@ -1898,7 +2033,7 @@ function retreat(ai: Ai, f: Force, w: World, beaten: boolean): void {
     const k = obj.kind === OBJ_TOWN ? obj.id : MAX_TOWNS;
     if (f.launch > ai.grudge[k]) ai.grudge[k] = f.launch;
   }
-  if (f.role === R_ARMY) ai.restUntil = w.tick + 45 * TICK_RATE;
+  if (f.role === R_ARMY) ai.restUntil = w.tick + ai.tune.rest;
   f.state = F_RETREAT;
   f.since = w.tick;
   f.obj = null;
@@ -1917,6 +2052,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
     ai.joining.length = 0;
   }
   if (f.state === F_IDLE) {
+    let busy: Set<number> | undefined;
     // Not while the base is under attack or the reserve has its hands full with an intruder.
     const al = ai.alarm;
     if (al !== null && (al.base || al.threat * 3 > strength(w, ai.reserve))) return;
@@ -1945,16 +2081,18 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
       const obj = chooseObjective(ai, w, cx, cy, power);
       if (obj === null) return;
       // Across the river only when the time has come; its own bank it clears at once.
-      if (bankOf(ai, obj.x, obj.y) !== ai.side && tick < tune.firstAttack) return;
+      if (across(ai, obj.x, obj.y) && tick < tune.firstAttack) return;
       for (const i of ai.reserve) ai.role[i] = R_ARMY;
       units.push(...ai.reserve);
       ai.reserve.length = 0;
       f.launch = power;
       f.done = 0;
       ai.lastAttack = tick;
+      if (across(ai, obj.x, obj.y)) ai.attacks++;
       setOut(ai, w, f, units, obj);
+      if (tune.carriers && f.wps.length > 0) busy = mount(w, out, f, units);
     }
-    if (f.wps.length > 0) marchOrders(ai, w, out, f, units, true);
+    if (f.wps.length > 0) marchOrders(ai, w, out, f, units, true, busy);
     return;
   }
   if (units.length === 0) {
@@ -1962,7 +2100,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
     f.obj = null;
     return;
   }
-  const power = strength(w, units);
+  const power = strength(w, units) + ai.aboard[which];
   const [cx, cy] = centre(w, units);
   if (f.state === F_RETREAT) {
     let home = 0;
@@ -2062,6 +2200,43 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
   assault(ai, w, out, f, units, cx, cy, power);
 }
 
+/**
+ * Mount up for the march: squads board the carriers the army has, the nearest first. The
+ * army still keeps together at the pace of whoever walks (a mechanised spearhead that left
+ * its walkers behind lost more games than it won in headless matches), but the squads
+ * under armour arrive whole and get out when the enemy is near (see `dismount`).
+ * Returns the units busy with boarding, to be left out of the march orders of this think.
+ */
+function mount(w: World, out: Command[], f: Force, units: number[]): Set<number> {
+  const carriers: number[] = [];
+  let seats = 0;
+  let sx = 0;
+  let sy = 0;
+  for (const i of units) {
+    const free = KINDS[w.kind[i]].carry - w.load[i];
+    if (free <= 0 || w.hp[i] * 2 < KINDS[w.kind[i]].hp) continue;
+    carriers.push(i);
+    seats += free;
+    sx += w.posX[i];
+    sy += w.posY[i];
+  }
+  const busy = new Set<number>();
+  if (seats === 0) return busy;
+  sx = Math.trunc(sx / carriers.length);
+  sy = Math.trunc(sy / carriers.length);
+  const foot = units.filter((i) => FOOT(w.kind[i]) && w.inside[i] < 0);
+  if (foot.length === 0) return busy;
+  foot.sort(
+    (a, b) => dist(w.posX[a], w.posY[a], sx, sy) - dist(w.posX[b], w.posY[b], sx, sy) || a - b,
+  );
+  const riders = foot.slice(0, seats);
+  out.push({ type: CMD_LOAD, units: riders, carriers });
+  for (const i of riders) busy.add(i);
+  for (const i of carriers) busy.add(i);
+  f.boardUntil = w.tick + 30 * TICK_RATE;
+  return busy;
+}
+
 /** Orders for the march: the line attack-moves on the way point, the rest keep behind it. */
 function marchOrders(
   ai: Ai,
@@ -2070,17 +2245,27 @@ function marchOrders(
   f: Force,
   units: number[],
   all: boolean,
+  busy?: Set<number>,
 ): void {
   const tx = f.wps[2 * f.wp];
   const ty = f.wps[2 * f.wp + 1];
-  const line = units.filter(
-    (i) =>
-      LINE[w.kind[i]] &&
-      (all ||
-        ((w.flags[i] & FLAG_MOVING) === 0 &&
-          w.attack[i] === NO_TARGET &&
-          dist(w.posX[i], w.posY[i], tx, ty) > fx(30))),
-  );
+  // While the squads mount, they and the carriers they are walking to are left alone.
+  const boarding = w.tick < f.boardUntil;
+  const awaited = new Set<number>();
+  if (boarding) {
+    for (const i of units) if ((w.flags[i] & FLAG_BOARD) !== 0) awaited.add(w.orderUnit[i]);
+  }
+  const line = units.filter((i) => {
+    if (!LINE[w.kind[i]] || busy?.has(i)) return false;
+    if ((w.flags[i] & FLAG_BOARD) !== 0) return !boarding;
+    if (awaited.has(i)) return false;
+    return (
+      all ||
+      ((w.flags[i] & FLAG_MOVING) === 0 &&
+        w.attack[i] === NO_TARGET &&
+        dist(w.posX[i], w.posY[i], tx, ty) > fx(30))
+    );
+  });
   order(out, CMD_ATTACK_MOVE, line, tx, ty);
   const [cx, cy] = centre(w, units);
   follow(ai, w, out, units, cx, cy);
@@ -2217,13 +2402,17 @@ function assault(
   }
   if (done || tick - f.since > 6 * MINUTE) {
     f.done++;
-    const next = raid
+    let next = raid
       ? f.done < 2
         ? raidTarget(ai, w)
         : null
       : done
         ? chooseObjective(ai, w, cx, cy, power)
         : null;
+    // One objective leads to the next, but not over the middle before its time has come.
+    if (!raid && next !== null && across(ai, next.x, next.y) && tick < ai.tune.firstAttack) {
+      next = null;
+    }
     if (next === null) {
       retreat(ai, f, w, !done);
       order(out, CMD_MOVE, units, ai.stageX, ai.stageY);

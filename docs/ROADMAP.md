@@ -122,8 +122,7 @@ decision 040); hotkeys for production and a build menu (M10).
   (`tools/matchups.ts`)
 
 Known weak spots, to revisit with play feedback: which side of the map you start on
-matters more than it should in AI against AI games; the AI does not yet use carriers to
-move infantry or smoke to cover an assault on easy and normal; game length is untested
+matters more than it should in AI against AI games; the AI does not yet use smoke to cover an assault on easy and normal; game length is untested
 by a human.
 
 ## M8 Fortifications (done)
@@ -198,6 +197,12 @@ bridge chokepoints and a fix for the slowdown when zoomed in followed in the sam
 - The ridge map (decision 069): no river, four ways across (road over a ridge, forest
   belt, ravine, farmland), mirror-symmetric, seven towns. Default for the skirmish; the
   river map is on the Map menu.
+
+## AI follow-up (built, awaiting Fabio's test)
+
+Fabio, 2026-11-12: easy is still too hard. Decision 070: a smaller, later, more cautious
+easy and recruit; the AI builds depots beside its stockpiles (it was starved of supplies
+on the ridge map); its squads ride to the attack in carriers.
 
 ## Urban warfare (planned, not built; order awaits Fabio)
 

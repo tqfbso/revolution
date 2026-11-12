@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { aiThink, createAi, findCrossings, type Ai, type AiLevel } from '../src/sim/ai';
-import { CMD_FIELDWORK, CMD_FOUND, CMD_SPAWN, type Command } from '../src/sim/commands';
-import { B_BARRACKS, B_HQ } from '../src/sim/economy';
+import { CMD_FIELDWORK, CMD_FOUND, CMD_LOAD, CMD_SPAWN, type Command } from '../src/sim/commands';
+import { B_BARRACKS, B_DEPOT, B_HQ } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
 import { MAP_CELLS, T_WIRE, flatMap, generateMap } from '../src/sim/map';
 import { WORK_WALL } from '../src/sim/works';
@@ -195,6 +195,40 @@ describe('the AI opponent', () => {
     expect(pop('hard')).toBeGreaterThan(pop('easy') + 20);
     expect(pop('easy')).toBeGreaterThan(pop('recruit'));
   });
+
+  it('on the ridge map puts depots beside its stockpiles and its squads into carriers', () => {
+    const w = createWorld(1, generateMap(1, 'ridge'));
+    const ais = [createAi(0, 'normal', 1), createAi(1, 'normal', 1)];
+    step(w, skirmishCommands(w.map));
+    const log: Command[] = [];
+    play(w, ais, 14 * MINUTE, undefined, log);
+    // A depot within 30 m of a supply site it works: short trips, so the purse fills.
+    let beside = 0;
+    for (let s = 0; s < w.map.structCount; s++) {
+      if (w.sTeam[s] !== 0 || w.sType[s] !== B_DEPOT || w.sHp[s] <= 0) continue;
+      for (let k = 0; k < w.map.siteCount; k++) {
+        const dx = (w.map.siteX[k] >> 10) - (w.map.sX[s] + 1) * 4;
+        const dy = (w.map.siteY[k] >> 10) - (w.map.sY[s] + 1) * 4;
+        if (dx * dx + dy * dy < 32 * 32) {
+          beside++;
+          break;
+        }
+      }
+    }
+    expect(beside).toBeGreaterThanOrEqual(2);
+    expect(count(w, 0)).toBeGreaterThan(150);
+    expect(log.some((c) => c.type === CMD_LOAD)).toBe(true);
+  }, 120000);
+
+  it('on easy stays on its side of the map until late and holds only two towns', () => {
+    const w = createWorld(2, generateMap(2, 'ridge'));
+    const ais = [null, createAi(1, 'easy', 2)];
+    step(w, skirmishCommands(w.map));
+    play(w, ais, 20 * MINUTE);
+    expect(ais[1]!.attacks).toBe(0);
+    expect(towns(w, 1)).toBeLessThanOrEqual(2);
+    expect(count(w, 1)).toBeLessThan(120);
+  }, 120000);
 
   it('does nothing without a base, and stops when its headquarters falls', () => {
     const w = createWorld(5, flatMap());
