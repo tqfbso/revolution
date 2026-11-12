@@ -1,7 +1,8 @@
 import * as THREE from 'three/webgpu';
-import { attribute, uv } from 'three/tsl';
+import { attribute, float, positionWorld, smoothstep, texture, uv } from 'three/tsl';
 import { Batch } from './batch';
 import type { Fog } from './fog';
+import type { Look } from './look';
 import type { Terrain } from './terrain';
 
 const MAX_SCARS = 4000;
@@ -20,13 +21,20 @@ export class Scars {
   constructor(
     fog: Fog,
     private readonly terrain: Terrain,
+    look: Look,
   ) {
     const material = new THREE.MeshBasicNodeMaterial({ transparent: true });
     const tint = attribute('aTint', 'vec4');
     material.colorNode = tint.xyz.mul(fog.shade());
     // Dark in the middle, fading out to nothing at the rim.
     const d = uv().sub(0.5).length().mul(2);
-    material.opacityNode = tint.w.mul(d.smoothstep(1, 0.35));
+    if (look.rich) {
+      // A torn edge and streaks of thrown earth, different for every scar.
+      const grain = texture(look.tex.noise, positionWorld.xz.div(9));
+      const ragged = d.add(grain.z.sub(0.5).mul(0.7));
+      material.opacityNode = tint.w.mul(float(1).sub(smoothstep(0.3, 0.95, ragged)));
+      material.colorNode = tint.xyz.mul(grain.w.mul(0.9).add(0.55)).mul(fog.shade());
+    } else material.opacityNode = tint.w.mul(float(1).sub(smoothstep(0.35, 1, d)));
     material.depthWrite = false;
     material.polygonOffset = true;
     material.polygonOffsetFactor = -2;

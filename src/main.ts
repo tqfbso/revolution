@@ -1,4 +1,6 @@
 import * as THREE from 'three/webgpu';
+import { pass } from 'three/tsl';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap } from './sim/map';
@@ -116,10 +118,10 @@ async function start(): Promise<void> {
   const map = generateMap(seed);
   fog.setMap(map);
   const terrain = new Terrain(map, fog, look);
-  const effects = new Effects();
+  const effects = new Effects(look, fog.cloud());
   const structures = new StructureView(map, terrain, fog, effects, look);
   const works = new WorksView(map, terrain, fog, effects, look);
-  const scars = new Scars(fog, terrain);
+  const scars = new Scars(fog, terrain, look);
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
   units.lodNear *= lodScale;
   units.lodFar *= lodScale;
@@ -371,6 +373,15 @@ async function start(): Promise<void> {
   window.addEventListener('resize', resize);
   resize();
 
+  // High detail: fire, flashes and sun glints bleed light into what is around them.
+  let pipeline: THREE.RenderPipeline | null = null;
+  if (quality === 'high') {
+    const scenePass = pass(scene, rts.camera);
+    const lit = scenePass.getTextureNode('output');
+    pipeline = new THREE.RenderPipeline(renderer);
+    pipeline.outputNode = lit.add(bloom(lit, 0.14, 0.3, 1.5));
+  }
+
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -401,7 +412,8 @@ async function start(): Promise<void> {
     }
     sun.target.position.copy(focus);
     sun.position.copy(focus).addScaledVector(sunDir, 400);
-    renderer.render(scene, rts.camera);
+    if (pipeline) pipeline.render();
+    else renderer.render(scene, rts.camera);
     hud.stats.units = units.count;
     hud.stats.selected = units.selectedCount;
     hud.stats.drawCalls = renderer.info.render.drawCalls;
