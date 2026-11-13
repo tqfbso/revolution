@@ -11,6 +11,7 @@ import {
   positionGeometry,
   positionWorld,
   smoothstep,
+  step,
   texture,
   vec2,
   vec3,
@@ -67,7 +68,15 @@ export interface Paint {
  * number per vehicle so that no two wear the same pattern, `burn` 0..1 turns it into a
  * burnt-out wreck.
  */
-export function fieldPaint(look: Look, base: V3, marking: F, seed: F, burn: F): Paint {
+export function fieldPaint(
+  look: Look,
+  base: V3,
+  marking: F,
+  seed: F,
+  burn: F,
+  boxP?: V3,
+  boxH?: THREE.Node<'vec4'>,
+): Paint {
   const p = positionGeometry;
   const shift = vec2(seed.mul(0.37), seed.mul(0.61));
   // Wrap the pattern round the hull: over the top by x and z, down the sides by height.
@@ -91,6 +100,29 @@ export function fieldPaint(look: Look, base: V3, marking: F, seed: F, burn: F): 
   c = mix(c, vec3(0.09, 0.075, 0.057), mud.mul(0.65));
   const dust = normalWorld.y.max(0).mul(fine.y).mul(0.22);
   c = mix(c, vec3(0.16, 0.148, 0.12), dust.mul(isPaint));
+  // Wear from the shape of the model (shape.ts): how far this pixel is from the nearest
+  // edge of the box it belongs to, in wear widths, and how deep in a crease it sits.
+  let chipped: F = float(0);
+  let cloth: F = float(0);
+  if (boxP && boxH) {
+    const d = boxH.xyz.sub(boxP.abs());
+    // The smallest of the three is the face we are on; the next is the way to its edge.
+    const toEdge = d.x.min(d.y).max(d.x.max(d.y).min(d.z));
+    cloth = step(1.5, boxH.w);
+    const crease = boxH.w.fract().div(0.9);
+    const grain = texture(look.tex.noise, uv.mul(2.3).add(shift));
+    // Chips are ragged: the band is eaten into by noise, wide here and absent there.
+    const band = float(1).sub(smoothstep(0.0, 1.0, toEdge));
+    chipped = smoothstep(0.5, 0.62, band.mul(0.6).add(grain.x.mul(0.75))).mul(step(0.02, band));
+    const hard = chipped.mul(float(1).sub(cloth));
+    // Paint chips to primer and bare steel; dark steel and rubber polish paler at the rim.
+    c = mix(c, mix(c.mul(1.9).add(0.012), vec3(0.2, 0.19, 0.175), isPaint), hard.mul(0.8));
+    // Cloth and webbing fray and fade along seams and corners.
+    c = mix(c, c.mul(1.35).add(0.02), band.mul(cloth).mul(0.55));
+    // Creases hold dirt and no light.
+    c = mix(c, c.mul(0.5).add(vec3(0.012, 0.01, 0.008)), crease.mul(0.6));
+    chipped = hard;
+  }
   // A wreck: soot where it burned hottest, rust and ash elsewhere.
   const ash = mix(
     vec3(0.016, 0.015, 0.014),
@@ -100,9 +132,15 @@ export function fieldPaint(look: Look, base: V3, marking: F, seed: F, burn: F): 
   const wreck = mix(ash, vec3(0.1, 0.1, 0.098), smoothstep(0.6, 0.7, fine.z).mul(0.5));
   return {
     colour: mix(c, wreck, burn),
-    roughness: mix(wear.w.add(mud.mul(0.3)).min(1), float(0.95), burn),
+    roughness: mix(
+      mix(wear.w.add(mud.mul(0.3)).min(1), float(0.42), chipped.mul(0.8)).max(cloth.mul(0.9)),
+      float(0.95),
+      burn,
+    ),
     metalness: mix(float(0.12), float(0.55), float(1).sub(isPaint).mul(float(1).sub(marking)))
+      .max(chipped.mul(0.7))
       .mul(float(1).sub(mud))
+      .mul(float(1).sub(cloth))
       .mul(float(1).sub(burn)),
   };
 }

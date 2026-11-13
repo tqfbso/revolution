@@ -47,7 +47,7 @@ describe('soldier rig', () => {
                   1,
                   0,
                 );
-                expect(frames.length).toBe(lod === 0 ? 11 : 6);
+                expect(frames.length).toBe(lod === 0 ? 11 : 8);
                 for (const f of frames) {
                   for (const v of f) expect(Number.isFinite(v)).toBe(true);
                   const [xx, xy, xz, yx, yy, yz, zx, zy, zz] = f;

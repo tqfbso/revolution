@@ -233,6 +233,12 @@ Fabio, 2026-11-13: the soldiers are the weakest thing on screen. Decision 075.
 - A flash at each rifle's own muzzle, with recoil
 - One neutral uniform, built from a palette so each faction can be dressed later
 
+## Soldiers, second pass (built, awaiting Fabio's test)
+
+Decision 090. Real body shapes in place of boxes at close and middle distance, kit, a
+carbine, heads that turn; edge wear and crease dirt on soldiers and vehicles; ambient
+occlusion and a colour grade on `normal` and `high`.
+
 ## Surveillance cameras (built, awaiting Fabio's test)
 
 Fabio, 2026-11-13. Decision 076.
@@ -318,12 +324,14 @@ fallback kept working. Nothing below touches the sim or the golden hash.
 
 Each item rides with the work it belongs to, in this order:
 
-- R1 Ambient occlusion and a grade pass (small, Sonnet 5.5). With the soldiers' second
+- R1 Ambient occlusion and a grade pass. BUILT 2026-11-13 (decision 090), without
+  automatic exposure. The plan was: With the soldiers' second
   pass. Half-resolution occlusion from depth with a depth-aware blur, then one grade pass:
   automatic exposure, a film curve, a little vignette, grain and sharpening. On `normal`
   and `high`; `low` stays as it is. The point is contact: soldiers, vehicles and houses
   that sit on the ground instead of floating over it
-- R2 Edge wear and cavity dirt from the shape of the model (small, Sonnet 5.5). With the
+- R2 Edge wear and cavity dirt from the shape of the model. BUILT 2026-11-13 for
+  soldiers and vehicles (decision 090); buildings follow in U4. The plan was: With the
   soldiers' second pass, then vehicles, then buildings in U4. When a model is built, how
   convex or concave each corner is goes into a vertex attribute; the material chips paint
   on outer edges and darkens inner corners. Paid once, free per frame, works instanced

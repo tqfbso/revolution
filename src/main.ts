@@ -1,6 +1,4 @@
 import * as THREE from 'three/webgpu';
-import { pass } from 'three/tsl';
-import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { CMD_ASSIGN, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
@@ -11,6 +9,7 @@ import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
 import { Governor, ratioFor, type Levers } from './client/governor';
 import { PerfTest } from './client/perftest';
+import { makePost } from './client/post';
 import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
@@ -547,14 +546,8 @@ async function start(): Promise<void> {
   window.addEventListener('resize', resize);
   resize();
 
-  // High detail: fire, flashes and sun glints bleed light into what is around them.
-  let pipeline: THREE.RenderPipeline | null = null;
-  if (quality === 'high') {
-    const scenePass = pass(scene, rts.camera);
-    const lit = scenePass.getTextureNode('output');
-    pipeline = new THREE.RenderPipeline(renderer);
-    pipeline.outputNode = lit.add(bloom(lit, 0.14, 0.3, 1.5));
-  }
+  // Ambient occlusion, glow and the grade (post.ts). `?ao=0` leaves the occlusion out.
+  const pipeline = makePost(renderer, scene, rts.camera, look, { ao: params.get('ao') !== '0' });
 
   // The levers the governor (or the performance test) holds, applied when they move.
   const apply = (l: Levers) => {

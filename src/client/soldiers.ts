@@ -11,7 +11,8 @@
 // right is -X, the origin is the ground under his hips.
 import type * as THREE from 'three/webgpu';
 import type { Batch } from './batch';
-import { box, merge } from './models';
+import { box, cyl, merge } from './models';
+import { loft, setWear, type Ring } from './shape';
 
 /** The colours of one army's kit. Build the rig with another to dress another faction. */
 export interface Uniform {
@@ -27,10 +28,10 @@ export interface Uniform {
 
 /** No nation's pattern: worn olive drab cloth, darker webbing, black rifle. */
 export const NEUTRAL: Uniform = {
-  cloth: 0x6a6a4c,
-  vest: 0x494c38,
-  pack: 0x505238,
-  helmet: 0x555a42,
+  cloth: 0x8b8763,
+  vest: 0x5e6146,
+  pack: 0x6a6a48,
+  helmet: 0x6c7052,
   boots: 0x1b1a18,
   gloves: 0x2a2b26,
   skin: 0x9a7a62,
@@ -84,6 +85,7 @@ export class Soldiers {
   private readonly thigh1: Batch;
   private readonly shin1: Batch;
   private readonly rifle1: Batch;
+  private readonly arm1: Batch;
   private readonly p = new Float32Array(FIELDS);
   private readonly f = new Float32Array(12);
   private ox = 0;
@@ -109,6 +111,7 @@ export class Soldiers {
     this.thigh1 = make(m.thigh1, FAR_MEN * 2, 1);
     this.shin1 = make(m.shin1, FAR_MEN * 2, 1);
     this.rifle1 = make(m.rifle1, FAR_MEN, 1);
+    this.arm1 = make(m.arm1, FAR_MEN * 2, 1);
   }
 
   /** Whether another man fits at full detail this frame. */
@@ -124,13 +127,14 @@ export class Soldiers {
         t(this.head) +
         2 * (t(this.thigh) + t(this.shin) + t(this.upper) + t(this.fore)) +
         t(this.rifle),
-      t(this.body1) + 2 * (t(this.thigh1) + t(this.shin1)) + t(this.rifle1),
+      t(this.body1) + 2 * (t(this.thigh1) + t(this.shin1) + t(this.arm1)) + t(this.rifle1),
     ];
   }
 
   /**
    * Draw one man standing at (x, y, z) facing (sin, cos). `kneel`, `prone`, `run` and `aim`
-   * are 0 to 1 and blend the stance; `stride` is where he is in his step; `kick` is recoil.
+   * are 0 to 1 and blend the stance; `stride` is where he is in his step; `kick` is recoil;
+   * `look` turns his head (radians, positive to his left).
    */
   man(
     lod: number,
@@ -149,6 +153,7 @@ export class Soldiers {
     g: number,
     b: number,
     a: number,
+    look = 0,
   ): void {
     this.ox = x;
     this.oy = y;
@@ -214,7 +219,26 @@ export class Soldiers {
 
     if (lod === 0) {
       this.sag(this.torso, 0, hy, hz, -lean);
-      this.sag(this.head, 0, neckY, neckZ, -p[5]);
+      // The head turns on the neck: he watches his arc when he is not looking down his sights.
+      const hs = Math.sin(-p[5]);
+      const hc = Math.cos(-p[5]);
+      const ls = Math.sin(look);
+      const lc = Math.cos(look);
+      this.put(
+        this.head,
+        0,
+        neckY,
+        neckZ,
+        lc,
+        -ls * hs,
+        -ls * hc,
+        0,
+        hc,
+        -hs,
+        ls,
+        lc * hs,
+        lc * hc,
+      );
       this.leg(this.thigh, this.shin, HIP_X, hy, hz, thL, knL);
       this.leg(this.thigh, this.shin, -HIP_X, hy, hz, thR, knR);
       this.sag(this.rifle, gx, gy, gz, pitch);
@@ -226,6 +250,9 @@ export class Soldiers {
       this.leg(this.thigh1, this.shin1, HIP_X, hy, hz, thL, knL);
       this.leg(this.thigh1, this.shin1, -HIP_X, hy, hz, thR, knR);
       this.sag(this.rifle1, gx, gy, gz, pitch);
+      // One straight bone a side, from the shoulder at the hand: enough to read as arms.
+      this.point(-1, shY, shZ, gx, gy - 0.02, gz);
+      this.point(1, shY, shZ, gx, gy + HANDGUARD * sp, gz + HANDGUARD * cp);
     }
   }
 
@@ -289,6 +316,16 @@ export class Soldiers {
     const hzz = nz * d - kz;
     const hl = Math.hypot(hx, hyy, hzz) || 1e-6;
     this.bone(this.fore, sx + kx, shY + ky, shZ + kz, hx / hl, hyy / hl, hzz / hl);
+  }
+
+  /** The middle-distance arm: a single piece from the shoulder toward the hand. */
+  private point(side: number, shY: number, shZ: number, tx: number, ty: number, tz: number) {
+    const sx = side * SHOULDER_X;
+    const nx = tx - sx;
+    const ny = ty - shY;
+    const nz = tz - shZ;
+    const len = Math.hypot(nx, ny, nz) || 1e-6;
+    this.bone(this.arm1, sx, shY, shZ, nx / len, ny / len, nz / len);
   }
 
   /** A piece whose length runs from its joint along the unit vector (dx, dy, dz). */
@@ -366,59 +403,197 @@ export class Soldiers {
   }
 }
 
-/** The pieces of the figure, in metres, each with its joint at the origin. */
+/**
+ * The pieces of the figure, in metres, each with its joint at the origin. Bodies and limbs
+ * are skins over rings (shape.ts), so a man has shoulders, a waist, calves and a helmet
+ * with a curve to it; his kit is boxes, which is what kit is. The middle-distance figure
+ * is the same man with fewer points.
+ */
 function buildParts(u: Uniform) {
+  setWear(0.018);
+  const cloth = { cloth: true };
+  const body = (seg: number, fine: boolean): Ring[] => {
+    const r: Ring[] = [
+      { y: -0.03, rx: 0.14, rz: 0.095 },
+      { y: 0.06, rx: 0.168, rz: 0.115 },
+      { y: 0.17, rx: 0.148, rz: 0.098 },
+      { y: 0.3, rx: 0.172, rz: 0.115 },
+      { y: 0.42, rx: 0.2, rz: 0.118 },
+      { y: 0.485, rx: 0.165, rz: 0.095 },
+      { y: 0.53, rx: 0.055, rz: 0.058 },
+    ];
+    return fine || seg > 5 ? r : [r[0], r[1], r[2], r[4], r[5], r[6]];
+  };
+  const carrier = (seg: number) =>
+    loft(
+      [
+        { y: 0.15, rx: 0.165, rz: 0.118 },
+        { y: 0.19, rx: 0.19, rz: 0.142 },
+        { y: 0.41, rx: 0.196, rz: 0.148 },
+        { y: 0.455, rx: 0.165, rz: 0.118 },
+      ],
+      { seg, square: 3.6, color: u.vest, ...cloth },
+    );
+  const pack = (seg: number) =>
+    loft(
+      [
+        { y: 0.15, rx: 0.13, rz: 0.07 },
+        { y: 0.2, rx: 0.155, rz: 0.092 },
+        { y: 0.44, rx: 0.15, rz: 0.088 },
+        { y: 0.5, rx: 0.12, rz: 0.062 },
+      ],
+      { seg, square: 3.2, color: u.pack, at: [0, 0, -0.215], ...cloth },
+    );
+  const skull = (seg: number, at: number) =>
+    loft(
+      [
+        { y: 0, rx: 0.052, rz: 0.055 },
+        { y: 0.055, rx: 0.05, rz: 0.058 },
+        { y: 0.085, rx: 0.07, rz: 0.082, z: 0.008 },
+        { y: 0.15, rx: 0.08, rz: 0.094, z: 0.006 },
+        { y: 0.2, rx: 0.074, rz: 0.086 },
+      ],
+      { seg, color: u.skin, at: [0, at, 0] },
+    );
+  const helmet = (seg: number, at: number) =>
+    loft(
+      [
+        { y: 0.128, rx: 0.106, rz: 0.124, z: -0.006 },
+        { y: 0.15, rx: 0.11, rz: 0.128, z: -0.006 },
+        { y: 0.215, rx: 0.103, rz: 0.12, z: -0.004 },
+        { y: 0.262, rx: 0.076, rz: 0.09 },
+        { y: 0.284, rx: 0.034, rz: 0.042 },
+      ],
+      { seg, color: u.helmet, team: 0.1, at: [0, at, 0] },
+    );
+
   const torso = merge([
-    box(0.32, 0.18, 0.2, { at: [0, 0.07, 0], color: u.cloth }),
-    box(0.345, 0.05, 0.225, { at: [0, 0.15, 0], color: u.vest }), // belt
-    box(0.37, 0.34, 0.2, { at: [0, 0.34, 0], top: [1.08, 1], color: u.cloth }),
-    box(0.4, 0.3, 0.27, { at: [0, 0.33, 0.005], color: u.vest }), // plate carrier
-    box(0.3, 0.11, 0.06, { at: [0, 0.26, 0.16], color: u.pack }), // magazine pouches
-    box(0.1, 0.09, 0.07, { at: [0.13, 0.4, 0.15], color: u.gloves }), // radio
-    box(0.3, 0.36, 0.15, { at: [0, 0.36, -0.2], top: [0.9, 0.8], color: u.pack }),
-    box(0.26, 0.1, 0.13, { at: [0, 0.58, -0.19], color: u.cloth }), // bedroll
-    box(0.49, 0.08, 0.2, { at: [0, 0.47, 0], color: u.cloth }), // shoulders
-    box(0.03, 0.09, 0.1, { at: [0.25, 0.44, 0], team: 1 }), // shoulder patches
-    box(0.03, 0.09, 0.1, { at: [-0.25, 0.44, 0], team: 1 }),
+    loft(body(10, true), { seg: 10, square: 2.5, color: u.cloth, ...cloth }),
+    carrier(8),
+    pack(8),
+    box(0.345, 0.045, 0.24, { at: [0, 0.14, 0], color: u.vest, ...cloth }), // belt
+    // Magazine pouches across the front, a radio high on the left, a pouch on each hip.
+    box(0.085, 0.125, 0.05, { at: [-0.095, 0.25, 0.165], color: u.pack, ...cloth }),
+    box(0.085, 0.125, 0.05, { at: [0, 0.25, 0.168], color: u.pack, ...cloth }),
+    box(0.085, 0.125, 0.05, { at: [0.095, 0.25, 0.165], color: u.pack, ...cloth }),
+    box(0.07, 0.1, 0.045, { at: [0.11, 0.39, 0.158], color: u.gloves }),
+    box(0.012, 0.16, 0.012, { at: [0.135, 0.5, 0.15], color: u.weapon }), // its aerial
+    box(0.06, 0.11, 0.11, { at: [0.185, 0.12, -0.02], color: u.pack, ...cloth }),
+    box(0.06, 0.11, 0.11, { at: [-0.185, 0.12, 0.0], color: u.pack, ...cloth }),
+    cyl(0.055, 0.3, 'x', { at: [0, 0.545, -0.2], color: u.cloth, ...cloth }, 7), // bedroll
+    box(0.2, 0.03, 0.02, { at: [0, 0.35, 0.152], team: 1 }), // name tape: the army's colour
   ]);
   const head = merge([
-    box(0.11, 0.08, 0.11, { at: [0, 0.03, 0], color: u.skin }),
-    box(0.15, 0.17, 0.17, { at: [0, 0.14, 0.005], color: u.skin }),
-    box(0.215, 0.11, 0.25, { at: [0, 0.235, -0.005], top: [0.78, 0.8], color: u.helmet }),
-    box(0.22, 0.09, 0.17, { at: [0, 0.16, -0.05], color: u.helmet, team: 0.12 }), // ear and nape
-    box(0.13, 0.04, 0.03, { at: [0, 0.2, 0.12], color: u.weapon }), // goggles on the brow
+    skull(8, 0),
+    helmet(9, 0),
+    box(0.05, 0.035, 0.045, { at: [0, 0.225, 0.118], color: u.weapon }), // night-sight mount
+    box(0.03, 0.075, 0.075, { at: [0.098, 0.12, 0], color: u.gloves }), // headset
+    box(0.03, 0.075, 0.075, { at: [-0.098, 0.12, 0], color: u.gloves }),
+    box(0.15, 0.03, 0.02, { at: [0, 0.135, 0.092], color: u.weapon }), // glasses
+    box(0.07, 0.05, 0.012, { at: [0, 0.2, -0.123], team: 1 }), // helmet patch, seen from behind
   ]);
+  const thighRings: Ring[] = [
+    { y: 0.03, rx: 0.08, rz: 0.092 },
+    { y: -0.1, rx: 0.084, rz: 0.096, z: 0.006 },
+    { y: -0.3, rx: 0.068, rz: 0.076 },
+    { y: -THIGH, rx: 0.058, rz: 0.064 },
+  ];
   const thigh = merge([
-    box(0.155, THIGH, 0.175, { at: [0, -THIGH / 2, 0], top: [1.08, 1.08], color: u.cloth }),
-    box(0.175, 0.14, 0.11, { at: [0, -0.24, -0.01], color: u.cloth }), // cargo pocket
+    loft(thighRings, { seg: 8, color: u.cloth, ...cloth }),
+    box(0.03, 0.14, 0.11, { at: [0, -0.22, 0], color: u.cloth, ...cloth }), // cargo pocket
   ]);
+  const shinRings = (toe: number): Ring[] => [
+    { y: 0.025, rx: 0.058, rz: 0.064 },
+    { y: -0.1, rx: 0.058, rz: 0.07, z: -0.012 },
+    { y: -0.27, rx: 0.045, rz: 0.05 },
+    { y: -0.35, rx: 0.047, rz: 0.054, color: u.boots },
+    { y: -0.43, rx: 0.052, rz: 0.1 * toe, z: 0.045, color: u.boots },
+    { y: -SHIN, rx: 0.054, rz: 0.125 * toe, z: 0.058, color: u.boots },
+  ];
   const shin = merge([
-    box(0.125, 0.36, 0.14, { at: [0, -0.18, 0], color: u.cloth }),
-    box(0.135, 0.11, 0.05, { at: [0, -0.03, 0.075], color: u.vest }), // knee pad
-    box(0.125, 0.13, 0.28, { at: [0, -0.415, 0.055], color: u.boots }),
+    loft(shinRings(1), { seg: 8, square: 2.4, color: u.cloth, ...cloth }),
+    loft(
+      [
+        { y: -0.07, rx: 0.05, rz: 0.02 },
+        { y: -0.02, rx: 0.062, rz: 0.03 },
+        { y: 0.035, rx: 0.05, rz: 0.02 },
+      ],
+      { seg: 6, color: u.vest, at: [0, 0, 0.062] },
+    ), // knee pad
   ]);
-  const upper = box(0.105, UPPER + 0.04, 0.115, { at: [0, -UPPER / 2, 0], color: u.cloth });
-  const fore = merge([
-    box(0.088, 0.24, 0.095, { at: [0, -0.11, 0], color: u.cloth }),
-    box(0.085, 0.1, 0.1, { at: [0, -0.27, 0], color: u.gloves }),
+  const upper = merge([
+    loft(
+      [
+        { y: 0.045, rx: 0.03, rz: 0.035 },
+        { y: 0.01, rx: 0.06, rz: 0.066 },
+        { y: -0.1, rx: 0.052, rz: 0.058 },
+        { y: -UPPER - 0.01, rx: 0.044, rz: 0.048 },
+      ],
+      { seg: 7, color: u.cloth, ...cloth },
+    ),
+    // The army's colour on both sleeves (the piece serves either arm).
+    box(0.125, 0.075, 0.07, { at: [0, -0.07, 0], team: 1 }),
   ]);
-  // Thicker than a real rifle so it does not vanish at arm's length from the camera.
+  const fore = loft(
+    [
+      { y: 0.01, rx: 0.045, rz: 0.048 },
+      { y: -0.08, rx: 0.046, rz: 0.048 },
+      { y: -0.21, rx: 0.036, rz: 0.038 },
+      { y: -0.225, rx: 0.04, rz: 0.044, color: u.gloves },
+      { y: -0.3, rx: 0.038, rz: 0.048, color: u.gloves },
+    ],
+    { seg: 7, color: u.cloth, ...cloth },
+  );
+  // A carbine with optic, magazine, stock and suppressor, a third thicker than life so it
+  // does not vanish at arm's length from the camera.
+  const steel = 0x2b2e2c;
   const rifle = merge([
-    box(0.05, 0.075, 0.3, { at: [0, 0.03, 0.05], color: u.weapon }),
-    box(0.045, 0.065, 0.24, { at: [0, 0.015, -0.2], color: u.weapon }),
-    box(0.042, 0.05, 0.3, { at: [0, 0.035, 0.33], color: 0x2b2e2c }),
-    box(0.024, 0.024, 0.16, { at: [0, 0.04, 0.54], color: u.weapon }),
-    box(0.035, 0.15, 0.065, { at: [0, -0.075, 0.1], rot: [0.2, 0, 0], color: u.weapon }),
-    box(0.035, 0.045, 0.1, { at: [0, 0.09, 0.04], color: 0x2b2e2c }),
+    box(0.045, 0.07, 0.26, { at: [0, 0.035, 0.04], color: u.weapon }),
+    box(0.036, 0.14, 0.055, { at: [0, -0.065, 0.1], rot: [0.22, 0, 0], color: steel }),
+    box(0.036, 0.1, 0.045, { at: [0, -0.04, -0.03], rot: [-0.35, 0, 0], color: u.weapon }),
+    box(0.034, 0.05, 0.2, { at: [0, 0.035, -0.19], color: u.weapon }),
+    box(0.042, 0.11, 0.035, { at: [0, 0.012, -0.3], color: steel }),
+    cyl(0.03, 0.27, 'z', { at: [0, 0.04, 0.3], color: steel }, 7),
+    cyl(0.013, 0.12, 'z', { at: [0, 0.04, 0.48], color: u.weapon }, 5),
+    cyl(0.023, 0.14, 'z', { at: [0, 0.04, 0.56], color: steel }, 6),
+    cyl(0.026, 0.1, 'z', { at: [0, 0.105, 0.05], color: u.weapon }, 6),
+    box(0.02, 0.03, 0.05, { at: [0, 0.078, 0.05], color: u.weapon }),
   ]);
 
+  // The middle distance: the same man in one piece above the hips, with straight arms.
   const body1 = merge([
-    box(0.36, 0.5, 0.2, { at: [0, 0.25, 0], color: u.cloth }),
-    box(0.4, 0.34, 0.42, { at: [0, 0.35, -0.07], color: u.vest, team: 0.1 }),
-    box(0.21, 0.26, 0.23, { at: [0, 0.66, 0], color: u.helmet, team: 0.3 }),
+    loft(body(5, false), { seg: 6, square: 2.5, color: u.cloth, ...cloth }),
+    carrier(4),
+    box(0.27, 0.32, 0.15, { at: [0, 0.32, -0.21], color: u.pack, ...cloth }),
+    skull(5, 0.52),
+    helmet(6, 0.52),
   ]);
-  const thigh1 = box(0.16, THIGH, 0.17, { at: [0, -THIGH / 2, 0], color: u.cloth });
-  const shin1 = box(0.13, SHIN, 0.17, { at: [0, -SHIN / 2, 0.015], color: u.cloth });
-  const rifle1 = box(0.05, 0.08, 0.95, { at: [0, 0.03, 0.14], color: u.weapon });
-  return { torso, head, thigh, shin, upper, fore, rifle, body1, thigh1, shin1, rifle1 };
+  const thigh1 = loft([thighRings[0], thighRings[1], thighRings[3]], {
+    seg: 5,
+    color: u.cloth,
+    ...cloth,
+  });
+  const s1 = shinRings(1);
+  const shin1 = loft([s1[0], s1[1], s1[3], s1[4], s1[5]], {
+    seg: 5,
+    square: 2.4,
+    color: u.cloth,
+    ...cloth,
+  });
+  const arm1 = loft(
+    [
+      { y: 0.03, rx: 0.058, rz: 0.062 },
+      { y: -0.28, rx: 0.044, rz: 0.046 },
+      { y: -0.47, rx: 0.036, rz: 0.04, team: 0 },
+      { y: -0.55, rx: 0.038, rz: 0.044, color: u.gloves },
+    ],
+    { seg: 4, color: u.cloth, team: 0.5, ...cloth },
+  );
+  const rifle1 = merge([
+    box(0.05, 0.08, 0.62, { at: [0, 0.03, -0.02], color: u.weapon }),
+    box(0.04, 0.04, 0.34, { at: [0, 0.04, 0.45], color: steel }),
+    box(0.04, 0.13, 0.05, { at: [0, -0.06, 0.1], color: steel }),
+  ]);
+  setWear(0.045);
+  return { torso, head, thigh, shin, upper, fore, rifle, body1, thigh1, shin1, arm1, rifle1 };
 }
