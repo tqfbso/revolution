@@ -27,6 +27,8 @@ export interface PerfStats {
   cpuFx: number;
   cpuDraw: number;
   hash: string;
+  /** What limits the frame rate and what the governor gave up for it. */
+  governor: string;
 }
 
 /** Rolling performance numbers, refreshed on screen twice a second. */
@@ -52,6 +54,7 @@ export class Hud {
     cpuFx: 0,
     cpuDraw: 0,
     hash: '',
+    governor: '',
   };
   private readonly el = document.getElementById('perf') as HTMLPreElement;
   private frames = 0;
@@ -124,6 +127,7 @@ export class Hud {
       `Detail     near ${s.lod[0]}  mid ${s.lod[1]}  far ${s.lod[2]}  off-screen ${s.culled}  fx ${s.particles}\n` +
       `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris, scale ${(s.scale * 100).toFixed(0)}%\n` +
       `CPU/frame  units ${s.cpuUnits.toFixed(1)}  fx ${s.cpuFx.toFixed(1)}  draw submit ${s.cpuDraw.toFixed(1)} ms   camera ${s.zoom.toFixed(0)} m away\n` +
+      `Governor   ${s.governor}\n` +
       `State hash ${s.hash}   build ${__BUILD__}`;
   }
 

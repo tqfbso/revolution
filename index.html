@@ -482,6 +482,20 @@
         text-align: center;
         pointer-events: none;
       }
+      #perf-test-result {
+        position: fixed;
+        top: 22%;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        font-size: 12px;
+        padding: 14px 18px;
+        margin: 0;
+        white-space: pre-wrap;
+        max-width: 760px;
+        cursor: pointer;
+        z-index: 30;
+      }
       #paused small {
         display: block;
         font-size: 12px;
@@ -713,6 +727,12 @@
               <option value="normal">Graphics: normal</option>
               <option value="high">Graphics: high</option>
             </select>
+            <button
+              id="perf-test"
+              title="Performance test: 20 seconds at the view you have now. Tells whether the graphics card or the processor limits the frame rate"
+            >
+              Performance test
+            </button>
             <button id="add-units" title="Stress test: 500 more units for each side">
               +1000 units
             </button>
@@ -736,6 +756,7 @@ starting…</pre>
     <div id="prompt" class="panel"></div>
     <div id="banner" class="panel"></div>
     <div id="paused" class="panel"></div>
+    <pre id="perf-test-result" class="panel"></pre>
     <div id="help" class="panel">
       The enemy base is off the map until one of your units sees it: scout. The Menu (top right)
       sets the opponent and starts a new game.<br />

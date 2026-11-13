@@ -327,7 +327,8 @@ Each item rides with the work it belongs to, in this order:
   soldiers' second pass, then vehicles, then buildings in U4. When a model is built, how
   convex or concave each corner is goes into a vertex attribute; the material chips paint
   on outer edges and darkens inner corners. Paid once, free per frame, works instanced
-- R3 Frame-time governor (small, Sonnet 5.5). Standalone, any time; best before the city
+- R3 Frame-time governor. BUILT 2026-11-13 (decision 089), with a performance test on
+  the menu that names the limit on the machine it runs on. The plan was: standalone, any time; best before the city
   map raises the load. Measure first whether the drop to the low 40s at 4,000 units is
   the graphics card or the CPU posing units (the stats overlay already splits CPU time).
   Then: a pixel budget per graphics level, the shadow map redrawn every second frame

@@ -241,6 +241,10 @@ Three.js `WebGPURenderer`, which uses WebGPU where available and WebGL2 otherwis
   delay, loss of treble and level by distance from the point the camera looks at; the
   loudest few per tick, 36 voices at most.
 
+- **Governor** (`src/client/governor.ts`): a pixel budget per graphics level, then detail
+  traded for frame rate under load, after finding out whether pixels, the scene or the
+  processor is the limit. `src/client/perftest.ts` is the test on the menu that measures it.
+
 - **Structures** (`src/client/structures.ts`): one mesh per building or bridge, rebuilt
   from boxes when it changes state (standing, shot up, collapsed). On top, two small
   instanced batches for the readability layer: a pip per squad over an occupied house, a

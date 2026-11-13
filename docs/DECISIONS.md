@@ -1326,3 +1326,36 @@ into it), or driving under the cover of either while the drones circle.
 Not done: tanks have no smoke launchers or active protection of their own (smoke comes
 from the guns), and the AI neither escorts its tanks on purpose nor masses drones on the
 air defence first. The golden hash is now 495916327.
+
+## 089. The frame governor and the performance test (R3) (2026-11-13)
+
+The old rule lowered the resolution whenever frames ran slow. That is the right cure for
+a graphics card out of fill rate and no cure at all for a processor busy posing units or
+a card busy with shadow geometry, and nobody knew which of the three the drop to the low
+40s at 4,000 units was. The cloud cannot say: its browser has no graphics card.
+
+So the governor (`src/client/governor.ts`) finds out before it acts. Each second it looks
+at the frame time and at how much of it was this thread's own work. Work above 70% of the
+frame means the processor: it shortens the distances at which units drop a level of
+detail and never touches the resolution. Otherwise it tries one resolution step and
+watches: a card out of fill rate speeds up in step with the pixels taken away, and if
+less than a quarter of that shows, the pixels go back and the scene gives instead (shadow
+map every third frame, post effects off, detail range, small props). Detail returns in
+reverse order after ten smooth seconds; if its return breaks the frame rate again the
+wait doubles, so a load on the edge does not flicker. The overlay (F3) says what the
+limit is and what was given up.
+
+Before any of that: a pixel budget per graphics level (2.1, 5.2 and 8.3 million pixels),
+so `normal` on a high-density laptop screen no longer draws every device pixel, and below
+`high` the sun's shadow map is redrawn every second frame, with the light moved only when
+it is redrawn so the old map stays valid in between.
+
+The measurement itself is a button, Menu then "Performance test": twenty seconds at the
+view on screen, switching one cost off at a time (half the pixels, shadows frozen, post
+off, units hidden, buildings hidden), then a table and one sentence naming the limit.
+That is the diagnosis the roadmap asked for, run on the machine it is about.
+
+What the cloud could measure on the city map (software rendering, so only counts and
+processor time mean anything): the whole centre in view is 101 draw calls and 553,000
+triangles, less than a 3,000-unit battle on the ridge. The city's static geometry is not
+the risk; shadows across it and the fight inside it are, which the test will show.
