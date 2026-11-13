@@ -139,6 +139,11 @@ export class Terrain {
     const high = new THREE.Color(look.rich ? 0x7a7c4e : 0x8b8863);
     // Packed earth in the settlements, a paved road along the main street onto the bridge.
     const built = (i: number, j: number) => {
+      if (map.streets.length > 0) {
+        // The city: its streets are cells of the map.
+        const r = i < GRID && j < GRID ? map.road[j * GRID + i] : 0;
+        return r === 1 ? 2 : r;
+      }
       let n = 0;
       for (let t = 0; t < map.townCount; t++) {
         const dx = i * CELL - map.townX[t] / 1024;
@@ -393,6 +398,8 @@ export class Terrain {
     const N = GRID;
     const dist = new Float32Array(N * N);
     const from = new Int32Array(N * N);
+    // The city has its roads already.
+    if (this.map.streets.length > 0) return;
     for (let side = 0; side < 2; side++) {
       const sx = Math.min(N - 1, map.startX[side] + 3);
       const sy = Math.min(N - 1, map.startY[side] + 6);

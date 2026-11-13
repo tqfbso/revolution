@@ -21,6 +21,8 @@ import { CLASS_AIR } from '../sim/map';
 import {
   EV_BREACH,
   EV_COLLAPSE,
+  EV_STORM,
+  EV_STORMED,
   EV_DEATH,
   EV_GUTTED,
   EV_IMPACT,
@@ -462,6 +464,18 @@ export class UnitView {
         const seen = this.fog.sees(c.x, c.z);
         this.sound?.at(SND_COLLAPSE, c.x, c.z, seen);
         if (seen) this.structures.collapse(a);
+        continue;
+      }
+      if (ev[e] === EV_STORM || ev[e] === EV_STORMED) {
+        // Fighting inside a building: shots and dust at its windows.
+        const c = this.structures.centreOf(a);
+        const seen = this.fog.sees(c.x, c.z);
+        this.sound?.at(ev[e] === EV_STORM ? SND_RIFLE : SND_IMPACT, c.x, c.z, seen);
+        if (seen) {
+          const p = this.structures.hit(a);
+          fx.thin = 0;
+          fx.squadHit(p.x, p.y, p.z);
+        }
         continue;
       }
       if (ev[e] === EV_GUTTED || ev[e] === EV_WALL) {

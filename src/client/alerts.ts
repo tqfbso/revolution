@@ -2,7 +2,7 @@
 // announced. A banner with a tone and a spoken line, a ping on the minimap, an arrow at
 // the screen edge pointing at it, and Backspace to jump there.
 import { KINDS, KIND_DRONE, KIND_TRUCK } from '../sim/units';
-import { EV_DEATH, EV_SHOT, EV_SIEGE, MAX_UNITS } from '../sim/world';
+import { EV_DEATH, EV_SHOT, EV_SIEGE, EV_STORM, EV_STORMED, MAX_UNITS } from '../sim/world';
 import { BASE_STRIDE, INFO_CARRIED, INFO_INSIDE, type Snapshot } from '../worker/protocol';
 import type { GameMap } from '../sim/map';
 import type { Fog } from './fog';
@@ -185,6 +185,14 @@ export class Alerts {
         if (u.teamOf(b) === me && u.teamOf(a) !== me) this.struck(b, now);
       } else if (type === EV_DEATH) {
         if (u.teamOf(a) === me && b >= 0 && b < s.count && u.teamOf(b) !== me) this.struck(a, now);
+      } else if (type === EV_STORM) {
+        // The enemy is fighting its way into a building the player holds.
+        if (b === me || this.structures.occTeam[a] !== me) continue;
+        const c = this.structures.centreOf(a);
+        this.attack(ALERT_ARMY, c.x, c.z, 'Garrison being stormed', now);
+      } else if (type === EV_STORMED) {
+        const c = this.structures.centreOf(a);
+        if (b === me) this.show(this.book.raise(ALERT_NOTE, c.x, c.z, 'Building taken', now));
       } else if (type === EV_SIEGE) {
         if (u.teamOf(a) === me) continue;
         const c = this.structures.centreOf(b);

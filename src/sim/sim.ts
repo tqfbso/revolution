@@ -134,6 +134,8 @@ import {
   CHASE_FIELDS,
   EV_BREACH,
   EV_GUTTED,
+  EV_STORM,
+  EV_STORMED,
   EV_WALL,
   EV_CAMERA,
   EV_CAMERA_LOST,
@@ -158,6 +160,7 @@ import {
   FLAG_HOLD,
   FLAG_MOVING,
   FLAG_SIEGE,
+  FLAG_STORM,
   FLAG_SMOKE,
   FLAG_WANDER,
   JOB_NONE,
@@ -333,6 +336,7 @@ export function step(w: World, commands: readonly Command[]): void {
   fire(w);
   resolveShells(w);
   integrate(w);
+  resolveStorms(w);
   resolveDamage(w);
   resolveStructures(w);
   if (w.tick % TOWN_PERIOD === 0) {
@@ -521,7 +525,8 @@ const ORDER_FLAGS =
   FLAG_SMOKE |
   FLAG_HOLD |
   FLAG_FOCUS |
-  FLAG_BREACH;
+  FLAG_BREACH |
+  FLAG_STORM;
 
 /**
  * Send each squad to the nearest carrier of its own army that still has a seat free,
@@ -817,11 +822,114 @@ function updateStructureOrders(w: World): void {
     if (w.sHp[s] <= 0) {
       w.flags[i] = 0;
     } else if ((flags & FLAG_GARRISON) !== 0) {
-      if (structDist2(w, s, w.posX[i], w.posY[i]) <= ENTER_DIST * ENTER_DIST) {
-        // Full, or the enemy got there first: wait outside.
+      const d2 = structDist2(w, s, w.posX[i], w.posY[i]);
+      if ((flags & FLAG_STORM) !== 0) {
+        // At the wall already: the fight inside is resolveStorms' business. Jostled away
+        // from it, the squad closes up again.
+        if (d2 > 4 * ENTER_DIST * ENTER_DIST && (flags & FLAG_MOVING) === 0) w.flags[i] = 0;
+      } else if (d2 <= ENTER_DIST * ENTER_DIST) {
         if (hasRoom(w, s, w.team[i])) enterBuilding(w, i, s);
-        else w.flags[i] = 0;
+        else if (w.sOcc[s] > 0 && w.sOccTeam[s] !== w.team[i]) {
+          // The enemy holds it: storm it (decision 085).
+          w.flags[i] = (flags & ~(FLAG_MOVING | FLAG_DIRECT | FLAG_AMOVE)) | FLAG_STORM;
+          w.path[i] = -1;
+        } else w.flags[i] = 0; // full of our own: wait outside
       } else if ((flags & FLAG_MOVING) === 0) w.flags[i] = 0;
+    }
+  }
+}
+
+/**
+ * Storming (decision 085). Squads at the wall of a building the enemy holds fight its
+ * garrison at arm's length, twice a second. Each side hurts the other in proportion to
+ * its own strength; the defender has the house on his side (STORM_EDGE, in quarters), which
+ * multiplies what he deals and divides what he takes. The edge is gone when most of the
+ * attackers come in through a breached wall, or when the house stands in smoke. When the
+ * last defender is down the attackers move in: the building changes hands, standing.
+ */
+const STORM_PERIOD = 10;
+/** The defender's edge by the state of the building: intact, damaged, gutted. */
+const STORM_EDGE = [7, 6, 5];
+/** Rounds it takes two equal bodies on even terms to wear each other down (roughly). */
+const STORM_ROUNDS = 26;
+/** How hard a squad fights hand to hand, by kind: sappers are the specialists. */
+const STORM_POWER = KINDS.map((k) => (!k.garrison ? 0 : k.engineer ? 20 : k.siege > 0 ? 10 : 5));
+const stormAtk = new Int32Array(MAX_STRUCTS);
+const stormBreach = new Int32Array(MAX_STRUCTS);
+const stormHp = new Int32Array(MAX_STRUCTS);
+const stormDef = new Int32Array(MAX_STRUCTS);
+const stormDefHp = new Int32Array(MAX_STRUCTS);
+const stormBy = new Int32Array(MAX_STRUCTS);
+const stormOf = new Int32Array(MAX_STRUCTS);
+
+function resolveStorms(w: World): void {
+  if (w.tick % STORM_PERIOD !== 0) return;
+  const map = w.map;
+  const n = w.count;
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    if (w.state[i] !== STATE_ALIVE || (w.flags[i] & FLAG_STORM) === 0) continue;
+    const s = w.orderStruct[i];
+    const team = w.team[i];
+    if (s < 0 || w.sHp[s] <= 0) {
+      w.flags[i] = 0;
+      continue;
+    }
+    if (w.sOcc[s] === 0 || w.sOccTeam[s] === team) {
+      // Cleared (or a comrade is in already): in we go, as many as there is room for.
+      if (hasRoom(w, s, team)) {
+        if (w.sOcc[s] === 0) w.events.push(EV_STORMED, s, team);
+        enterBuilding(w, i, s);
+      } else w.flags[i] = 0;
+      continue;
+    }
+    if (!any) {
+      any = true;
+      stormAtk.fill(0, 0, map.structCount);
+      stormBreach.fill(0, 0, map.structCount);
+      stormHp.fill(0, 0, map.structCount);
+      stormDef.fill(0, 0, map.structCount);
+      stormDefHp.fill(0, 0, map.structCount);
+    }
+    const power = STORM_POWER[w.kind[i]] * w.hp[i];
+    if (stormAtk[s] === 0) stormBy[s] = i;
+    stormAtk[s] += power;
+    stormHp[s] += w.hp[i];
+    if (w.sWall[4 * s + faceToward(map, s, w.posX[i], w.posY[i])] <= 0) stormBreach[s] += power;
+  }
+  if (!any) return;
+  for (let i = 0; i < n; i++) {
+    const s = w.inside[i];
+    if (s < 0 || w.state[i] !== STATE_ALIVE || stormAtk[s] === 0) continue;
+    if (stormDef[s] === 0) stormOf[s] = i;
+    stormDef[s] += (STORM_POWER[w.kind[i]] || 5) * w.hp[i];
+    stormDefHp[s] += w.hp[i];
+    // Whoever is fought hand to hand is no longer hidden.
+    w.reveal[i] = w.tick + REVEAL_TICKS;
+  }
+  for (let s = 0; s < map.structCount; s++) {
+    if (stormAtk[s] === 0 || stormDef[s] === 0) continue;
+    let edge = STORM_EDGE[Math.min(2, stageOf(w, s))];
+    const cx = map.sX[s] + (map.sW[s] >> 1);
+    const cy = map.sY[s] + (map.sH[s] >> 1);
+    if (2 * stormBreach[s] >= stormAtk[s] || map.smoke[cy * MAP_CELLS + cx] > w.tick) edge = 4;
+    // Tenths of a hit point per unit of power, so that small fights do not round to nothing.
+    stormAtk[s] = Math.trunc((stormAtk[s] * 4) / (edge * STORM_ROUNDS));
+    stormDef[s] = Math.trunc((stormDef[s] * edge) / (4 * STORM_ROUNDS));
+    if (w.tick % (2 * STORM_PERIOD) === 0) w.events.push(EV_STORM, s, w.team[stormBy[s]]);
+  }
+  for (let i = 0; i < n; i++) {
+    if (w.state[i] !== STATE_ALIVE) continue;
+    const s = w.inside[i];
+    if (s >= 0) {
+      if (stormAtk[s] === 0 || stormDefHp[s] === 0) continue;
+      damage[i] += Math.max(1, Math.trunc((stormAtk[s] * w.hp[i]) / (10 * stormDefHp[s])));
+      killer[i] = stormBy[s];
+    } else if ((w.flags[i] & FLAG_STORM) !== 0) {
+      const t = w.orderStruct[i];
+      if (t < 0 || stormDef[t] === 0 || stormHp[t] === 0) continue;
+      damage[i] += Math.max(1, Math.trunc((stormDef[t] * w.hp[i]) / (10 * stormHp[t])));
+      killer[i] = stormOf[t];
     }
   }
 }
@@ -935,6 +1043,9 @@ function routeUnits(w: World, units: readonly number[], gx: number, gy: number):
  * built in a slot no moving unit still uses. Returns -1 if every slot is in use (the unit
  * then walks straight, as before pathfinding existed).
  */
+/** Flowfields built in one tick at most; each takes about 3 ms. */
+const FIELDS_PER_TICK = 3;
+
 function acquireField(w: World, goal: number, layer: number): number {
   // Armies whose passability is the same share their fields.
   const cls = w.map.shared[layer];
@@ -958,6 +1069,13 @@ function acquireField(w: World, goal: number, layer: number): number {
   const dist = (w.fieldDist[slot] ??= newField());
   goalScratch[0] = goal;
   buildField(w.map, cls, dist, goalScratch, 1, UNREACHABLE - 1);
+  // A field costs a few milliseconds and a city gives every squad and truck its own goal:
+  // build a few a tick and let the rest walk straight until theirs is made.
+  if (w.fieldsBuiltTick !== w.tick) {
+    w.fieldsBuiltTick = w.tick;
+    w.fieldsBuilt = 0;
+  }
+  if (++w.fieldsBuilt >= FIELDS_PER_TICK) w.fieldsFullTick = w.tick;
   w.fieldGoal[slot] = goal;
   w.fieldClass[slot] = cls;
   return slot;

@@ -310,6 +310,10 @@ Fable 5.2 for core systems, Sonnet 5.5 for features, interface and balance.
 | U5 Urban AI and urban units  | AI that holds blocks, fortifies, storms, routes by street, keeps armour out of unscreened streets; marksman team; top attack; drone rules                                                             | Heavy  | Fable 5.2                                                                                                        |
 | U6 Tuning after play         | Numbers, from Fabio's games                                                                                                                                                                           | Light  | Sonnet 5.5                                                                                                       |
 
+Status 2026-11-13: U1 built (decision 074). Of U2, storming is built (decision 086); of U3,
+the city generator and its streets are built and the city is the default map (decision
+087). The rest of both phases is open.
+
 U1 is independent and small enough to go next. U2 needs U1. U3 needs neither and can run
 beside U2. U4 needs U3. U5 needs U2 and U3.
 
