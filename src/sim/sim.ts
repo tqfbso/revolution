@@ -398,13 +398,29 @@ function applyCommand(w: World, cmd: Command): void {
       if (!Number.isInteger(st) || st < 0 || st >= map.structCount || w.sHp[st] <= 0) break;
       const garrison = cmd.type === CMD_GARRISON;
       if (garrison && map.sKind[st] !== S_BUILDING) break;
-      const units = validUnits(w, cmd.units).filter((id) => {
+      const all = validUnits(w, cmd.units);
+      const units = all.filter((id) => {
         const kind = KINDS[w.kind[id]];
         return garrison ? kind.garrison && w.inside[id] !== st : kind.siege > 0;
       });
       // Everyone heads for the middle of the structure; they stop (or go in) on the way.
       const gx = ((2 * map.sX[st] + map.sW[st]) << CELL_SHIFT) >> 1;
       const gy = ((2 * map.sY[st] + map.sH[st]) << CELL_SHIFT) >> 1;
+      if (!garrison) {
+        // Troops with nothing that hurts a wall (rifle squads) are not left standing where
+        // they were: they close on the place fighting, and cover whoever can bring it down.
+        const escort = all.filter((id) => {
+          const kind = KINDS[w.kind[id]];
+          return kind.siege === 0 && kind.damage.some((d) => d > 0);
+        });
+        if (escort.length > 0) {
+          for (let k = 0; k < escort.length; k++) leaveBuilding(w, escort[k]);
+          orderFormationMove(w, escort, gx, gy);
+          for (let k = 0; k < escort.length; k++) {
+            w.flags[escort[k]] = (w.flags[escort[k]] & ~ORDER_FLAGS) | FLAG_AMOVE;
+          }
+        }
+      }
       for (let k = 0; k < units.length; k++) {
         const id = units[k];
         leaveBuilding(w, id);

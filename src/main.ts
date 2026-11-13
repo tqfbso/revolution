@@ -5,7 +5,7 @@ import { CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS } from './sim/world';
-import { ALERT_TOWN, Alerts } from './client/alerts';
+import { ALERT_ARMY, ALERT_TOWN, Alerts } from './client/alerts';
 import { Cameras } from './client/cameras';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
@@ -234,6 +234,7 @@ async function start(): Promise<void> {
     card,
     works,
   );
+  input.say = (text, x, z) => alerts?.report(ALERT_ARMY, x, z, text, performance.now() / 1000);
   // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
   // default: the first playtest found normal hard to beat.
   const level = params.get('ai');

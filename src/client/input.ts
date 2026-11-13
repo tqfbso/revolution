@@ -345,6 +345,14 @@ export class Input {
     return { ground, structure: this.structures.pick(origin, direction, reach) };
   }
 
+  /** Tells the player something about an order just given, at a place (set by the client). */
+  say: (text: string, x: number, z: number) => void = () => {};
+
+  private enemyBase(structure: number): boolean {
+    const team = this.structures.baseTeam[structure];
+    return team >= 0 && team !== this.units.playerTeam && !this.controlAll;
+  }
+
   private orderMove(clientX: number, clientY: number, attack: boolean, shell: boolean): void {
     const { ground, structure } = this.structureAt(clientX, clientY);
     // The card first: a rally point for a building, or trucks sent to haul or to build.
@@ -354,10 +362,19 @@ export class Input {
     }
     if (this.units.selectedCount === 0) return;
     const ids = this.units.selectedIds();
-    if (structure >= 0 && shell) {
+    // An enemy base building is attacked on a plain right click; a house or a bridge only
+    // with Ctrl held (a plain click on a house sends the infantry in).
+    if (structure >= 0 && (shell || this.enemyBase(structure))) {
       this.send({ type: CMD_ATTACK_STRUCTURE, units: ids, structure });
       const c = this.structures.centreOf(structure);
       this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z);
+      if (!ids.some((id) => KINDS[this.units.kindOf(id)].siege > 0)) {
+        this.say(
+          'Rifles cannot damage buildings: send engineers, missiles, tanks or guns',
+          c.x,
+          c.z,
+        );
+      }
       return;
     }
     if (structure >= 0 && this.terrain.map.sKind[structure] === S_BUILDING) {
