@@ -1359,3 +1359,47 @@ What the cloud could measure on the city map (software rendering, so only counts
 processor time mean anything): the whole centre in view is 101 draw calls and 553,000
 triangles, less than a 3,000-unit battle on the ridge. The city's static geometry is not
 the risk; shadows across it and the fight inside it are, which the test will show.
+
+## 090. Soldiers with bodies, wear from the shape of a model, occlusion and a grade (R1, R2) (2026-11-13)
+
+Fabio named the soldiers the weakest thing on screen, and the first sprint (decision 075)
+gave them joints and stances but left them made of boxes. Three things, built together
+because each needs the others to show.
+
+**Bodies.** `src/client/shape.ts` adds a loft: a smooth skin over a stack of rings, each an
+ellipse or something squarer. A man is now a torso with shoulders and a waist, tapered
+thighs, calves into boots, a neck, a head under a curved helmet, upper arms with a round
+shoulder, forearms into gloves; over that a plate carrier, three magazine pouches, a
+radio with its aerial, hip pouches, a pack and bedroll, a headset and glasses, and a
+carbine with optic, magazine, stock and suppressor. About 1,200 triangles up close. The
+middle distance, where most soldiers are seen from an RTS camera, was six boxes without
+arms or a head; it is the same man at a quarter of the points, with two straight arms
+that reach for the rifle (eight pieces, about 300 triangles). The squad's far block has a
+head. The army's colour sits on both sleeves, a name tape and the back of the helmet.
+At the halt and out of a fight each man turns his head across his own arc in his own time.
+
+**Wear (R2).** The study this came from stored how convex each corner is per vertex. That
+cannot work on models made of boxes: a box has no vertices inside its faces, so a face
+would be worn all over or not at all. Instead every vertex carries where it is inside its
+own box and the box's half size, in wear widths; the pixel shader then knows its distance
+to the nearest edge exactly, anywhere on a face. Paint chips to primer and steel in a
+ragged band along every edge, dark steel and rubber polish pale, cloth frays and fades.
+A second value marks creases, set when a model is assembled: a vertex lying against the
+skin of a neighbouring part, or a narrow ring between wider ones (a waist, an ankle),
+holds dirt and little light. All of it is paid once at start-up and rides on every
+instance for free. Vehicles got it by changing the two builders they are all made from.
+
+**Occlusion and grade (R1).** `src/client/post.ts`: on `normal` and `high` the scene is
+drawn to a target, ambient occlusion is worked out from depth at half resolution (8 or 16
+samples) and multiplied in, `high` adds its glow and a sharpen, and a grade finishes the
+picture: a mild S-curve, shadows a little cool and highlights a little warm, a vignette,
+fine grain. `?ao=0` leaves the occlusion out; the governor drops the whole chain when the
+frame rate needs it. `low` draws straight to the screen as before.
+
+Left out: automatic exposure. It needs the average brightness of the last frame, which is
+a read-back or a chain of shrinking passes, for a camera that never goes indoors.
+
+Not verified in the cloud: the cost of the occlusion pass on a real graphics card (the
+performance test of decision 089 measures it: "no post effects"), and whether its noise
+shows at half resolution without a blur pass. If it does, the fix is the depth-aware blur
+three.js ships, at the price of one more full-screen pass.

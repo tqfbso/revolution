@@ -233,7 +233,15 @@ export class UnitView {
     // fraction is "burn", where 1 turns the model into a scorched wreck.
     const burn = tint.w.fract().sub(BURN_BASE).div(BURN_SCALE).clamp(0, 1);
     if (look.rich) {
-      const paint = fieldPaint(look, painted, marking, tint.w.floor(), burn);
+      const paint = fieldPaint(
+        look,
+        painted,
+        marking,
+        tint.w.floor(),
+        burn,
+        attribute('aBoxP', 'vec3'),
+        attribute('aBoxH', 'vec4'),
+      );
       material.colorNode = paint.colour.mul(fog.cloud());
       material.roughnessNode = paint.roughness;
       material.metalnessNode = paint.metalness;
@@ -975,6 +983,11 @@ export class UnitView {
               team[1],
               team[2],
               seed,
+              // At the halt and out of a fight each man watches his own arc, in his own time.
+              halted *
+                (1 - fight) *
+                0.75 *
+                Math.sin(seconds * (0.35 + ((i * 7 + k * 3) % 5) * 0.06) + i * 2.3 + k * 1.9),
             );
             if (firing && phase < dt * 7) {
               const mz = this.soldiers.muzzle;

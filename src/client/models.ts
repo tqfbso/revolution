@@ -6,6 +6,7 @@
 // per-instance team colour replaces it (0 = none, 1 = recognition panel).
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { creases, dress } from './shape';
 
 const PAINT = 0x565c45;
 const PAINT_DARK = 0x3f4434;
@@ -29,10 +30,22 @@ interface Opts {
   top?: [number, number];
   /** Slide the top face along z, for sloped fronts. */
   shear?: number;
+  /** Fabric: its edges fray pale instead of chipping to bare metal. */
+  cloth?: boolean;
 }
 
-function finish(g: THREE.BufferGeometry, o: Opts): THREE.BufferGeometry {
+/**
+ * `half` is the part's half size before it is bent, turned or moved, and `local` where each
+ * vertex is inside it: what the edge wear is measured from (see shape.ts).
+ */
+function finish(
+  g: THREE.BufferGeometry,
+  o: Opts,
+  half: [number, number, number],
+  local?: Float32Array,
+): THREE.BufferGeometry {
   const pos = g.getAttribute('position');
+  const boxP = local ?? Float32Array.from(pos.array as Float32Array);
   if (o.top || o.shear) {
     g.computeBoundingBox();
     const midY = (g.boundingBox!.max.y + g.boundingBox!.min.y) / 2;
@@ -46,27 +59,33 @@ function finish(g: THREE.BufferGeometry, o: Opts): THREE.BufferGeometry {
   if (o.at) g.translate(...o.at);
   g.computeVertexNormals();
   g.deleteAttribute('uv');
-  const c = new THREE.Color(o.color ?? PAINT);
-  const colors = new Float32Array(pos.count * 3);
-  const mask = new Float32Array(pos.count).fill(o.team ?? 0);
-  for (let i = 0; i < pos.count; i++) c.toArray(colors, i * 3);
-  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  g.setAttribute('teamMask', new THREE.BufferAttribute(mask, 1));
-  return g;
+  return dress(g, { color: o.color ?? PAINT, team: o.team, cloth: o.cloth }, boxP, half);
 }
 
 export const box = (w: number, h: number, d: number, o: Opts = {}) =>
-  finish(new THREE.BoxGeometry(w, h, d), o);
+  finish(new THREE.BoxGeometry(w, h, d), o, [w / 2, h / 2, d / 2]);
 
 /** Cylinder whose axis runs along `axis`. */
-function cyl(r: number, len: number, axis: 'x' | 'y' | 'z', o: Opts = {}, seg = 10) {
+export function cyl(r: number, len: number, axis: 'x' | 'y' | 'z', o: Opts = {}, seg = 10) {
   const g = new THREE.CylinderGeometry(r, r, len, seg);
+  // A cylinder's only edges are its two rims: measured by distance from the axis and
+  // along it, so the side wears at its ends and each end wears at its rim.
+  const pos = g.getAttribute('position');
+  const local = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    local[i * 3] = Math.hypot(pos.getX(i), pos.getZ(i));
+    local[i * 3 + 1] = pos.getY(i);
+  }
   if (axis === 'x') g.rotateZ(Math.PI / 2);
   else if (axis === 'z') g.rotateX(Math.PI / 2);
-  return finish(g, o);
+  return finish(g, o, [r, len / 2, 1e9], local);
 }
 
-export const merge = (parts: THREE.BufferGeometry[]) => mergeGeometries(parts);
+/** Join the parts of a model into one mesh, marking the creases where parts meet. */
+export const merge = (parts: THREE.BufferGeometry[]) => {
+  creases(parts);
+  return mergeGeometries(parts);
+};
 
 export interface VehicleModel {
   hull: THREE.BufferGeometry[]; // LOD 0, 1
@@ -464,9 +483,10 @@ export const SQUAD_OFFSETS: readonly [number, number][] = [
 /** The far level of a rifle squad: one block per man. The men themselves are in soldiers.ts. */
 export function buildInfantry(): InfantryModel {
   const far = merge(
-    SQUAD_OFFSETS.map(([x, z]) =>
-      box(0.3, 0.62, 0.3, { at: [x, 0.31, z], color: 0x3a3d2e, team: 0.7 }),
-    ),
+    SQUAD_OFFSETS.flatMap(([x, z]) => [
+      box(0.26, 0.5, 0.2, { at: [x, 0.25, z], top: [1.25, 1], color: 0x3a3d2e, team: 0.7 }),
+      box(0.16, 0.14, 0.17, { at: [x, 0.56, z], color: 0x3a3d2e, team: 0.4 }),
+    ]),
   );
   return { far };
 }
