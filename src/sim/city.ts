@@ -399,7 +399,8 @@ export function generateCity(seed: number): GameMap {
         claim(x, y, w, d, 1);
         if (shop) {
           // Its forecourt, down to the kerb.
-          if (upright) pave(side > 0 ? rx0 + 2 : x + w, y, side > 0 ? x - 1 : rx0 - 2, y + d - 1, 2);
+          if (upright)
+            pave(side > 0 ? rx0 + 2 : x + w, y, side > 0 ? x - 1 : rx0 - 2, y + d - 1, 2);
           else pave(x, side > 0 ? ry0 + 2 : y + d, x + w - 1, side > 0 ? y - 1 : ry0 - 2, 2);
         } else if (((h >> 12) & 3) !== 0) {
           // A hedge along the back of the garden.

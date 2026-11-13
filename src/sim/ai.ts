@@ -58,6 +58,7 @@ import {
   MAX_TOWNS,
   SITE_FUEL,
   S_BASE,
+  STAGE_GUTTED,
   S_BUILDING,
   T_BRIDGE,
   T_FORD,
@@ -80,7 +81,7 @@ import {
   canFortify,
   workStands,
 } from './works';
-import { concealed, structDist2 } from './sim';
+import { concealed, stageOf, structDist2 } from './sim';
 import {
   GARRISON_MAX,
   KINDS,
@@ -2668,6 +2669,33 @@ export function press(
   }
   if (sappers.length > 0) {
     out.push({ type: CMD_BREACH, units: sappers, x: cellX(gapCell), y: cellY(gapCell) });
+  }
+  // A house the enemy holds is stormed (decision 085) when the squads at hand outnumber
+  // what it can hold by enough: three to one against whole walls, two to one through a
+  // breach or once it is gutted. Until then the guns and tanks work on it.
+  if (point >= 0 && map.sKind[point] === S_BUILDING && ai.occupied[point] > w.tick) {
+    const near: number[] = [];
+    let going = 0;
+    for (const i of units) {
+      if (!FOOT(w.kind[i]) || !KINDS[w.kind[i]].garrison || w.inside[i] >= 0) continue;
+      if ((w.flags[i] & FLAG_GARRISON) !== 0 && w.orderStruct[i] === point) going++;
+      else if (dist(w.posX[i], w.posY[i], tx, ty) < fx(90)) near.push(i);
+    }
+    let open = stageOf(w, point) >= STAGE_GUTTED;
+    for (let f = 0; f < 4; f++) open ||= w.sWall[4 * point + f] <= 0;
+    // How many are inside it cannot know: it reckons with half a house full.
+    const want = (open ? 8 : 12) + 1;
+    if (going + near.length >= want && going < want + 4) {
+      near.sort(
+        (a, b) => dist(w.posX[a], w.posY[a], tx, ty) - dist(w.posX[b], w.posY[b], tx, ty) || a - b,
+      );
+      const squads = near.slice(0, want + 4 - going);
+      if (squads.length > 0) {
+        out.push({ type: CMD_GARRISON, units: squads, structure: point });
+        const gone = new Set(squads);
+        for (let k = line.length - 1; k >= 0; k--) if (gone.has(line[k])) line.splice(k, 1);
+      }
+    }
   }
   if (shell.length > 0) out.push({ type: CMD_ATTACK_STRUCTURE, units: shell, structure: point });
   order(out, CMD_ATTACK_MOVE, line, tx, ty);

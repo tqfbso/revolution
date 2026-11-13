@@ -27,6 +27,7 @@ import { KINDS, KIND_ENGINEER, KIND_INFANTRY, KIND_TANK } from '../src/sim/units
 import {
   EV_COLLAPSE,
   EV_GUTTED,
+  EV_STORMED,
   EV_WALL,
   STATE_ALIVE,
   createWorld,
@@ -181,5 +182,56 @@ describe('buildings that die slowly (U1)', () => {
     for (let t = 0; t < 600; t++) step(w, []);
     expect(w.map.type[cell]).toBe(T_RUBBLE);
     expect(w.sHp[0]).toBe(0);
+  });
+});
+
+describe('storming a held building (U2)', () => {
+  /** `men` squads of army 0 sent into a 3 by 3 house that `held` squads of army 1 hold. */
+  function storm(men: number, held: number, prepare?: (w: World) => void) {
+    const w = createWorld(7, withHouse(3, 3, 3));
+    step(w, [spawnAt(1, KIND_INFANTRY, held, 508, 510)]);
+    const garrison = Array.from({ length: held }, (_, k) => k);
+    step(w, [{ type: CMD_GARRISON, units: garrison, structure: 0 }]);
+    for (let t = 0; t < 200; t++) step(w, []);
+    expect(garrison.every((i) => w.inside[i] === 0)).toBe(true);
+    prepare?.(w);
+    // From the west, close by: the fight at the wall is what is measured, not the approach.
+    step(w, [spawnAt(0, KIND_INFANTRY, men, 492, 502)]);
+    const ids = Array.from({ length: men }, (_, k) => held + k);
+    step(w, [{ type: CMD_GARRISON, units: ids, structure: 0 }]);
+    let taken = -1;
+    for (let t = 0; t < 2400 && taken < 0; t++) {
+      step(w, []);
+      if (events(w, EV_STORMED).length > 0) taken = t;
+      w.events.length = 0;
+    }
+    const left = (list: number[]) => list.filter((i) => w.state[i] === STATE_ALIVE).length;
+    return { w, taken, attackers: left(ids), defenders: left(garrison), ids };
+  }
+
+  it('takes the house standing, at a price, when the attackers are many', () => {
+    const r = storm(14, 4);
+    expect(r.taken).toBeGreaterThan(0);
+    expect(r.defenders).toBe(0);
+    expect(r.w.sHp[0]).toBeGreaterThan(0);
+    expect(r.w.sOccTeam[0]).toBe(0);
+    expect(r.ids.filter((i) => r.w.inside[i] === 0).length).toBeGreaterThan(0);
+    expect(r.attackers).toBeLessThan(14);
+  });
+
+  it('fails against a garrison its own size behind whole walls', () => {
+    const r = storm(5, 5);
+    expect(r.taken).toBe(-1);
+    expect(r.attackers).toBe(0);
+    expect(r.defenders).toBeGreaterThanOrEqual(3);
+  });
+
+  it('is far cheaper through a breached wall', () => {
+    const whole = storm(10, 4);
+    const breached = storm(10, 4, (w) => {
+      w.sWall[4 * 0 + FACE_WEST] = 0;
+    });
+    expect(breached.taken).toBeGreaterThan(0);
+    expect(breached.attackers).toBeGreaterThan(whole.attackers);
   });
 });

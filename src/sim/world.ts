@@ -50,6 +50,11 @@ export const FLAG_FOCUS = 1024;
  * stands in the way of a move order (which then goes on once it is down).
  */
 export const FLAG_BREACH = 2048;
+/**
+ * At the wall of the enemy-held building `orderStruct`, fighting its garrison room by room
+ * (set on top of FLAG_GARRISON by the sim when a squad sent into a house finds it held).
+ */
+export const FLAG_STORM = 4096;
 /** Cells that can hold smoke at once. */
 export const MAX_SMOKE = 4096;
 
@@ -126,6 +131,8 @@ export const EV_BREACH = 16; // a = unit, b = cell of the field work it hit
 export const EV_GUTTED = 17; // a = structure: its roof and floors have come down
 export const EV_WALL = 18; // a = structure, b = the face whose wall was breached
 export const EV_CAMERA = 19; // a = camera slot, b = team: a surveillance camera was placed
+export const EV_STORM = 21; // a = structure, b = the army storming it: a second of the fight inside
+export const EV_STORMED = 22; // a = structure, b = the army that took it from its garrison
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
