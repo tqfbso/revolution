@@ -1,6 +1,7 @@
 // Runs the deterministic simulation at a fixed tick rate, off the main thread, so rendering
 // never waits on game logic and game logic never waits on rendering.
 import { aiThink, createAi, type Ai } from '../sim/ai';
+import { createStaff, staffThink, type Staff } from '../sim/staff';
 import type { Command } from '../sim/commands';
 import { fromFx } from '../sim/fixed';
 import { S_BUILDING, generateMap } from '../sim/map';
@@ -28,6 +29,8 @@ import {
   hashWorld,
   type World,
   MAX_CAMERAS,
+  MAX_COMMANDERS,
+  CF_AUTO,
 } from '../sim/world';
 import { CAPTURE_POINTS } from '../sim/units';
 import {
@@ -42,6 +45,10 @@ import {
   NO_AIM,
   TASK_MOVING,
   TASK_HUNGRY,
+  COMMANDER_AUTO,
+  COMMANDER_FIGHTING,
+  COMMANDER_NEED,
+  COMMANDER_STRIDE,
   type Snapshot,
   type ToWorker,
 } from './protocol';
@@ -52,6 +59,8 @@ let world: World | null = null;
 let pending: Command[] = [];
 /** The computer players. They hand in their commands before each tick, like anyone else. */
 let ais: Ai[] = [];
+/** The staff of the player's sub-commanders: it hands its commands in the same way. */
+let staff: Staff | null = null;
 let lastTime = 0;
 let accumulator = 0;
 /** Game speed: simulated ticks per real tick interval (`?speed=`). */
@@ -81,6 +90,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       // `?demo=1`: the AI plays red as well, to watch it at work.
       if (msg.demo) ais.push(createAi(0, msg.ai, msg.seed));
     }
+    staff = msg.demo ? null : createStaff(0, msg.seed);
     speed = Math.min(Math.max(msg.speed, 0.5), 16);
     paused = false;
     accumulator = TICK_MS; // run the first tick immediately
@@ -113,6 +123,7 @@ function pump(): void {
   while (accumulator >= TICK_MS && ticks < MAX_CATCH_UP_TICKS * speed) {
     const t0 = performance.now();
     for (const ai of ais) aiThink(ai, world, pending);
+    if (staff) staffThink(staff, world, pending);
     step(world, pending);
     simMs = performance.now() - t0;
     pending = [];
@@ -213,6 +224,23 @@ function postSnapshot(w: World, simMs: number): void {
     bases.push(Math.round(fromFx(w.sRallyX[s])), Math.round(fromFx(w.sRallyY[s])), w.sRepeat[s]);
   }
   if (bases.length % BASE_STRIDE !== 0) throw new Error('base record size');
+  const commanders = new Int32Array(MAX_COMMANDERS * COMMANDER_STRIDE);
+  for (let c = 0; c < MAX_COMMANDERS; c++) {
+    const o = c * COMMANDER_STRIDE;
+    const p = staff?.posts[c];
+    commanders[o] = w.cMission[c];
+    commanders[o + 1] = Math.round(fromFx(w.cX[c]));
+    commanders[o + 2] = Math.round(fromFx(w.cY[c]));
+    commanders[o + 9] = (w.cFlags[c] & CF_AUTO) !== 0 ? COMMANDER_AUTO : 0;
+    if (!p) continue;
+    commanders[o + 3] = p.status;
+    commanders[o + 4] = p.power;
+    commanders[o + 5] = p.f.launch;
+    commanders[o + 6] = p.count;
+    commanders[o + 7] = Math.round(fromFx(p.cx));
+    commanders[o + 8] = Math.round(fromFx(p.cy));
+    commanders[o + 9] |= (p.need ? COMMANDER_NEED : 0) | (p.fighting ? COMMANDER_FIGHTING : 0);
+  }
   const events = Int32Array.from(w.events);
   w.events.length = 0;
   const snapshot: Snapshot = {
@@ -244,6 +272,8 @@ function postSnapshot(w: World, simMs: number): void {
     orders: w.orders.slice(),
     keep: w.keep.slice(),
     dest: w.dest.slice(),
+    cmdr: w.cmdr.slice(0, n),
+    commanders,
     task,
     siteStock: w.siteStock.slice(0, map.siteCount),
     bases: Int32Array.from(bases),

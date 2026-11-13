@@ -1123,3 +1123,57 @@ top bar, an alert when the first units run out, the count in the selection line.
 Fabio asked whether groups exist. They did (Ctrl + 1..9, recall, double tap), unseen.
 Added: group 0, Ctrl + Shift + number adds the selection to a group, and a chip per
 existing group above the command card showing its number and size; a click recalls it.
+
+## 081. Rifles do not hurt buildings, but an order never leaves them standing (2026-11-13)
+
+Fabio: "soldiers can't destroy buildings, they just hang around". Not a pathing bug. An
+attack-structure order dropped every unit without a siege weapon, units without one never
+fire on a base building by themselves, and the order needed Ctrl + right click. Now a
+plain right click on an enemy base building is the order, units that cannot damage it
+attack-move up to it, and the player is told what can (engineers, missiles, tanks, guns).
+Whether rifle squads should carry a slow demolition charge is left to Fabio.
+
+## 082. Sub-commanders: missions are state, the staff is a player (2026-11-13)
+
+Fabio wants to command the war, not the firefight: give a group a commander and a
+mission and have it run itself, on the enemy AI's brain, deterministic for co-op.
+
+Two halves, split the way the computer player already is:
+
+- Game state (`src/sim/commanders.ts`, hashed): per unit the commander it answers to
+  (`cmdr`), per team eight commanders with a mission (attack, hold, defend, patrol,
+  screen), a place, a flag "replace losses" and an establishment per unit kind. Three
+  commands: assign, mission, reinforce. A second player could give these as well as the
+  first, which is all co-op roles needs from this.
+- The staff (`src/sim/staff.ts`): an outside player like the AI. It reads that state and
+  hands in ordinary commands once a second. It owns a hard-level `Ai` and uses its parts
+  unchanged: `perceive` (the memory of where the enemy is), `marchOrders` (a body that
+  closes up before it moves on), `press` (the lower half of the AI's assault: smoke,
+  breaching, shelled strong points; split out of `assault` for this), `billet` (infantry
+  into houses; split out of `garrisons`), `follow`, `mount`, and the AI's own rule for
+  breaking off. The AI's behaviour did not change in the split.
+
+What each mission does. Attack: form up if scattered, close up 60 m short, assault, hold
+what was taken; break off when beaten, guns laying smoke, fall back to the nearest held
+town or the base, and go in again only at 75 per cent of its best strength (so: when
+reinforced, or told again). Hold: never falls back. Defend: hold, sortie against an
+enemy seen within 110 m, give ground to more than twice its strength, return when the
+place is quiet (after 90 s it goes to look instead of trusting a stale memory). Patrol:
+between where it stood and the point. Screen: a line of pickets across the way from
+home, which pulls back from anything stronger than itself.
+
+Reinforcements. "Send to: commander" in the production centre; or "replace losses", where
+the economy orders whatever the establishment is short of (the larger of that and any
+"keep N", never both) and the next unit of that kind off any line joins the commander.
+New arrivals count as part of the body once within 50 m of it.
+
+Rules for the player's hands: an order given to a unit directly takes it out of its
+commander's (the client sends the release first); a selection box over mixed troops
+leaves commanded ones out, and so does Ctrl + A.
+
+Measured headless, ridge map, hard AI opposite: 6,000 units with eight commanders average
+9.8 ms a tick (7.5 ms without), the staff itself 0.03 ms a tick. Golden hash 2524715586.
+
+Not done: no marker over commanded troops in the 3D view (the minimap has one); the
+staff has not been tuned in full games against the AI; commanders do not coordinate
+with each other.

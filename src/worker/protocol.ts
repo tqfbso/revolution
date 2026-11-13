@@ -15,6 +15,11 @@ export const TASK_HOLD_FIRE = 8;
 export const TASK_MOVING = 16;
 /** Out of rations: beyond supply for too long (see the logistics). */
 export const TASK_HUNGRY = 32;
+export const COMMANDER_STRIDE = 10;
+/** Its losses are replaced by themselves; it is asking for reinforcements; it is in a fight. */
+export const COMMANDER_AUTO = 1;
+export const COMMANDER_NEED = 2;
+export const COMMANDER_FIGHTING = 4;
 
 /**
  * Bits of Snapshot.info: life state (2 bits), team (2 bits), inside a building, (for a
@@ -108,6 +113,14 @@ export interface Snapshot {
   orders: Int16Array;
   keep: Int16Array;
   dest: Uint8Array;
+  /** Per unit: the sub-commander it answers to, or -1. */
+  cmdr: Int8Array;
+  /**
+   * The player's sub-commanders, COMMANDER_STRIDE numbers each: mission (M_*), where
+   * (x, z), status (ST_*), strength now and at its best, units, where its body is (x, z),
+   * and COMMANDER_* flags.
+   */
+  commanders: Int32Array;
   /** Per unit: job | stance | moving (see TASK_*). */
   task: Uint8Array;
   /** Per resource site: what is left. */

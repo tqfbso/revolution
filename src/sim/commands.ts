@@ -312,7 +312,45 @@ export interface DestCommand {
   dest: number;
 }
 
+export const CMD_ASSIGN = 31;
+export const CMD_MISSION = 32;
+export const CMD_REINFORCE = 33;
+
+/**
+ * Put `units` under commander `slot` of their army (0 to MAX_COMMANDERS - 1), or, with
+ * slot -1, take them back under the player's own orders.
+ */
+export interface AssignCommand {
+  type: typeof CMD_ASSIGN;
+  units: number[];
+  slot: number;
+}
+
+/**
+ * Give commander `slot` of `team` a mission (M_*) at a point. M_NONE stands it down where
+ * it is; mission -1 disbands it: its troops go back under the player's own orders.
+ */
+export interface MissionCommand {
+  type: typeof CMD_MISSION;
+  team: number;
+  slot: number;
+  mission: number;
+  x: number;
+  y: number;
+}
+
+/** Commander `slot` of `team` has its losses replaced by itself (or, off, not). */
+export interface ReinforceCommand {
+  type: typeof CMD_REINFORCE;
+  team: number;
+  slot: number;
+  on: boolean;
+}
+
 export type Command =
+  | AssignCommand
+  | MissionCommand
+  | ReinforceCommand
   | OrderCommand
   | KeepCommand
   | DestCommand

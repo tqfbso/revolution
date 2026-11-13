@@ -1,10 +1,10 @@
 import * as THREE from 'three/webgpu';
 import { pass } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { CMD_SPAWN, type Command } from './sim/commands';
+import { CMD_ASSIGN, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
-import { MAP_SIZE, MAX_UNITS } from './sim/world';
+import { MAP_SIZE, MAX_UNITS, M_NONE } from './sim/world';
 import { ALERT_ARMY, ALERT_TOWN, Alerts } from './client/alerts';
 import { Cameras } from './client/cameras';
 import { RtsCamera } from './client/camera';
@@ -18,6 +18,7 @@ import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
 import { ProductionCentre } from './client/production';
+import { COMMANDER_NAMES, MissionBoard } from './client/missions';
 import { Scars } from './client/scars';
 import { Sound } from './client/sound';
 import { StructureView } from './client/structures';
@@ -174,6 +175,13 @@ async function start(): Promise<void> {
     showPause();
   };
   const send = (command: Command) => {
+    // An order the player gives a unit himself takes it out of its commander's hands
+    // (or the staff would countermand it a second later).
+    if ('units' in command && command.type !== CMD_ASSIGN) {
+      const taken = command.units.filter((id) => units.cmdr[id] >= 0 && units.isMine(id));
+      if (taken.length > 0)
+        post({ type: 'command', command: { type: CMD_ASSIGN, units: taken, slot: -1 } });
+    }
     post({ type: 'command', command });
     if (paused) {
       queued++;
@@ -187,6 +195,7 @@ async function start(): Promise<void> {
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
     production.applySnapshot(e.data);
+    board.applySnapshot(e.data);
     supply.applySnapshot(e.data);
     alerts?.applySnapshot(e.data, performance.now() / 1000);
     hud.simTick(e.data.simMs);
@@ -235,6 +244,35 @@ async function start(): Promise<void> {
     works,
   );
   input.say = (text, x, z) => alerts?.report(ALERT_ARMY, x, z, text, performance.now() / 1000);
+  // The mission board: sub-commanders, their missions and how they are getting on.
+  const promptEl = document.getElementById('prompt');
+  input.prompt = (text) => {
+    if (!promptEl) return;
+    promptEl.style.display = text === null ? 'none' : 'block';
+    promptEl.textContent = text ?? '';
+  };
+  const board = new MissionBoard(
+    document.getElementById('missions') as HTMLElement,
+    map,
+    units,
+    send,
+    {
+      lookAt,
+      ask: (text, done) => input.ask(text, done),
+      alert: (text, x, z) => alerts?.report(ALERT_ARMY, x, z, text, performance.now() / 1000),
+    },
+  );
+  production.postings = () => board.postings();
+  const boardBtn = document.getElementById('missions-toggle');
+  boardBtn?.addEventListener('click', () => {
+    board.toggle();
+    boardBtn.blur();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'KeyM') board.toggle();
+    else if (e.code === 'KeyN') board.newFromSelection();
+  });
   // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
   // default: the first playtest found normal hard to beat.
   const level = params.get('ai');
@@ -311,6 +349,11 @@ async function start(): Promise<void> {
     works,
     supply,
   );
+  minimap.pick = (x, z) => input.pickAt(x, z);
+  minimap.commanders = () =>
+    board.info
+      .filter((c) => c.count > 0)
+      .map((c) => ({ name: c.name, cx: c.cx, cz: c.cz, x: c.x, z: c.z, on: c.mission !== M_NONE }));
   // Where a ground point is on screen, for the alerts' edge arrows.
   const probe = new THREE.Vector3();
   alerts = new Alerts(
@@ -409,6 +452,11 @@ async function start(): Promise<void> {
       .selectedIds()
       .filter((id) => (units.task[id] & TASK_HUNGRY) !== 0).length;
     if (starving > 0) parts.push(`${starving} out of supply: half fire rate`);
+    const under = new Map<number, number>();
+    for (const id of units.selectedIds()) {
+      if (units.cmdr[id] >= 0) under.set(units.cmdr[id], (under.get(units.cmdr[id]) ?? 0) + 1);
+    }
+    for (const [slot, count] of under) parts.push(`${count} under ${COMMANDER_NAMES[slot]}`);
     // The first units to run out of rations get an alert; the count stays in the top bar.
     const out = supply.hungry;
     if (out.length > 0 && wasFed) {
@@ -594,6 +642,7 @@ async function start(): Promise<void> {
     works,
     card,
     production,
+    board,
     alerts,
     map,
     send,

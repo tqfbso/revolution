@@ -234,6 +234,134 @@
       #card .row.works button {
         min-width: 86px;
       }
+      /* The mission board: the sub-commanders, down the right side above the minimap. */
+      #missions {
+        position: fixed;
+        top: 50px;
+        right: 10px;
+        width: 300px;
+        max-height: calc(100vh - 320px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        background: rgba(12, 16, 20, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        display: none;
+        pointer-events: auto;
+        z-index: 6;
+        font-size: 12px;
+      }
+      #missions .head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 14px;
+        margin-bottom: 6px;
+      }
+      #missions button {
+        padding: 2px 7px;
+        font-size: 11px;
+      }
+      #missions button.on {
+        outline: 1px solid #d8c27a;
+        color: #ffe082;
+      }
+      #missions button:disabled {
+        opacity: 0.4;
+      }
+      #missions .cmd {
+        border-left: 3px solid #6fbf73;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+        padding: 4px 6px;
+        margin-bottom: 5px;
+      }
+      #missions .cmd.warn {
+        border-left-color: #e0b84a;
+      }
+      #missions .cmd.bad {
+        border-left-color: #ff6b5b;
+      }
+      #missions .cmd.open {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      #missions .row {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        cursor: pointer;
+      }
+      #missions .row b {
+        color: #ffe082;
+      }
+      #missions .row .what {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #missions .row .n {
+        color: #9aa7b3;
+      }
+      #missions .bar {
+        height: 4px;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 2px;
+        margin: 3px 0;
+      }
+      #missions .bar i {
+        display: block;
+        height: 100%;
+        border-radius: 2px;
+        background: #6fbf73;
+      }
+      #missions .warn .bar i {
+        background: #e0b84a;
+      }
+      #missions .bad .bar i {
+        background: #ff6b5b;
+      }
+      #missions .state {
+        color: #c8d2db;
+        font-size: 11px;
+      }
+      #missions .orders {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 5px;
+      }
+      #missions .idle {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+        margin-top: 6px;
+        color: #ffcf7a;
+      }
+      #missions .idle span {
+        flex: 1 0 100%;
+      }
+      #missions .hint {
+        color: #9aa7b3;
+        font-size: 11px;
+        margin: 6px 0 0;
+        line-height: 1.35;
+      }
+      /* A question to the player: click the map to answer it. */
+      #prompt {
+        position: fixed;
+        top: 52px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        background: rgba(60, 48, 12, 0.95);
+        border: 1px solid #d8c27a;
+        color: #ffe082;
+        font-size: 14px;
+        font-weight: bold;
+        z-index: 8;
+        pointer-events: none;
+      }
       /* The war production centre: a sheet over the middle of the screen. */
       #production {
         top: 52px;
@@ -533,6 +661,12 @@
         >
           Production <kbd>P</kbd>
         </button>
+        <button
+          id="missions-toggle"
+          title="Commanders: give groups of troops a commander and a mission (attack, hold, defend, patrol, screen) and it runs them for you"
+        >
+          Commanders <kbd>M</kbd>
+        </button>
         <button id="pause" title="Pause (Space). Orders given while paused start when you resume">
           Pause (Space)
         </button>
@@ -597,6 +731,8 @@ starting…</pre>
       <div id="card" class="panel"></div>
     </div>
     <div id="production" class="panel"></div>
+    <div id="missions" class="panel"></div>
+    <div id="prompt" class="panel"></div>
     <div id="banner" class="panel"></div>
     <div id="paused" class="panel"></div>
     <div id="help" class="panel">
@@ -616,6 +752,17 @@ starting…</pre>
       your barracks share the work; each unit is paid for as it starts, so you can order ahead of
       your money. Keep: that many are kept in the field, losses replaced by themselves. Send to: new
       units of that kind go straight to a town instead of the factory's rally point<br />
+      Commanders (M, or the button at the top): select troops and press N, and they get a commander
+      (Alpha to Hotel, eight at most). Open its row and give it a mission, then click the map (or
+      the minimap) for the place. Attack: it forms up, marches as one body, assaults with smoke and
+      guns, holds what it took, and breaks off and waits for reinforcements when it is losing. Hold:
+      stays to the last, infantry in the houses. Defend: holds, goes out to meet an enemy nearby,
+      gives ground to one far too strong and comes back. Patrol: back and forth between where it
+      stood and the place. Screen: a thin line of lookouts that pulls back from anything strong.
+      Replace losses: what it loses is ordered again and sent to it. Production's "Send to" can also
+      send every new unit of a kind to a commander. An order you give a unit yourself takes it out
+      of its commander's hands; a box drawn over mixed troops leaves commanded ones alone. The board
+      also counts idle units and can hand them to the nearest commander<br />
       You command red. Drag: select · Double click: all of that type · Shift: add · Ctrl+A: all<br />
       Right click: move (breaks off a fight) · Right click an enemy: attack it · C then click or
       Alt+right click: attack-move · X: stop · H: hold position · G: hold fire · . (full stop): idle
