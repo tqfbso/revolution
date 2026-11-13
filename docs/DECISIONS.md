@@ -1291,7 +1291,43 @@ rule; the blocks do that. Roofs are all one colour and there is no signage (R5, 
 U4). The client frame rate on this map has only been checked in software rendering here:
 it needs Fabio's machine.
 
-## 088. The frame governor and the performance test (R3) (2026-11-13)
+## 088. Strike drones take turns (2026-11-13)
+
+Fabio, after the city build: everything is good except that drones wipe out tanks in two
+seconds. Measured with `tools/droneduel.ts` on open ground, counted from the moment the
+drones come into the tanks' view: 8 strike drones killed 4 tanks in 3.9 seconds, 16 in
+4.0, 32 in 2.8. A tank took two drones, all of them arrived together, and one air-defence
+vehicle (a kill every 0.6 seconds) had no time to matter: 16 drones still killed all four.
+
+Drones stay cheap and quick to build (the army mix of decision 059), so what changes is
+how fast they kill, not what they cost:
+
+- A tank's roof takes four strike drones, not two (75 in the table, 125 after the pacing
+  factor, against 467 health). Carriers still take two, guns, air defence, jammers and
+  trucks one.
+- They attack in turn. The first drone to come within 13 of a target starts lining up on
+  it, which takes 2.5 seconds; after every hit the next one waits 5 seconds. Drones
+  waiting circle the target at that distance and the one whose turn it is starts its dive
+  just before the wait is over. If nobody takes a turn within 2 seconds (shot down on the
+  way in) the lining up starts again. One value per unit, `strikeAt`, holds this.
+- The owner is told when the lining up starts: event `EV_STRIKE`, on the client a banner
+  and a spoken "Drones inbound" even when the tank is on screen, with the swarm visibly
+  circling over it.
+
+Measured after: a tank dies about 19 seconds after the drones come into view (first hit
+at 4), four tanks to 16 drones in 25 seconds, to 32 in 21. Eight drones on four tanks
+kill none (they spread two a tank). With one air-defence vehicle the four tanks lose
+nothing to 16 drones and are all lost to 32, which kill the air defence first (it still
+dies to one); with two, one of the four tanks survives 32. A jammer stops any
+number, as before. So the answers are the ones that existed, and there is now time for
+them to work: air defence or a jammer with the tanks, smoke on them (a drone cannot see
+into it), or driving under the cover of either while the drones circle.
+
+Not done: tanks have no smoke launchers or active protection of their own (smoke comes
+from the guns), and the AI neither escorts its tanks on purpose nor masses drones on the
+air defence first. The golden hash is now 495916327.
+
+## 089. The frame governor and the performance test (R3) (2026-11-13)
 
 The old rule lowered the resolution whenever frames ran slow. That is the right cure for
 a graphics card out of fill rate and no cure at all for a processor busy posing units or

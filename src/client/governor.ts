@@ -1,4 +1,4 @@
-// The frame-time governor (R3, decision 088). It watches how long frames take and where
+// The frame-time governor (R3, decision 089). It watches how long frames take and where
 // the time goes, and trades detail for frame rate one step at a time. It first finds out
 // what the limit is, because the cure differs: fewer pixels help a graphics card that is
 // out of fill rate and do nothing for a processor that is busy posing units.

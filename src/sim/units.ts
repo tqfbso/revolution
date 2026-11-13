@@ -232,13 +232,15 @@ const BASE_KINDS: readonly UnitKind[] = [
   },
   {
     // One-way attack drone. Fast, cheap, dies with its target. Goes for vehicles first.
+    // Carriers, guns and trucks it kills in one or two; a tank's roof takes four, and they
+    // come one at a time (see STRIKE_RING), so armour has time to get under cover.
     name: 'Strike drone',
     cls: CLASS_AIR,
     hp: 12,
     speed: fx(0.8),
     range: fx(1.5),
     reload: 1,
-    damage: [170, 50, 60, 150, 120, 50, 0, 0, 130, 130, 130, 50],
+    damage: [75, 50, 60, 150, 120, 50, 0, 0, 130, 130, 130, 50],
     siege: 0,
     garrison: false,
     wreckTicks: 1,
@@ -338,7 +340,7 @@ const BASE_KINDS: readonly UnitKind[] = [
  * tables, which hold small whole numbers, every ground unit is that much tougher: the same
  * as 40% less damage per shot, with no loss of resolution. Drones keep their health, since
  * jamming drains it at a fixed rate and a hit kills them either way; strike drones hit harder
- * by the same factor, so a tank still takes two of them.
+ * by the same factor, so each target still takes as many of them as the table says.
  */
 export const TOUGHNESS_NUM = 5;
 export const TOUGHNESS_DEN = 3;
@@ -377,6 +379,19 @@ export const DETECT_RANGE = fx(24);
 export const JAM_REVEAL_TICKS = 100;
 /** A jammed strike drone loses one point of health every this many ticks, until it crashes. */
 export const JAM_DRAIN_TICKS = 3;
+/**
+ * Strike drones attack in turn (decision 088). The first to come within STRIKE_RING of a
+ * target has to line up for STRIKE_ARM_TICKS before anything may hit it; after every hit
+ * the next has to wait STRIKE_GAP_TICKS. Drones waiting their turn circle the target at
+ * the ring, where air defence can get at them, and the one that goes in starts its dive
+ * STRIKE_DIVE_TICKS before the wait is over. A turn nobody takes within
+ * STRIKE_WINDOW_TICKS is lost, and the lining up starts again.
+ */
+export const STRIKE_RING = fx(13);
+export const STRIKE_ARM_TICKS = 50;
+export const STRIKE_GAP_TICKS = 100;
+export const STRIKE_WINDOW_TICKS = 40;
+export const STRIKE_DIVE_TICKS = 16;
 /**
  * Surveillance cameras (decision 076): an engineer squad leaves one where it stands. A
  * camera reports enemy ground troops in a small circle and cannot be seen or shot. An

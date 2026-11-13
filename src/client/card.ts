@@ -62,14 +62,14 @@ const SHORT = [
   'Engineer',
 ];
 const HINT = [
-  'Main battle tank. Kills vehicles and breaks walls; weak to missile teams and to infantry up close in streets.',
+  'Main battle tank. Kills vehicles and breaks walls; weak to missile teams, to infantry up close in streets, and to strike drones without air defence or a jammer near.',
   'Infantry squad. Cheap and fast to raise. Holds buildings, trenches and forest; rockets hurt vehicles within 8 m.',
   'Missile team. Kills vehicles from beyond gun range. Helpless against infantry: keep riflemen with it.',
   'Infantry fighting vehicle. Carries two squads fast (L to mount, U to dismount) and mows down infantry.',
   'Self-propelled gun. Shells what others have spotted from far behind. Ctrl + right click: shell a spot. F: smoke.',
   'Recon team. Sees far, hard to see, unarmed. Everything else is half blind without it.',
   'Recon drone. Eyes in the sky over hills and houses. Dies to air defence and jammers.',
-  'Strike drone. Flies into what it finds, once.',
+  'Strike drone. Flies into a vehicle, once. They circle, then hit one at a time: four for a tank. Dies to air defence and jammers.',
   'Air-defence vehicle. The only thing that shoots drones down reliably.',
   'Jammer. Enemy drones in its ring crash; enemy cameras in it are blinded and revealed. Works by itself.',
   'Logistics truck. Hauls supplies and fuel, builds and repairs base buildings and field works.',
