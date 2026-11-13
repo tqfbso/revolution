@@ -122,10 +122,11 @@ async function start(): Promise<void> {
     scene.environmentIntensity = 0.45;
     pmrem.dispose();
   }
-  // The skirmish is fought on the ridge map unless `?map=river` asks for the old one; the
-  // other scenarios are laid out for the river.
+  // The skirmish is fought in the city unless `?map=ridge` or `?map=river` asks for an
+  // older map; the other scenarios are laid out for the river.
+  const asked = params.get('map');
   const layout: Layout =
-    scenario === 'skirmish' && params.get('map') !== 'river' ? 'ridge' : 'river';
+    scenario !== 'skirmish' || asked === 'river' ? 'river' : asked === 'ridge' ? 'ridge' : 'city';
   const map = generateMap(seed, layout);
   fog.setMap(map);
   const terrain = new Terrain(map, fog, look);

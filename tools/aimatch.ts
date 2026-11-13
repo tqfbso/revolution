@@ -11,12 +11,15 @@ import { createWorld, hashWorld, NO_TEAM } from '../src/sim/world';
 const seed = Number(process.argv[2] ?? 1);
 const minutes = Number(process.argv[3] ?? 20);
 const levels = [process.argv[4] ?? 'normal', process.argv[5] ?? 'normal'];
-const layout = process.env.MAP === 'river' ? 'river' : 'ridge';
+const layout =
+  process.env.MAP === 'river' ? 'river' : process.env.MAP === 'ridge' ? 'ridge' : 'city';
 const w = createWorld(seed, generateMap(seed, layout));
 const ais = levels.map((l, t) => (l === 'off' ? null : createAi(t, l as AiLevel, seed)));
 let cmds: Command[] = skirmishCommands(w.map);
 let worst = 0;
 let total = 0;
+let stepTotal = 0;
+let stepWorst = 0;
 const lastPlan = ['', ''];
 for (let tick = 0; tick < minutes * 1200; tick++) {
   const t0 = performance.now();
@@ -24,7 +27,11 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
   const ms = performance.now() - t0;
   total += ms;
   if (ms > worst) worst = ms;
+  const t1 = performance.now();
   step(w, cmds);
+  const sm = performance.now() - t1;
+  stepTotal += sm;
+  if (sm > stepWorst) stepWorst = sm;
   cmds = [];
   w.events.length = 0;
   for (const ai of ais) {
@@ -46,6 +53,7 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
     break;
   }
 }
+console.log(`step: worst ${stepWorst.toFixed(1)} ms, mean ${(stepTotal / w.tick).toFixed(2)} ms/tick`);
 console.log(
   `ai think: worst ${worst.toFixed(2)} ms, mean ${(total / w.tick).toFixed(4)} ms/tick; hash ${hashWorld(w).toString(16)}`,
 );

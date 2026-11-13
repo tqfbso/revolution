@@ -1,6 +1,7 @@
 // The battlefield: an integer heightfield plus a terrain type per 4-unit cell. Generated
 // from the seed with integer arithmetic only, so the simulation (passability) and every
 // client (what is drawn) derive the identical map without sending it over the wire.
+import { generateCity } from './city';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
 
 // Map is a square of MAP_SIZE world units. Sim (x, y) maps to render (x, z).
@@ -46,7 +47,7 @@ export const S_BUILDING = 0;
 export const S_BRIDGE = 1;
 /** A base building put up by an army during the game (see src/sim/economy.ts). */
 export const S_BASE = 2;
-export const MAX_STRUCTS = 512;
+export const MAX_STRUCTS = 1024;
 /**
  * What a building is made of (decision 074): a house of brick or timber, an apartment or
  * office block of concrete, or a hall (public or industrial: thick walls, wide spans).
@@ -89,7 +90,7 @@ export function wallMax(map: GameMap, s: number, f: number): number {
 export const SITE_SUPPLIES = 0;
 export const SITE_FUEL = 1;
 export const MAX_SITES = 32;
-export const MAX_TOWNS = 8;
+export const MAX_TOWNS = 16;
 /** Height of one storey, for sight from upper floors and for drawing. */
 export const FLOOR_HEIGHT = fx(0.85);
 
@@ -207,10 +208,29 @@ export interface GameMap {
   /** Where each of the two armies sets up: the north-west cell of its headquarters plot. */
   startX: Int32Array;
   startY: Int32Array;
+  layout: Layout;
+  /**
+   * Streets and squares, per cell (ROAD_*). Open ground like any other to the sim; the
+   * client paves it, and nothing is built or planted on it when the map is made.
+   */
+  road: Uint8Array;
+  /**
+   * The streets as lines, for the client to mark and to light: cell coordinates of both
+   * ends (x0, y0, x1, y1) and the kind (1 = a main road, 0 = a side street), five numbers each.
+   */
+  streets: number[];
 }
 
-/** Which battlefield: the river with its fords and bridges, or the ridge with its four ways. */
-export type Layout = 'river' | 'ridge';
+/**
+ * Which battlefield: the river with its fords and bridges, the ridge with its four ways,
+ * or the city, a town at every flag and streets between them (see city.ts).
+ */
+export type Layout = 'river' | 'ridge' | 'city';
+
+/** What a cell is paved with (GameMap.road): nothing, a carriageway, or a yard or square. */
+export const ROAD_NONE = 0;
+export const ROAD_STREET = 1;
+export const ROAD_PAVED = 2;
 
 /**
  * One way from the west half of a map to the east half: where an army forms up at its west
@@ -224,7 +244,7 @@ export interface Lane {
   town: [number, number];
 }
 
-function lattice(x: number, y: number, seed: number): number {
+export function lattice(x: number, y: number, seed: number): number {
   let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(seed, 0x9e3779b1);
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
@@ -232,7 +252,7 @@ function lattice(x: number, y: number, seed: number): number {
 }
 
 /** Smoothstep on Q10: 0..1024 in, 0..1024 out. */
-function smooth(t: number): number {
+export function smooth(t: number): number {
   return (t * t * (3072 - 2 * t)) >> 20;
 }
 
@@ -263,6 +283,7 @@ const HALF = fx(MAP_SIZE / 2);
  */
 export function generateMap(seed: number, layout: Layout = 'river'): GameMap {
   if (layout === 'ridge') return generateRidge(seed);
+  if (layout === 'city') return generateCity(seed);
   const s = seed | 0;
   const heights = new Int32Array(MAP_VERTS * MAP_VERTS);
   const fords: number[] = [];
@@ -397,7 +418,7 @@ function ab(a: number, b: number): [number, number] {
   return [fx(512) + ((a + b) << (FP_SHIFT - 1)), fx(512) + ((a - b) << (FP_SHIFT - 1))];
 }
 
-const symNoise = (x: number, y: number, shift: number, seed: number) =>
+export const symNoise = (x: number, y: number, shift: number, seed: number) =>
   (noise(x, y, shift, seed) + noise(y, x, shift, seed)) >> 1;
 
 /** How much of the ridge's plateau a point is on, 0..1024. */
@@ -553,7 +574,7 @@ function placeSettlement(
 const STOCK_SCALE = 2;
 
 /** Put a resource site as near to world point (wx, wy) as open ground allows. */
-function addSite(map: GameMap, kind: number, stock: number, wx: number, wy: number): void {
+export function addSite(map: GameMap, kind: number, stock: number, wx: number, wy: number): void {
   if (map.siteCount >= MAX_SITES) return;
   const open = (x: number, y: number) => {
     if (x < 2 || y < 2 || x >= MAP_CELLS - 2 || y >= MAP_CELLS - 2) return false;
@@ -656,6 +677,7 @@ function generateRidge(seed: number): GameMap {
   for (const [, , a] of RIDGE_SHARED) clear((a + MAP_SIZE) >> 1, (a + MAP_SIZE) >> 1);
 
   const map = newMap(heights, type);
+  map.layout = 'ridge';
   // Towns in pairs, the west army's first (the AI counts on that), the one on the ridge last.
   placeSettlement(map, s, 89, 170, 3, 1, 'Westgate', false);
   placeSettlement(map, s, 89, 170, 3, 1, 'Eastgate', true);
@@ -834,7 +856,7 @@ export function flatMap(): GameMap {
   );
 }
 
-function newMap(heights: Int32Array, type: Uint8Array): GameMap {
+export function newMap(heights: Int32Array, type: Uint8Array): GameMap {
   return {
     heights,
     type,
@@ -875,15 +897,21 @@ function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     siteStock: new Int32Array(MAX_SITES),
     startX: new Int32Array(2).fill(-1),
     startY: new Int32Array(2).fill(-1),
+    layout: 'river',
+    road: new Uint8Array(CELL_COUNT),
+    streets: [],
   };
 }
 
-function finishMap(map: GameMap): GameMap {
+export function finishMap(map: GameMap): GameMap {
   refreshPassability(map);
   let hash = 0x811c9dc5;
   for (let i = 0; i < CELL_COUNT; i++) hash = Math.imul(hash ^ map.type[i], 0x01000193);
   for (let i = 0; i < map.heights.length; i++) {
     hash = Math.imul(hash ^ map.heights[i], 0x01000193);
+  }
+  if (map.streets.length > 0) {
+    for (let i = 0; i < CELL_COUNT; i++) hash = Math.imul(hash ^ map.road[i], 0x01000193);
   }
   map.hash = hash >>> 0;
   return map;
@@ -1135,7 +1163,7 @@ function placeCrossing(
 }
 
 /** True if a building can stand on the plot; if so, levels the ground under it. */
-function levelPlot(map: GameMap, x: number, y: number, w: number, h: number): boolean {
+export function levelPlot(map: GameMap, x: number, y: number, w: number, h: number): boolean {
   for (let j = y; j < y + h; j++) {
     for (let i = x; i < x + w; i++) if (map.type[j * MAP_CELLS + i] !== T_OPEN) return false;
   }
