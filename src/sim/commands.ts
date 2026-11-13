@@ -270,7 +270,15 @@ export interface RepeatCommand {
   on: boolean;
 }
 
+/** Each engineer squad in `units` leaves a surveillance camera where it stands. */
+export const CMD_CAMERA = 27;
+export interface CameraCommand {
+  type: typeof CMD_CAMERA;
+  units: number[];
+}
+
 export type Command =
+  | CameraCommand
   | RepeatCommand
   | FortifyCommand
   | DemolishCommand

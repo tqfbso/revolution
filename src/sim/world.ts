@@ -11,6 +11,9 @@ import {
 } from './map';
 import { seedRng } from './rng';
 
+/** Surveillance cameras on the map at once, all armies together (see the unit rules). */
+export const MAX_CAMERAS = 64;
+
 export { MAP_SIZE, MAP_SIZE_FX } from './map';
 export const MAX_UNITS = 16384;
 export { MAX_TEAMS } from './map';
@@ -99,6 +102,8 @@ export const EV_WORK_LOST = 15; // a = cell, b = kind of field work: destroyed
 export const EV_BREACH = 16; // a = unit, b = cell of the field work it hit
 export const EV_GUTTED = 17; // a = structure: its roof and floors have come down
 export const EV_WALL = 18; // a = structure, b = the face whose wall was breached
+export const EV_CAMERA = 19; // a = camera slot, b = team: a surveillance camera was placed
+export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
 export function packPoint(x: number, y: number): number {
@@ -188,6 +193,15 @@ export interface World {
    * of every tick before anything reads it, so it is not part of the hash.
    */
   jammed: Uint8Array;
+  /**
+   * Surveillance cameras, one per slot: owner (-1 = free slot), position, and the tick
+   * until which the enemy knows where it is. `camBlind` is recomputed every tick.
+   */
+  camTeam: Int8Array;
+  camX: Int32Array;
+  camY: Int32Array;
+  camSeen: Int32Array;
+  camBlind: Uint8Array;
   /** Structures: health (0 or less = destroyed), repair work done, occupants and their team. */
   sHp: Int32Array;
   /**
@@ -321,6 +335,11 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     smokeCount: 0,
     smokeCells: new Int32Array(MAX_SMOKE),
     jammed: new Uint8Array(MAX_UNITS),
+    camTeam: new Int8Array(MAX_CAMERAS).fill(-1),
+    camX: new Int32Array(MAX_CAMERAS),
+    camY: new Int32Array(MAX_CAMERAS),
+    camSeen: new Int32Array(MAX_CAMERAS),
+    camBlind: new Uint8Array(MAX_CAMERAS),
     sHp: map.sMaxHp.slice(),
     sWall: new Int32Array(MAX_STRUCTS * 4),
     sRepair: new Int32Array(MAX_STRUCTS),
@@ -396,6 +415,13 @@ export function hashWorld(w: World): number {
   mix(w.fieldsFullTick);
   for (let f = 0; f < MAX_FIELDS; f++) mix(w.fieldGoal[f] ^ (w.fieldClass[f] << 24));
   for (let f = 0; f < CHASE_FIELDS; f++) mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
+  for (let c = 0; c < MAX_CAMERAS; c++) {
+    if (w.camTeam[c] < 0) continue;
+    mix(c ^ (w.camTeam[c] << 8));
+    mix(w.camX[c]);
+    mix(w.camY[c]);
+    mix(w.camSeen[c]);
+  }
   mix(w.map.structCount);
   for (let s = 0; s < w.map.structCount; s++) {
     mix(w.sHp[s]);

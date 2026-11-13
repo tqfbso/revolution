@@ -10,6 +10,7 @@ import {
   CMD_HOLD,
   CMD_RALLY,
   CMD_RESEARCH,
+  CMD_CAMERA,
   CMD_STANCE,
   CMD_STOP,
   CMD_TRAIN,
@@ -26,7 +27,7 @@ import {
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
 import { MAP_CELLS, canPlace, type GameMap } from '../sim/map';
-import { KINDS, KIND_TRUCK, POINTS } from '../sim/units';
+import { CAMERA_COST, KINDS, KIND_TRUCK, POINTS } from '../sim/units';
 import { MAX_ORDER, WORKS, WORK_COUNT, canFortify } from '../sim/works';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
 import {
@@ -213,7 +214,15 @@ export class CommandCard {
     } else if (act === 'stop') this.send({ type: CMD_STOP, units: ids });
     else if (act === 'hold') this.send({ type: CMD_HOLD, units: ids });
     else if (act === 'fire') this.toggleFire();
+    else if (act === 'camera') this.placeCamera();
     this.render();
+  }
+
+  /** Each selected engineer squad of yours leaves a surveillance camera where it stands. */
+  placeCamera(): void {
+    const u = this.units;
+    const ids = u.selectedIds().filter((id) => u.isMine(id) && KINDS[u.kindOf(id)].engineer);
+    if (ids.length > 0) this.send({ type: CMD_CAMERA, units: ids });
   }
 
   /** Hold fire for the whole selection, or fire at will again if all of it already holds. */
@@ -549,6 +558,10 @@ export class CommandCard {
       html += this.button('stop', 0, 'Stop', null, 'X');
       html += this.button('hold', 0, 'Hold position', null, 'H');
       html += this.button('fire', 0, held ? 'Fire at will' : 'Hold fire', null, 'G');
+      if (ids.some((id) => this.units.isMine(id) && KINDS[this.units.kindOf(id)].engineer)) {
+        const p = { supplies: CAMERA_COST, fuel: 0, credits: 0, ticks: 0, tier: 1 };
+        html += this.button('camera', 0, 'Camera (V)', p);
+      }
       html += '</div>';
     } else {
       if (this.placing >= 0) this.placing = -1;

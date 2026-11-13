@@ -229,6 +229,11 @@ export class Alerts {
     this.attack(ALERT_ARMY, x, z, 'Our forces under attack', now);
   }
 
+  /** Raise an alert from elsewhere in the client (a camera lost, say). */
+  report(kind: number, x: number, z: number, text: string, now: number): void {
+    this.show(this.book.raise(kind, x, z, text, now));
+  }
+
   private attack(kind: number, x: number, z: number, text: string, now: number): void {
     if (!this.book.open(kind, x, z, now)) return;
     // What the player is looking at needs no announcement.

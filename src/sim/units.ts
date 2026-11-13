@@ -375,6 +375,20 @@ export const DETECT_RANGE = fx(24);
 export const JAM_REVEAL_TICKS = 100;
 /** A jammed strike drone loses one point of health every this many ticks, until it crashes. */
 export const JAM_DRAIN_TICKS = 3;
+/**
+ * Surveillance cameras (decision 076): an engineer squad leaves one where it stands. A
+ * camera reports enemy ground troops in a small circle and cannot be seen or shot. An
+ * enemy jammer blinds the cameras in its bubble and shows them to its army, and a camera
+ * that has been shown is pulled down by the first enemy ground unit to walk up to it.
+ */
+export const CAMERA_LIMIT = 12;
+export const CAMERA_COST = 20;
+export const CAMERA_SIGHT = fx(38);
+export const CAMERA_SPACING = fx(14);
+export const CAMERA_PULL = fx(5);
+export const CAMERA_HEIGHT = fx(2);
+/** A camera a jammer has found stays known to the enemy for this long after it drives off. */
+export const CAMERA_REVEAL_TICKS = 600;
 /** How high drones fly, for sight and for drawing them. */
 export const AIR_HEIGHT = fx(12);
 

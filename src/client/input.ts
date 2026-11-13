@@ -148,6 +148,7 @@ export class Input {
       } else if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && units.selectedCount > 0) {
         this.armAttackMove(!this.attackMoveArmed);
       } else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
+      else if (e.code === 'KeyV' && units.selectedCount > 0) card.placeCamera();
       else if (e.code === 'Period') card.selectIdle();
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
