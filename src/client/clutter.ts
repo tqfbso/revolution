@@ -278,8 +278,11 @@ export class Clutter {
   }
 
   /** `distance` is how far the camera is from what it looks at. */
+  /** Switched off by the frame governor when the scene is the limit. */
+  small = true;
+
   update(distance: number): void {
-    const show = distance < SMALL_WITHIN;
+    const show = this.small && distance < SMALL_WITHIN;
     if (show === this.smallShown) return;
     this.smallShown = show;
     for (const chunk of this.batches) for (const b of chunk) if (b.small) b.mesh.visible = show;

@@ -9,6 +9,8 @@ import { ALERT_NOTE, Alerts } from './client/alerts';
 import { Cameras } from './client/cameras';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
+import { Governor, ratioFor, type Levers } from './client/governor';
+import { PerfTest } from './client/perftest';
 import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
@@ -75,19 +77,13 @@ async function start(): Promise<void> {
     wanted === 'roam' || wanted === 'clash' || wanted === 'assault' ? wanted : 'skirmish';
 
   const { renderer, canvas, backend } = await createRenderer(params.get('renderer') === 'webgl');
-  // Render scale adapts to load: if frames run slow for a couple of seconds the resolution
-  // steps down, and it steps back up after a long smooth stretch. `?scale=fixed` pins it.
-  const maxRatio = Math.min(window.devicePixelRatio, 2);
-  const minRatio = Math.max(0.75, maxRatio / 2);
-  const adaptScale = params.get('scale') !== 'fixed' && maxRatio > minRatio;
-  let ratio = maxRatio;
-  let slowSeconds = 0;
-  let smoothSeconds = 0;
-  let windowMs = 0;
-  let windowFrames = 0;
-  renderer.setPixelRatio(ratio);
-
   const quality = readQuality(params);
+  // The frame governor (governor.ts): a pixel budget per graphics level, then detail
+  // traded for frame rate under load. `?scale=fixed` switches the trading off.
+  const governor = new Governor(quality, params.get('scale') !== 'fixed');
+  let maxRatio = ratioFor(quality, window.innerWidth, window.innerHeight, window.devicePixelRatio);
+  let ratio = maxRatio;
+  renderer.setPixelRatio(ratio);
   const shadows = params.get('shadows') !== '0';
   const lodScale = Math.min(Math.max(Number(params.get('lod') ?? 1) || 1, 0.25), 4);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -147,8 +143,8 @@ async function start(): Promise<void> {
   const supply = new SupplyView(map, units);
   const sound = new Sound();
   units.sound = sound;
-  units.lodNear *= lodScale;
-  units.lodFar *= lodScale;
+  const lodNear = units.lodNear * lodScale;
+  const lodFar = units.lodFar * lodScale;
   const rts = new RtsCamera(canvas, terrain);
   const hud = new Hud();
   hud.stats.backend = `${backend}, ${quality} detail${shadows ? '' : ', no shadows'}`;
@@ -542,6 +538,9 @@ async function start(): Promise<void> {
   document.getElementById('reset')?.addEventListener('click', () => location.reload());
 
   const resize = () => {
+    maxRatio = ratioFor(quality, window.innerWidth, window.innerHeight, window.devicePixelRatio);
+    ratio = maxRatio * governor.levers.scale;
+    renderer.setPixelRatio(ratio);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     rts.resize(window.innerWidth, window.innerHeight);
   };
@@ -557,11 +556,43 @@ async function start(): Promise<void> {
     pipeline.outputNode = lit.add(bloom(lit, 0.14, 0.3, 1.5));
   }
 
+  // The levers the governor (or the performance test) holds, applied when they move.
+  const apply = (l: Levers) => {
+    const next = maxRatio * l.scale;
+    if (next !== ratio) {
+      ratio = next;
+      renderer.setPixelRatio(ratio);
+    }
+    hud.stats.scale = l.scale;
+    units.lodNear = lodNear * l.lod;
+    units.lodFar = lodFar * l.lod;
+    clutter.small = l.props;
+    hud.stats.governor = governor.describe();
+  };
+  apply(governor.levers);
+  const perfTest = new PerfTest(document.getElementById('perf-test-result'), (hide) => {
+    units.group.visible = !hide.units;
+    structures.group.visible = clutter.group.visible = !hide.town;
+  });
+  document.getElementById('perf-test')?.addEventListener('click', () => {
+    (document.getElementById('menu') as HTMLDetailsElement | null)?.removeAttribute('open');
+    perfTest.start(hud.stats, governor.levers);
+  });
+  // The sun's shadow map is redrawn every Nth frame; in between the old one stays valid
+  // because the light only moves when it is redrawn.
+  sun.shadow.autoUpdate = false;
+  let frameNo = 0;
+  let workMs = 0;
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const dtMs = now - last;
     last = now;
+    const held = perfTest.running ? perfTest.frame(dtMs, workMs, now) : governor.levers;
+    if (perfTest.running) apply(held);
+    else if (perfTest.finished()) apply(governor.levers);
+    else if (governor.frame(dtMs, workMs)) apply(governor.levers);
+    frameNo++;
     const dt = Math.min(dtMs / 1000, 0.1);
     rts.update(dt);
     units.zoom = rts.distance;
@@ -595,12 +626,16 @@ async function start(): Promise<void> {
       sc.far = 900;
       sc.updateProjectionMatrix();
     }
-    sun.target.position.copy(focus);
-    sun.position.copy(focus).addScaledVector(sunDir, 400);
+    if (held.shadowEvery > 0 && frameNo % held.shadowEvery === 0) {
+      sun.target.position.copy(focus);
+      sun.position.copy(focus).addScaledVector(sunDir, 400);
+      sun.shadow.needsUpdate = true;
+    }
     const c4 = performance.now();
-    if (pipeline) pipeline.render();
+    if (pipeline && held.post) pipeline.render();
     else renderer.render(scene, rts.camera);
     const c5 = performance.now();
+    workMs = c5 - now;
     // Smoothed, so the readout is readable: where the CPU time of a frame goes.
     const st = hud.stats;
     st.cpuUnits += (c1 - c0 - st.cpuUnits) * 0.05;
@@ -615,28 +650,13 @@ async function start(): Promise<void> {
     hud.stats.culled = units.stats.culled;
     hud.stats.particles = effects.count;
     hud.frame(dtMs);
-    windowMs += dtMs;
-    windowFrames++;
-    if (adaptScale && windowMs >= 1000) {
-      const avg = windowMs / windowFrames;
-      windowMs = windowFrames = 0;
-      slowSeconds = avg > 19.5 ? slowSeconds + 1 : 0;
-      smoothSeconds = avg < 17.5 ? smoothSeconds + 1 : 0;
-      let next = ratio;
-      if (slowSeconds >= 2) next = Math.max(minRatio, ratio - 0.25);
-      else if (smoothSeconds >= 12) next = Math.min(maxRatio, ratio + 0.25);
-      if (next !== ratio) {
-        ratio = next;
-        slowSeconds = smoothSeconds = 0;
-        renderer.setPixelRatio(ratio);
-        hud.stats.scale = ratio / maxRatio;
-      }
-    }
   });
 
   // Read by automated performance checks.
   (window as unknown as { __revolution: unknown }).__revolution = {
     stats: hud.stats,
+    governor,
+    perfTest,
     sound,
     units,
     structures,
