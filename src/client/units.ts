@@ -52,7 +52,7 @@ import { Batch } from './batch';
 import { Soldiers } from './soldiers';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
-import { ICON_FROM, ICON_FULL, Icons } from './icons';
+import { COMMANDER_RGB, ICON_FROM, ICON_FULL, ICON_PENNANT, Icons } from './icons';
 import type { Look } from './look';
 import { fieldPaint } from './surface';
 import {
@@ -205,7 +205,9 @@ export class UnitView {
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
   private readonly jamRings: Batch;
-  private readonly icons = new Icons(MAX_UNITS);
+  private readonly icons = new Icons(MAX_UNITS * 2);
+  /** Draw a pennant over troops that answer to a sub-commander. */
+  pennants = true;
   /** How far the camera is from what it looks at: decides when the map symbols show. */
   zoom = 0;
   private readonly camRight = new THREE.Vector3();
@@ -828,6 +830,28 @@ export class UnitView {
           Math.min(1, team[1] * 1.9 * sel + 0.04),
           Math.min(1, team[2] * 1.9 * sel + 0.04),
           iconAlpha,
+        );
+      }
+      // Troops under a sub-commander carry its pennant, at any zoom: small up close, and
+      // beside the map symbol when the camera is far out.
+      const boss = this.cmdr[i];
+      if (boss >= 0 && alive && teamId === this.playerTeam && this.pennants) {
+        const dist = Math.sqrt(d2);
+        const s = dist * (0.0135 + 0.002 * iconAlpha);
+        const lift = (flying ? 0.8 : 2.7) + s * (0.6 + 1.5 * iconAlpha);
+        const tint = COMMANDER_RGB[boss & 7];
+        icons.put(
+          x + up.x * lift,
+          y + up.y * lift,
+          z + up.z * lift,
+          s,
+          right,
+          up,
+          ICON_PENNANT + (boss & 7),
+          tint[0],
+          tint[1],
+          tint[2],
+          this.selected[i] ? 1 : 0.8,
         );
       }
       const h = this.heading[i];

@@ -18,6 +18,7 @@ import {
   ST_ATTACK,
   ST_DEFEND,
   ST_FALLBACK,
+  ST_GATHER,
   ST_HOLD,
   ST_MARCH,
   ST_PATROL,
@@ -187,6 +188,30 @@ describe('sub-commanders: the staff', () => {
     expect(st.posts[0].status).toBe(ST_SECURED);
     expect(ids.filter((i) => w.inside[i] >= 0).length).toBeGreaterThanOrEqual(6);
     expect(alive(w, ids)).toBeGreaterThanOrEqual(10);
+  }, 60000);
+
+  it('attack: waits short of the objective for its stragglers, then goes in as one body', () => {
+    const { w, st } = field();
+    const t = town(w, 'Westgate');
+    // Most of the body is fast and close; a third of it is on foot, a long walk behind.
+    const ids = add(w, [spawn(0, KIND_IFV, 13, 300, 740), spawn(0, KIND_INFANTRY, 7, 215, 815)]);
+    step(w, [
+      { type: CMD_ASSIGN, units: ids, slot: 0 },
+      mission(0, M_ATTACK, w.map.townX[t], w.map.townY[t]),
+    ]);
+    let gathered = false;
+    let up = -1;
+    play(w, st, 300, () => {
+      const p = st.posts[0];
+      if (p.status === ST_GATHER) gathered = true;
+      if (up < 0 && (p.status === ST_ATTACK || p.status === ST_SECURED)) {
+        up = ids.filter(
+          (i) => Math.hypot(w.posX[i] - p.cx, w.posY[i] - p.cy) < fx(70) || w.carrier[i] >= 0,
+        ).length;
+      }
+    });
+    expect(gathered).toBe(true);
+    expect(up).toBeGreaterThanOrEqual(17);
   }, 60000);
 
   it('attack: breaks off against far too much, falls back and waits to be reinforced', () => {
