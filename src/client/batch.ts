@@ -70,6 +70,36 @@ export class Batch {
     this.n++;
   }
 
+  /** Add an instance from a full frame: three axes (already scaled) and a position. */
+  frame(f: Float32Array, r: number, g: number, b: number, a: number): void {
+    if (this.n >= this.capacity) return;
+    const m = this.m;
+    const o = this.n * 16;
+    m[o] = f[0];
+    m[o + 1] = f[1];
+    m[o + 2] = f[2];
+    m[o + 3] = 0;
+    m[o + 4] = f[3];
+    m[o + 5] = f[4];
+    m[o + 6] = f[5];
+    m[o + 7] = 0;
+    m[o + 8] = f[6];
+    m[o + 9] = f[7];
+    m[o + 10] = f[8];
+    m[o + 11] = 0;
+    m[o + 12] = f[9];
+    m[o + 13] = f[10];
+    m[o + 14] = f[11];
+    m[o + 15] = 1;
+    const t = this.t;
+    const q = this.n * 4;
+    t[q] = r;
+    t[q + 1] = g;
+    t[q + 2] = b;
+    t[q + 3] = a;
+    this.n++;
+  }
+
   /** Upload only the live part of the buffers. */
   flush(): void {
     this.mesh.count = this.n;

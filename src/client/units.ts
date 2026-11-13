@@ -49,6 +49,7 @@ import {
   type Snapshot,
 } from '../worker/protocol';
 import { Batch } from './batch';
+import { Soldiers } from './soldiers';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import { ICON_FROM, ICON_FULL, Icons } from './icons';
@@ -96,6 +97,10 @@ const SOLDIER_TURN = 9;
 const CULL_RADIUS = 4;
 const WRECK_SMOKE_SECONDS = 50;
 const LOD_HIDDEN = 3;
+/** What the men of a foot unit do when it halts. */
+const DRILL_SQUAD = 0;
+const DRILL_CREW = 1;
+const DRILL_SCOUT = 2;
 /** Paint patterns to go round, and the room left under 1 for the burn (see the material). */
 const SEEDS = 16;
 const BURN_SCALE = 0.97;
@@ -111,7 +116,10 @@ interface VehicleDraw {
 }
 /** How a foot unit is drawn: figures (men, a launcher) around the unit's centre. */
 interface SquadDraw {
-  figures: { batch: Batch[]; x: number; z: number }[];
+  /** `batch` is a fixed model (the launcher); without one the figure is a soldier. */
+  figures: { batch?: Batch[]; x: number; z: number }[];
+  /** What the men do when halted: see DRILL_*. */
+  drill: number;
   far: Batch;
 }
 /** Kinds with a hull whose direction comes from the sim. */
@@ -170,6 +178,12 @@ export class UnitView {
   private readonly moving = new Uint8Array(MAX_UNITS);
   /** Seconds (client clock) of the last shot and of death, for recoil and wreck smoke. */
   private readonly shotAt = new Float32Array(MAX_UNITS).fill(-1e9);
+  /** Per foot unit, eased 0 to 1: how settled it is at the halt, and how much in a fight. */
+  private readonly halted = new Float32Array(MAX_UNITS);
+  private readonly fight = new Float32Array(MAX_UNITS);
+  private readonly soldiers: Soldiers;
+  /** For tuning and screenshots: force every foot unit to [halted, fight, seconds since a shot]. */
+  pose: [number, number, number] | null = null;
   private readonly diedAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private snapshotTime = 0;
   private fogAge = 0;
@@ -246,18 +260,17 @@ export class UnitView {
     this.vehicles[KIND_DRONE] = vehicle(buildReconDrone(), MAX_UNITS >> 2);
     this.vehicles[KIND_STRIKE] = vehicle(buildStrikeDrone(), MAX_UNITS >> 1);
     const infantry = buildInfantry();
-    const soldier = infantry.soldier.map((g, lod) => batch(g, MAX_UNITS * 5, lod, true));
+    this.soldiers = new Soldiers((g, cap, lod) => batch(g, cap, lod, true));
     this.squads[KIND_INFANTRY] = {
-      figures: SQUAD_OFFSETS.map(([x, z]) => ({ batch: soldier, x, z })),
+      figures: SQUAD_OFFSETS.map(([x, z]) => ({ x, z })),
+      drill: DRILL_SQUAD,
       far: batch(infantry.far, MAX_UNITS, 2),
     };
     const team = buildLauncher();
     const launcher = [0, 1].map((lod) => batch(team.launcher.clone(), MAX_UNITS >> 2, lod, true));
     this.squads[KIND_ATGM] = {
-      figures: [
-        { batch: launcher, x: 0, z: 0.25 },
-        ...TEAM_OFFSETS.map(([x, z]) => ({ batch: soldier, x, z })),
-      ],
+      figures: [{ batch: launcher, x: 0, z: 0.25 }, ...TEAM_OFFSETS.map(([x, z]) => ({ x, z }))],
+      drill: DRILL_CREW,
       far: batch(team.far, MAX_UNITS >> 2, 2),
     };
     // A recon team is two men: fewer, and that is how you tell it from a rifle squad.
@@ -266,7 +279,8 @@ export class UnitView {
       [0.35, -0.2],
     ];
     this.squads[KIND_RECON] = {
-      figures: pair.map(([x, z]) => ({ batch: soldier, x, z })),
+      figures: pair.map(([x, z]) => ({ x, z })),
+      drill: DRILL_SCOUT,
       far: batch(
         new THREE.BoxGeometry(0.9, 0.5, 0.5).translate(0, 0.25, 0).deleteAttribute('uv'),
         MAX_UNITS >> 3,
@@ -860,24 +874,67 @@ export class UnitView {
           const face = Number.isNaN(aimAngle) ? h : aimAngle;
           const fs = Math.sin(face);
           const fc = Math.cos(face);
-          const walking = this.moving[i] === 1;
+          // Ease between halted and moving, and between at ease and in a fight, so a squad
+          // settles into its stances instead of snapping.
+          const forced = this.pose;
+          const since = forced ? forced[2] : seconds - this.shotAt[i];
+          const ease = Math.min(1, dt * 4.5);
+          let halted = (this.halted[i] += ((this.moving[i] === 1 ? 0 : 1) - this.halted[i]) * ease);
+          let fight = (this.fight[i] +=
+            ((since < 3 || !Number.isNaN(aimAngle) ? 1 : 0) - this.fight[i]) * ease);
+          if (forced) {
+            halted = forced[0];
+            fight = forced[1];
+          }
+          const drill = squad.drill;
+          const near = lod === 0 && this.soldiers.roomNear ? 0 : 1;
           for (let k = 0; k < men; k++) {
             const f = figures[k];
             const sx = x + f.x * cos + f.z * sin;
             const sz = z - f.x * sin + f.z * cos;
-            const bob = walking ? Math.abs(Math.sin(seconds * 9 + i + k * 1.7)) * 0.035 : 0;
-            f.batch[lod].put(
+            const sy = this.terrain.heightAt(sx, sz);
+            const seed = ((i + k * 5) % SEEDS) + BURN_BASE;
+            if (f.batch) {
+              f.batch[lod].put(sx, sy, sz, fs, fc, 1, team[0], team[1], team[2], seed);
+              continue;
+            }
+            // Halted, a squad takes a knee, and in a fight some of it goes flat; a missile
+            // crew kneels by its launcher; scouts lie up and watch.
+            const role = (i + k) % 5;
+            let kneel = halted;
+            let prone = 0;
+            if (drill === DRILL_SCOUT) prone = halted;
+            else if (drill === DRILL_SQUAD) {
+              if (role === 1 || role === 4) prone = halted * fight;
+              else if (role === 3) kneel = halted * (1 - fight);
+              else if (role === 0) kneel = halted * fight;
+            }
+            const burst = since * 7 + k * 0.37;
+            const firing = since < 0.9 && halted > 0.6 && ((burst | 0) + k) % 2 === 0;
+            const phase = burst - (burst | 0);
+            this.soldiers.man(
+              near,
               sx,
-              this.terrain.heightAt(sx, sz) + bob,
+              sy,
               sz,
               fs,
               fc,
-              1,
+              kneel,
+              prone,
+              1 - halted,
+              fight * halted,
+              seconds * 11 + i * 1.3 + k * 2.1,
+              firing ? 0.035 * (1 - phase) : 0,
               team[0],
               team[1],
               team[2],
-              ((i + k * 5) % SEEDS) + BURN_BASE,
+              seed,
             );
+            if (firing && phase < dt * 7) {
+              const mz = this.soldiers.muzzle;
+              fx.thin = 0;
+              fx.muzzle(mz[0], mz[1], mz[2], mz[3], mz[4]);
+            }
           }
         }
       }

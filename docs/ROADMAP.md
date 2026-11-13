@@ -222,6 +222,17 @@ an attack elsewhere. Decision 073.
   found by a recon drone: banner, tone, spoken line, minimap ping, edge arrow; Backspace
   jumps to the latest
 
+## Soldiers sprint (built, awaiting Fabio's test)
+
+Fabio, 2026-11-13: the soldiers are the weakest thing on screen. Decision 075.
+
+- A jointed figure at true proportions with helmet, plate carrier, pouches, pack, knee
+  pads, boots and rifle; a simpler jointed figure at middle distance
+- Stances: running with a real stride, standing at the low ready, kneeling at the halt,
+  kneeling or prone to fire, scouts lying up; eased from one to the next
+- A flash at each rifle's own muzzle, with recoil
+- One neutral uniform, built from a palette so each faction can be dressed later
+
 ## Urban warfare (U1 built, awaiting Fabio's test; U2 to U6 planned)
 
 Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,

@@ -943,3 +943,42 @@ to 3890551401.
 
 Not in U1, by the plan: fortifying and repairing houses, linked buildings, storming,
 top attack, rubble in the streets (U2 and U3). A breached face is not yet an entrance.
+
+## 075 Soldiers are jointed figures posed on the CPU
+
+Fabio, 2026-11-13: the game looks better, and the soldiers are the big gap. They were a
+stack of fifteen boxes that slid over the ground with a small bob.
+
+A soldier is now eleven rigid pieces (torso, head, two thighs, two shins, two upper arms,
+two forearms, rifle) modelled in metres at true proportions and scaled to the map
+(`src/client/soldiers.ts`). Each frame the client blends a pose from seven key stances,
+places the joints, and writes every piece into its own instanced batch. The arms are
+solved to the rifle (two bones, elbow kept clear of the ground when prone), and the hips
+sit as low as the lowest knee or foot allows, which keeps feet on the ground through a
+stride and puts a knee on it when a man kneels.
+
+Why on the CPU and not in a vertex shader: a shader rig would be one draw call instead
+of seven, but it would need its own material, its own shadow path and its own instance
+attributes, on a WebGPU path that cannot be tested in the cloud. Posing on the CPU keeps
+soldiers on exactly the material, shadows and upload path the vehicles already use.
+Measured headless: 3,000 soldiers on screen cost about 2 ms of CPU a frame at either
+level of detail. A man is about 450 triangles near (was 190) and 96 at middle distance
+(was 36); full detail is capped at 4,096 men at once and the rest of a crowd falls to
+the simple figure.
+
+What a squad does is decided on the client from what it already knows (moving, shot
+recently, has a target), so the sim and the golden hash are untouched:
+
+- moving: everyone runs, rifle at the port
+- halted: most take a knee, one or two stay standing
+- in a fight: some kneel and fire, some go prone, one fires standing
+- a missile crew kneels by its launcher; scouts lie prone whenever they stop
+
+Each rifle flashes at its own muzzle in short bursts after the squad's shot, with a small
+recoil. Uniforms come from a palette (`Uniform`, default `NEUTRAL`: olive drab, no
+nation's pattern); the factions milestone builds one rig per faction with its own.
+
+Not done: death and wound animation (men still drop out of the squad as it loses
+health), taking cover behind a specific wall or tree, crawling, and stances that follow
+the sim's cover value. The figure is still made of boxes: it reads as a soldier from the
+RTS camera, not in a close-up.

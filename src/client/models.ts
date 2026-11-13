@@ -11,8 +11,6 @@ const PAINT = 0x565c45;
 const PAINT_DARK = 0x3f4434;
 const RUBBER = 0x17181a;
 const STEEL = 0x2b2e2c;
-const CLOTH = 0x6a6a4c;
-const SKIN = 0x9a7a62;
 /**
  * Art direction is grounded realism (docs/DECISIONS.md 011): hulls keep muted service paint
  * and carry the team colour only on small markings. The barely visible tint below just
@@ -57,7 +55,7 @@ function finish(g: THREE.BufferGeometry, o: Opts): THREE.BufferGeometry {
   return g;
 }
 
-const box = (w: number, h: number, d: number, o: Opts = {}) =>
+export const box = (w: number, h: number, d: number, o: Opts = {}) =>
   finish(new THREE.BoxGeometry(w, h, d), o);
 
 /** Cylinder whose axis runs along `axis`. */
@@ -68,7 +66,7 @@ function cyl(r: number, len: number, axis: 'x' | 'y' | 'z', o: Opts = {}, seg = 
   return finish(g, o);
 }
 
-const merge = (parts: THREE.BufferGeometry[]) => mergeGeometries(parts);
+export const merge = (parts: THREE.BufferGeometry[]) => mergeGeometries(parts);
 
 export interface VehicleModel {
   hull: THREE.BufferGeometry[]; // LOD 0, 1
@@ -450,7 +448,6 @@ export function buildIfv(): VehicleModel {
 }
 
 export interface InfantryModel {
-  soldier: THREE.BufferGeometry[]; // LOD 0, 1: one soldier
   far: THREE.BufferGeometry; // LOD 2: the whole squad in one mesh
 }
 
@@ -464,37 +461,14 @@ export const SQUAD_OFFSETS: readonly [number, number][] = [
   [0.95, -0.4],
 ];
 
-/** A rifleman in helmet, vest and pack, weapon at the low ready. Taller than scale so he reads. */
+/** The far level of a rifle squad: one block per man. The men themselves are in soldiers.ts. */
 export function buildInfantry(): InfantryModel {
-  const s: THREE.BufferGeometry[] = [];
-  for (const side of [-1, 1]) {
-    s.push(box(0.075, 0.27, 0.09, { at: [side * 0.05, 0.135, 0], color: CLOTH }));
-    s.push(box(0.08, 0.05, 0.13, { at: [side * 0.05, 0.025, 0.02], color: RUBBER }));
-    s.push(
-      box(0.06, 0.2, 0.07, { at: [side * 0.135, 0.38, 0.05], rot: [-0.7, 0, 0], color: CLOTH }),
-    );
-    s.push(box(0.065, 0.03, 0.065, { at: [side * 0.135, 0.45, 0], team: 1 })); // shoulder patch
-  }
-  s.push(box(0.21, 0.22, 0.13, { at: [0, 0.38, 0], color: CLOTH }));
-  s.push(box(0.23, 0.15, 0.16, { at: [0, 0.37, 0.005], color: 0x494c38 })); // vest
-  s.push(box(0.17, 0.17, 0.08, { at: [0, 0.39, -0.11], color: 0x505238 })); // pack
-  s.push(box(0.085, 0.09, 0.09, { at: [0, 0.535, 0.005], color: SKIN }));
-  s.push(
-    box(0.12, 0.065, 0.13, { at: [0, 0.585, 0], top: [0.8, 0.8], color: 0x555a42, team: 0.12 }),
-  );
-  s.push(box(0.03, 0.045, 0.36, { at: [0.05, 0.34, 0.2], rot: [0.12, 0.15, 0], color: RUBBER }));
-
-  const soldier1 = merge([
-    box(0.17, 0.27, 0.1, { at: [0, 0.135, 0], color: CLOTH }),
-    box(0.24, 0.23, 0.16, { at: [0, 0.385, 0], color: 0x3a3d2e, team: 0.1 }),
-    box(0.12, 0.13, 0.13, { at: [0, 0.56, 0], color: 0x3d4232, team: 0.3 }),
-  ]);
   const far = merge(
     SQUAD_OFFSETS.map(([x, z]) =>
       box(0.3, 0.62, 0.3, { at: [x, 0.31, z], color: 0x3a3d2e, team: 0.7 }),
     ),
   );
-  return { soldier: [merge(s), soldier1], far };
+  return { far };
 }
 
 /** Where the two crewmen of a missile team stand, and the launcher between them. */
