@@ -17,6 +17,7 @@ import { Clutter } from './client/clutter';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { Minimap } from './client/minimap';
+import { ProductionCentre } from './client/production';
 import { Scars } from './client/scars';
 import { Sound } from './client/sound';
 import { StructureView } from './client/structures';
@@ -183,6 +184,7 @@ async function start(): Promise<void> {
     cameras.applySnapshot(e.data, performance.now() / 1000);
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
+    production.applySnapshot(e.data);
     alerts?.applySnapshot(e.data, performance.now() / 1000);
     hud.simTick(e.data.simMs);
     hud.stats.alive = e.data.alive;
@@ -202,6 +204,21 @@ async function start(): Promise<void> {
     lookAt,
     works,
   );
+  const production = new ProductionCentre(
+    document.getElementById('production') as HTMLElement,
+    map,
+    units,
+    send,
+  );
+  const productionBtn = document.getElementById('production-toggle');
+  productionBtn?.addEventListener('click', () => {
+    production.toggle();
+    productionBtn.blur();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyP' && !e.ctrlKey && !e.metaKey) production.toggle();
+    else if (e.code === 'Escape' && production.open) production.toggle(false);
+  });
   const input = new Input(
     canvas,
     rts.camera,
@@ -534,6 +551,7 @@ async function start(): Promise<void> {
     structures,
     works,
     card,
+    production,
     alerts,
     map,
     send,

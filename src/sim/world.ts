@@ -11,6 +11,9 @@ import {
 } from './map';
 import { seedRng } from './rng';
 
+/** Room per team in the per-kind tables of the world (at least KIND_COUNT of the unit table). */
+export const KIND_SLOTS = 16;
+
 /** Surveillance cameras on the map at once, all armies together (see the unit rules). */
 export const MAX_CAMERAS = 64;
 
@@ -51,6 +54,15 @@ export const MAX_SMOKE = 4096;
 
 /** Shells in the air at once. A gun whose shell finds no room simply misfires. */
 export const MAX_SHELLS = 2048;
+
+/** Where a kind's new units go (see CMD_DEST): the factory's rally point, a town, a commander. */
+export const DEST_RALLY = 0;
+export const DEST_TOWN = 1;
+export const DEST_COMMANDER = 64;
+/** Sub-commanders an army can have. */
+export const MAX_COMMANDERS = 8;
+/** The most of one kind that can be on bulk order, or kept in the field, at once. */
+export const ORDER_MAX = 999;
 
 /** Units a base building can have on order at once. */
 export const QUEUE_MAX = 8;
@@ -244,6 +256,17 @@ export interface World {
   sProgress: Int32Array;
   sRallyX: Int32Array;
   sRallyY: Int32Array;
+  /**
+   * The war production centre, per team and unit kind (index team * KIND_SLOTS + kind):
+   * units on bulk order and not yet on a factory's queue, the number to keep in the field
+   * (0 = no standing order), and where new ones go (DEST_*).
+   */
+  orders: Int16Array;
+  keep: Int16Array;
+  dest: Uint8Array;
+  /** Per team: whose turn it is among the kinds on order, and how long it has waited for money. */
+  orderTurn: Uint8Array;
+  orderWait: Uint8Array;
   /** Trucks: the job, the site and the building it refers to, the load and a timer. */
   job: Uint8Array;
   jobSite: Int16Array;
@@ -365,6 +388,11 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     sProgress: new Int32Array(MAX_STRUCTS),
     sRallyX: new Int32Array(MAX_STRUCTS),
     sRallyY: new Int32Array(MAX_STRUCTS),
+    orders: new Int16Array(MAX_TEAMS * KIND_SLOTS),
+    keep: new Int16Array(MAX_TEAMS * KIND_SLOTS),
+    dest: new Uint8Array(MAX_TEAMS * KIND_SLOTS),
+    orderTurn: new Uint8Array(MAX_TEAMS),
+    orderWait: new Uint8Array(MAX_TEAMS),
     job: new Uint8Array(MAX_UNITS),
     jobSite: new Int16Array(MAX_UNITS),
     jobStruct: new Int16Array(MAX_UNITS),
@@ -447,6 +475,11 @@ export function hashWorld(w: World): number {
     mix(w.townOwner[t] | (w.townCapturer[t] << 8) | (w.townProgress[t] << 16));
   }
   for (let t = 0; t < MAX_TEAMS; t++) mix(w.credits[t]);
+  for (let t = 0; t < MAX_TEAMS; t++) mix(w.orderTurn[t] | (w.orderWait[t] << 8));
+  for (let k = 0; k < MAX_TEAMS * KIND_SLOTS; k++) {
+    mix((w.orders[k] & 0xffff) | (w.keep[k] << 16));
+    mix(w.dest[k]);
+  }
   mix(w.shellCount);
   for (let k = 0; k < w.shellCount; k++) {
     mix(w.shX[k]);

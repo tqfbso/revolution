@@ -230,6 +230,106 @@
       #card .row.works button {
         min-width: 86px;
       }
+      /* The war production centre: a sheet over the middle of the screen. */
+      #production {
+        top: 52px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(1040px, calc(100vw - 40px));
+        max-height: calc(100vh - 130px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        background: rgba(12, 16, 20, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        display: none;
+        pointer-events: auto;
+        z-index: 7;
+      }
+      #production .head {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 14px;
+      }
+      #production .head span {
+        flex: 1;
+        font-size: 11px;
+        color: #9aa7b3;
+      }
+      #production .bank,
+      #production .foot {
+        margin: 6px 0;
+        font-size: 11px;
+        color: #9aa7b3;
+      }
+      #production table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      #production th {
+        text-align: left;
+        font-weight: normal;
+        font-size: 11px;
+        color: #9aa7b3;
+        padding: 2px 6px;
+      }
+      #production td {
+        padding: 2px 6px;
+        white-space: nowrap;
+      }
+      #production tr.group td {
+        padding-top: 8px;
+        font-weight: bold;
+        color: #d8c27a;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      #production tr.group.none td {
+        color: #ff7b6b;
+      }
+      #production tr.dim td:first-child {
+        opacity: 0.5;
+      }
+      #production td button {
+        padding: 2px 7px;
+        margin-right: 3px;
+      }
+      #production td i {
+        font-style: normal;
+        margin-right: 7px;
+      }
+      #production [data-cell^='keep'] {
+        display: inline-block;
+        min-width: 30px;
+        text-align: center;
+      }
+      #production [data-cell^='why'] {
+        margin-left: 6px;
+        font-size: 11px;
+        color: #ff7b6b;
+      }
+      #production .hot {
+        color: #f0e2b0;
+        font-weight: bold;
+      }
+      #production select {
+        font: inherit;
+        font-size: 11px;
+        color: #e6edf3;
+        background: rgba(12, 16, 20, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 4px;
+        padding: 2px 4px;
+        max-width: 190px;
+      }
+      kbd {
+        margin-left: 6px;
+        padding: 0 4px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 3px;
+        font: inherit;
+        font-size: 10px;
+        color: #d8c27a;
+      }
       #banner {
         position: fixed;
         top: 30%;
@@ -405,6 +505,12 @@
     <div id="top">
       <div id="resources" class="panel"></div>
       <div id="actions">
+        <button
+          id="production-toggle"
+          title="War production: order units from every factory at once, keep numbers up, choose where new units go"
+        >
+          Production <kbd>P</kbd>
+        </button>
         <button id="pause" title="Pause (Space). Orders given while paused start when you resume">
           Pause (Space)
         </button>
@@ -467,14 +573,19 @@ starting…</pre>
       <div id="selection" class="panel"></div>
       <div id="card" class="panel"></div>
     </div>
+    <div id="production" class="panel"></div>
     <div id="banner" class="panel"></div>
     <div id="paused" class="panel"></div>
     <div id="help" class="panel">
-      The enemy base is off the map until one of your units sees it: scout. The AI menu (top right)
+      The enemy base is off the map until one of your units sees it: scout. The Menu (top right)
       sets the opponent and starts a new game.<br />
       Economy: select trucks, right click a stockpile (tan marker) or an oil well (amber) to haul;
       the buttons at the bottom build. Click one of your buildings to produce units.<br />
       Supplies run out, wells pump slowly (hold more wells), towns pay credits for technology.<br />
+      Production (P, or the button at the top): every factory on one screen. Order 20 squads and all
+      your barracks share the work; each unit is paid for as it starts, so you can order ahead of
+      your money. Keep: that many are kept in the field, losses replaced by themselves. Send to: new
+      units of that kind go straight to a town instead of the factory's rally point<br />
       You command red. Drag: select · Double click: all of that type · Shift: add · Ctrl+A: all<br />
       Right click: move (breaks off a fight) · Right click an enemy: attack it · C then click or
       Alt+right click: attack-move · X: stop · H: hold position · G: hold fire · . (full stop): idle
