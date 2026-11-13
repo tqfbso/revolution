@@ -254,11 +254,11 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   damaged, gutted, ruin), each still a position; building classes two to six times
   tougher; tank guns break walls, artillery brings structures down; a ruin cannot be
   destroyed further; the garrison's losses come in two steps
-- U2 Hold and take a block. BUILT 2026-11-13 (decision 085): storming an enemy-held
+- U2 Hold and take a block. BUILT 2026-11-13 (decision 086): storming an enemy-held
   building, with breaches and smoke taking away the defender's edge; the AI storms too.
   Still to do (Fable 5.2 with Sonnet 5.5 for the interface): fortify, repair, barricades,
   linked buildings with mouseholes, "garrison this block"
-- U3 Streets. BUILT 2026-11-13 (decision 086): the city map, generated round nine flags,
+- U3 Streets. BUILT 2026-11-13 (decision 087): the city map, generated round nine flags,
   436 buildings, streets and street furniture, now the default map. Still to do (Fable
   5.2): columns in corridors, local map updates, rubble that shuts streets and engineers
   that clear it

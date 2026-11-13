@@ -1201,7 +1201,7 @@ went in when half had arrived, so a mixed body attacked with its vehicles and th
 infantry walked into the aftermath. The staff is not hashed state: the golden hash is
 unchanged.
 
-## 085. Storming a held building (U2, first part) (2026-11-13)
+## 086. Storming a held building (U2, first part) (2026-11-13)
 
 Infantry ordered into a building the enemy holds now fights its way in instead of standing
 at the door. The order is the one the player already knows (right click the building); the
@@ -1229,7 +1229,7 @@ Not done from the U2 list in URBAN.md: fortifying and repairing, barricades, lin
 buildings and mouseholes, "garrison this block". Engineers alone are weak stormers (four
 to six fail against four); they are a multiplier, not an assault force.
 
-## 086. The city map, built round the flags (U3, first part) (2026-11-13)
+## 087. The city map, built round the flags (U3, first part) (2026-11-13)
 
 A third map layout, `city`, now the default (`?map=ridge` and `?map=river` still work, and
 the menu offers all three). Fabio asked for towns generated round the flags, dense and
