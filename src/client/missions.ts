@@ -180,7 +180,7 @@ export class MissionBoard {
     for (let slot = 0; slot < MAX_COMMANDERS; slot++) {
       const o = slot * COMMANDER_STRIDE;
       const c = this.info[slot];
-      const was = { status: c.status, need: c.need, count: c.count };
+      const was = { status: c.status, need: c.need, count: c.count, fighting: c.fighting };
       const flags = s.commanders[o + 9];
       c.mission = s.commanders[o];
       c.x = s.commanders[o + 1];
@@ -197,7 +197,8 @@ export class MissionBoard {
       c.need = (flags & COMMANDER_NEED) !== 0;
       c.fighting = (flags & COMMANDER_FIGHTING) !== 0;
       // What the player must hear about, wherever they are looking.
-      if (c.count === 0 && was.count > 0) {
+      // (Troops the player took back are not a loss: only a command that died fighting.)
+      if (c.count === 0 && was.count > 0 && (was.fighting || was.status === ST_FALLBACK)) {
         this.hooks.alert(`${c.name} has no troops left`, c.cx, c.cz);
       } else if (c.status !== was.status && c.status === ST_FALLBACK) {
         this.hooks.alert(`${c.name} is falling back`, c.cx, c.cz);
@@ -332,6 +333,7 @@ export class MissionBoard {
     if (!this.open) return;
     const u = this.units;
     const active = this.info.filter((c) => c.count > 0 || c.mission !== M_NONE);
+    const picked = u.selectedIds();
     let html = '';
     if (active.length === 0) {
       html +=
@@ -351,6 +353,11 @@ export class MissionBoard {
         `<div class="row" data-act="open" data-s="${c.slot}" title="Click: select its troops and show its orders"><b>${c.name}</b><span class="what">${what}</span><span class="n">${c.count}</span></div>` +
         `<div class="bar"><i style="width:${pct}%"></i></div>` +
         `<div class="state">${notes.join(' · ')}</div>`;
+      // Troops selected that are not this commander's: one click puts them under it.
+      const extra = picked.filter((id) => u.cmdr[id] !== c.slot).length;
+      if (extra > 0) {
+        html += `<div class="orders"><button data-act="add" data-s="${c.slot}" class="on" title="Put the selected units under ${c.name}. New arrivals join its body when they catch up with it">+ Add ${extra} selected to ${c.name}</button></div>`;
+      }
       if (openRow) {
         html += '<div class="orders">';
         for (const d of MISSIONS) {
@@ -359,7 +366,6 @@ export class MissionBoard {
         html +=
           `</div><div class="orders">` +
           `<button data-act="jump" data-s="${c.slot}" title="Look at its troops">Go to</button>` +
-          `<button data-act="add" data-s="${c.slot}" title="Put the selected units under ${c.name}"${u.selectedCount === 0 ? ' disabled' : ''}>+ Selection</button>` +
           `<button data-act="auto" data-s="${c.slot}" class="${c.auto ? 'on' : ''}" title="Replace losses: what ${c.name} loses is ordered again from your factories and sent to it, as money allows">Replace losses: ${c.auto ? 'on' : 'off'}</button>` +
           `<button data-act="stand" data-s="${c.slot}" title="Stop where it is and wait for orders">Stand down</button>` +
           `<button data-act="disband" data-s="${c.slot}" title="Its troops go back under your own orders">Disband</button>` +
@@ -378,7 +384,7 @@ export class MissionBoard {
         `<button data-act="absorb" title="Each joins the commander whose troops are nearest"${active.some((c) => c.count > 0) ? '' : ' disabled'}>Give to nearest</button></div>`;
     }
     html +=
-      '<p class="hint">An order you give a unit yourself takes it out of its commander\'s hands. Dragging a box leaves commanded troops alone when it also holds others.</p></div>';
+      '<p class="hint">An order you give a unit yourself takes it out of its commander\'s hands. To put it back, select it and press + Add on the commander.</p></div>';
     if (html !== this.html) this.body.innerHTML = this.html = html;
   }
 }

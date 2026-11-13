@@ -98,15 +98,17 @@ describe('buildings that die slowly (U1)', () => {
     expect(events(w, EV_COLLAPSE).length).toBe(0);
   });
 
-  it('rifle squads ordered onto a building close on it instead of standing idle', () => {
+  it('rifle squads ordered onto a building go and wear it down, slowly', () => {
     const w = createWorld(1, withHouse());
     step(w, [spawnAt(1, KIND_INFANTRY, 1, 580, 500)]);
     step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [0], structure: 0 }]);
     const from = w.posX[0];
-    for (let t = 0; t < 400; t++) step(w, []);
-    // They cannot hurt it (that is for engineers, missiles, tanks and guns), but they go.
+    for (let t = 0; t < 1200; t++) step(w, []);
     expect(from - w.posX[0]).toBeGreaterThan(fx(30));
-    expect(w.sHp[0]).toBe(w.map.sMaxHp[0]);
+    // Grenades and rockets: it tells after a minute, and a tank does thirty times as much.
+    const done = w.map.sMaxHp[0] - w.sHp[0];
+    expect(done).toBeGreaterThan(0);
+    expect(done).toBeLessThan(w.map.sMaxHp[0] / 10);
   });
 
   it('an engineer charge goes into the structure, not into a wall', () => {

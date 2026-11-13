@@ -1177,3 +1177,13 @@ Measured headless, ridge map, hard AI opposite: 6,000 units with eight commander
 Not done: no marker over commanded troops in the 3D view (the minimap has one); the
 staff has not been tuned in full games against the AI; commanders do not coordinate
 with each other.
+
+## 083. After the first test of commanders (2026-11-13)
+
+Fabio, playing build dccd279. Rifle squads get a siege value of 2 (a tank gun is 60):
+"they still don't attack enemy buildings" settled the question 081 left open. Reports
+that are not attacks (a commander's news, troops out of supply, a hint about an order)
+are their own alert kind, blue and spoken as written; they used the army-attack kind,
+which said "forces under attack". A box now selects commanded troops like any others:
+leaving them out read as a selection bug. Every commander row shows "+ Add N selected"
+when troops that are not its own are selected. Golden hash 665890359.

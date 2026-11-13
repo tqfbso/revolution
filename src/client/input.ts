@@ -167,9 +167,8 @@ export class Input {
       else if (e.code === 'Period') card.selectIdle();
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        // All of them that are yours to order about: not those a commander has.
         units.setSelected(
-          range(units.count).filter((i) => this.mayCommand(i) && units.cmdr[i] < 0),
+          range(units.count).filter((i) => this.mayCommand(i)),
           false,
         );
       } else if (e.code === 'KeyX' && units.selectedCount > 0) {
@@ -338,11 +337,7 @@ export class Input {
       }
     }
     this.card.select(-1);
-    // A box that holds both leaves a commander's troops out: sweeping up your own units
-    // must not empty a command by accident. A box of nothing but commanded troops, or a
-    // click on one, selects them.
-    const own = isClick ? picked : picked.filter((i) => this.units.cmdr[i] < 0);
-    this.units.setSelected(own.length > 0 ? own : picked, additive);
+    this.units.setSelected(picked, additive);
   }
 
   /** Waiting for a click on the map (see `ask`). */
@@ -408,7 +403,7 @@ export class Input {
       this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z);
       if (!ids.some((id) => KINDS[this.units.kindOf(id)].siege > 0)) {
         this.say(
-          'Rifles cannot damage buildings: send engineers, missiles, tanks or guns',
+          'Nothing selected can damage buildings: send infantry, engineers, tanks or guns',
           c.x,
           c.z,
         );

@@ -5,7 +5,7 @@ import { CMD_ASSIGN, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS, M_NONE } from './sim/world';
-import { ALERT_ARMY, ALERT_TOWN, Alerts } from './client/alerts';
+import { ALERT_NOTE, Alerts } from './client/alerts';
 import { Cameras } from './client/cameras';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
@@ -243,7 +243,7 @@ async function start(): Promise<void> {
     card,
     works,
   );
-  input.say = (text, x, z) => alerts?.report(ALERT_ARMY, x, z, text, performance.now() / 1000);
+  input.say = (text, x, z) => alerts?.report(ALERT_NOTE, x, z, text, performance.now() / 1000);
   // The mission board: sub-commanders, their missions and how they are getting on.
   const promptEl = document.getElementById('prompt');
   input.prompt = (text) => {
@@ -259,7 +259,7 @@ async function start(): Promise<void> {
     {
       lookAt,
       ask: (text, done) => input.ask(text, done),
-      alert: (text, x, z) => alerts?.report(ALERT_ARMY, x, z, text, performance.now() / 1000),
+      alert: (text, x, z) => alerts?.report(ALERT_NOTE, x, z, text, performance.now() / 1000),
     },
   );
   production.postings = () => board.postings();
@@ -461,7 +461,7 @@ async function start(): Promise<void> {
     const out = supply.hungry;
     if (out.length > 0 && wasFed) {
       const c = units.centreOf(out);
-      if (c) alerts?.report(ALERT_TOWN, c.x, c.z, 'Units out of supply', performance.now() / 1000);
+      if (c) alerts?.report(ALERT_NOTE, c.x, c.z, 'Units out of supply', performance.now() / 1000);
     }
     wasFed = out.length === 0;
     selectionEl.style.display = parts.length > 0 ? 'block' : 'none';
