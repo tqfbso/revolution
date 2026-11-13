@@ -233,6 +233,16 @@ Fabio, 2026-11-13: the soldiers are the weakest thing on screen. Decision 075.
 - A flash at each rifle's own muzzle, with recoil
 - One neutral uniform, built from a palette so each faction can be dressed later
 
+## Surveillance cameras (built, awaiting Fabio's test)
+
+Fabio, 2026-11-13. Decision 076.
+
+- Engineers leave cameras (V): cheap, unseen by the enemy, a small circle of sight, a
+  contact alert when enemy troops walk in
+- A jammer truck blinds cameras in its bubble and gives them away; a camera given away is
+  pulled down by any enemy ground unit that reaches it; jammed drones show through the fog
+- Not yet: the AI placing cameras of its own; cameras on the minimap
+
 ## Urban warfare (U1 built, awaiting Fabio's test; U2 to U6 planned)
 
 Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,

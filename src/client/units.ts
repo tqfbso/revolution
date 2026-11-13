@@ -86,7 +86,7 @@ import {
 import type { Terrain } from './terrain';
 
 // Marking colours (linear RGB): red, blue, gold. Hulls stay in service paint.
-const TEAM_RGB = [
+export const TEAM_RGB = [
   [0.52, 0.045, 0.03],
   [0.03, 0.15, 0.62],
   [0.62, 0.36, 0.02],

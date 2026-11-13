@@ -87,6 +87,8 @@ export class Fog {
   /** Take the lie of the land from the map: heights, forest. Buildings come via setWall. */
   /** Fixed lookouts as (cell x, cell y, radius in cells) triples. */
   posts: number[] = [];
+  /** The player's working surveillance cameras, in the same form. */
+  cameras: number[] = [];
 
   setMap(map: GameMap): void {
     let sum = 0;
@@ -174,6 +176,9 @@ export class Fog {
     // Fixed lookouts (your base buildings): a plain circle each.
     for (let k = 0; k < this.posts.length; k += 3) {
       this.lookDown(this.posts[k], this.posts[k + 1], this.posts[k + 2]);
+    }
+    for (let k = 0; k < this.cameras.length; k += 3) {
+      this.lookDown(this.cameras[k], this.cameras[k + 1], this.cameras[k + 2]);
     }
     const H = N >> 1;
     for (let by = 0; by < H; by++) {

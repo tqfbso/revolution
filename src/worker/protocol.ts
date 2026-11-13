@@ -26,6 +26,9 @@ export const INFO_REVEALED = 32;
 export const INFO_CARRIED = 64;
 /** The enemy knows where it is: in someone's sight, or a gun located by its own fire. */
 export const INFO_SPOTTED = 128;
+/** Camera flags: the enemy knows where it is; an enemy jammer has blinded it. */
+export const CAMERA_KNOWN = 16;
+export const CAMERA_BLIND = 32;
 export const NO_AIM = 0xffff;
 
 /** Main thread -> simulation worker. */
@@ -78,6 +81,11 @@ export interface Snapshot {
    * face (FACE_*) whose wall has been breached.
    */
   structStage: Uint8Array;
+  /**
+   * Surveillance cameras standing: four numbers each. Slot, x and z in world units, then
+   * the owner's team in the low four bits with CAMERA_KNOWN and CAMERA_BLIND above.
+   */
+  cameras: Float32Array;
   /** Per town: owner and capturing team (255 = none), capture progress 0..100. */
   townOwner: Uint8Array;
   townCapturer: Uint8Array;

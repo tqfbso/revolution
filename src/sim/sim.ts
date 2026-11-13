@@ -9,6 +9,7 @@ import {
   CMD_MOVE,
   CMD_SPAWN,
   CMD_STOP,
+  CMD_CAMERA,
   CMD_UNLOAD,
   type Command,
   type SpawnCommand,
@@ -99,6 +100,13 @@ import {
   HEIGHT_RANGE_SHIFT,
   JAM_DRAIN_TICKS,
   JAM_REVEAL_TICKS,
+  CAMERA_COST,
+  CAMERA_HEIGHT,
+  CAMERA_LIMIT,
+  CAMERA_PULL,
+  CAMERA_REVEAL_TICKS,
+  CAMERA_SIGHT,
+  CAMERA_SPACING,
   KINDS,
   KIND_COUNT,
   KIND_INFANTRY,
@@ -119,6 +127,9 @@ import {
   EV_BREACH,
   EV_GUTTED,
   EV_WALL,
+  EV_CAMERA,
+  EV_CAMERA_LOST,
+  MAX_CAMERAS,
   EV_CAPTURE,
   EV_COLLAPSE,
   EV_DEATH,
@@ -241,6 +252,7 @@ const PRIORITY = KINDS.flatMap((a) =>
 const DETECT_RANGE_SQ = DETECT_RANGE * DETECT_RANGE;
 /** Jammers alive this tick. */
 const jammers = new Int32Array(MAX_UNITS);
+let jammerCount = 0;
 const structDamage = new Int32Array(MAX_STRUCTS);
 /** Damage of the tick to the walls of buildings, four faces each. */
 const wallDamage = new Int32Array(MAX_STRUCTS * 4);
@@ -305,6 +317,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateEyes(w);
   updateJamming(w);
   updateSpotters(w);
+  updateCameras(w);
   acquireTargets(w);
   steer(w);
   separate(w);
@@ -344,6 +357,11 @@ export function step(w: World, commands: readonly Command[]): void {
 }
 
 function applyCommand(w: World, cmd: Command): void {
+  // Leaving a camera behind interrupts nothing the squad was doing.
+  if (cmd.type === CMD_CAMERA) {
+    placeCameras(w, cmd.units);
+    return;
+  }
   if (applyEconomyCommand(w, cmd) || applyWorkCommand(w, cmd)) return;
   // Any other order takes a truck off its job.
   if ('units' in cmd) {
@@ -1321,6 +1339,7 @@ function updateJamming(w: World): void {
   for (let i = 0; i < n; i++) {
     if (w.state[i] === STATE_ALIVE && KINDS[w.kind[i]].jam > 0) jammers[count++] = i;
   }
+  jammerCount = count;
   for (let i = 0; i < n; i++) {
     if (!IS_AIR[w.kind[i]] || w.state[i] !== STATE_ALIVE) continue;
     let hit = 0;
@@ -1335,6 +1354,8 @@ function updateJamming(w: World): void {
       w.spotted[e] = tick + JAM_REVEAL_TICKS;
     }
     w.jammed[i] = hit;
+    // What a jammer has hold of it also has a fix on.
+    if (hit !== 0 && w.spotted[i] < tick + SPOT_TICKS) w.spotted[i] = tick + SPOT_TICKS;
     if (hit !== 0 && KINDS[w.kind[i]].kamikaze && (tick + i) % JAM_DRAIN_TICKS === 0) {
       damage[i]++;
       killer[i] = i;
@@ -1391,6 +1412,103 @@ function updateSpotters(w: World): void {
         }
         w.spotted[j] = until;
       }
+    }
+  }
+}
+
+/** Each engineer squad named leaves a camera where it stands, if its army can have one there. */
+function placeCameras(w: World, ids: readonly number[]): void {
+  const units = validUnits(w, ids);
+  for (let k = 0; k < units.length; k++) {
+    const id = units[k];
+    if (!KINDS[w.kind[id]].engineer || w.inside[id] >= 0) continue;
+    const team = w.team[id];
+    if (w.supplies[team] < CAMERA_COST) continue;
+    let free = -1;
+    let own = 0;
+    let crowded = false;
+    for (let c = 0; c < MAX_CAMERAS; c++) {
+      if (w.camTeam[c] < 0) {
+        if (free < 0) free = c;
+        continue;
+      }
+      if (w.camTeam[c] !== team) continue;
+      own++;
+      const dx = w.camX[c] - w.posX[id];
+      const dy = w.camY[c] - w.posY[id];
+      if (dx * dx + dy * dy < CAMERA_SPACING * CAMERA_SPACING) crowded = true;
+    }
+    if (free < 0 || own >= CAMERA_LIMIT || crowded) continue;
+    w.camTeam[free] = team;
+    w.camX[free] = w.posX[id];
+    w.camY[free] = w.posY[id];
+    w.camSeen[free] = 0;
+    w.camBlind[free] = 0;
+    w.supplies[team] -= CAMERA_COST;
+    w.events.push(EV_CAMERA, free, team);
+  }
+}
+
+/**
+ * Cameras: blinded and given away by an enemy jammer's bubble, otherwise reporting the
+ * enemy ground troops they can see, twice a second. One the enemy knows about comes down
+ * when an enemy ground unit reaches it.
+ */
+function updateCameras(w: World): void {
+  const tick = w.tick;
+  const map = w.map;
+  const sight2 = CAMERA_SIGHT * CAMERA_SIGHT;
+  const pull2 = CAMERA_PULL * CAMERA_PULL;
+  const reach = (CAMERA_SIGHT >> COARSE_SHIFT) + 1;
+  const until = tick + SPOT_TICKS;
+  for (let c = 0; c < MAX_CAMERAS; c++) {
+    const team = w.camTeam[c];
+    if (team < 0) continue;
+    const x = w.camX[c];
+    const y = w.camY[c];
+    let blind = 0;
+    for (let k = 0; k < jammerCount; k++) {
+      const e = jammers[k];
+      if (w.team[e] === team) continue;
+      const dx = w.posX[e] - x;
+      const dy = w.posY[e] - y;
+      const r = KINDS[w.kind[e]].jam;
+      if (dx * dx + dy * dy > r * r) continue;
+      blind = 1;
+      w.spotted[e] = tick + JAM_REVEAL_TICKS;
+    }
+    w.camBlind[c] = blind;
+    if (blind !== 0) w.camSeen[c] = tick + CAMERA_REVEAL_TICKS;
+    if (((tick + c) & SPOTTER_MASK) !== 0) continue;
+    const known = w.camSeen[c] > tick;
+    const z = heightAt(map, x, y) + CAMERA_HEIGHT;
+    const cx = x >> COARSE_SHIFT;
+    const cy = y >> COARSE_SHIFT;
+    const y0 = cy > reach ? cy - reach : 0;
+    const y1 = cy + reach < COARSE_DIM ? cy + reach : COARSE_DIM - 1;
+    const x0 = cx > reach ? cx - reach : 0;
+    const x1 = cx + reach < COARSE_DIM ? cx + reach : COARSE_DIM - 1;
+    let tests = MAX_SPOTTER_SIGHT_TESTS;
+    let pulled = false;
+    for (let gy = y0; gy <= y1; gy++) {
+      const to = coarseStart[gy * COARSE_DIM + x1 + 1];
+      for (let s = coarseStart[gy * COARSE_DIM + x0]; s < to; s++) {
+        const j = coarseSorted[s];
+        if (w.team[j] === team || w.state[j] !== STATE_ALIVE || IS_AIR[w.kind[j]]) continue;
+        const dx = w.posX[j] - x;
+        const dy = w.posY[j] - y;
+        const d2 = dx * dx + dy * dy;
+        if (known && d2 <= pull2 && w.inside[j] < 0) pulled = true;
+        if (blind !== 0 || d2 > sight2 || w.spotted[j] >= until - SPOTTER_MASK) continue;
+        if (d2 > DETECT_RANGE_SQ && concealed(w, j)) continue;
+        if (tests-- <= 0) continue;
+        if (!lineOfSight(map, x, y, z, w.posX[j], w.posY[j], eyeZ[j], -1, w.inside[j])) continue;
+        w.spotted[j] = until;
+      }
+    }
+    if (pulled) {
+      w.camTeam[c] = -1;
+      w.events.push(EV_CAMERA_LOST, c, team);
     }
   }
 }

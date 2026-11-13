@@ -982,3 +982,35 @@ Not done: death and wound animation (men still drop out of the squad as it loses
 health), taking cover behind a specific wall or tree, crawling, and stances that follow
 the sim's cover value. The figure is still made of boxes: it reads as a soldier from the
 RTS camera, not in a close-up.
+
+## 076 Surveillance cameras, and a jammer that finds them
+
+Fabio, 2026-11-13: wants to deploy cameras that watch part of the map, stealthy, found
+only by a jammer truck or similar.
+
+A camera is not a unit. It is a row in a small table of the world (64 slots: owner,
+position, the tick until which the enemy knows of it), so nothing can target it, no
+damage table knows it, and it costs no army points.
+
+- Placing: `CMD_CAMERA` (V, or the button on an engineer squad). Each engineer squad
+  named leaves one where it stands: 20 supplies, at most 12 per army, not within 14 units
+  (about 55 m) of another of yours, not from inside a house or a carrier. It does not
+  interrupt what the squad was doing.
+- Watching: twice a second a camera reports enemy ground troops within 38 units (about
+  145 m, half a recon team's reach) that it has a line of sight to, by the same rule as
+  a recon team (concealed troops only from close in). It does not see drones.
+- Stealth: enemy troops do not find a camera, at any distance.
+- The counter: a camera inside an enemy jammer's bubble reports nothing, and is known to
+  that army for as long as it stays there plus 30 seconds. A known camera comes down when
+  an enemy ground unit gets within 5 units of it. Jamming a camera gives the jammer away,
+  as jamming a drone does.
+- The jammer also has a fix on every drone it jams (they show through the fog while it
+  has them), which is the "reveals drones" half of the ask.
+
+On the client the player's cameras show with a thin ring for their circle (red while
+blinded), lift the fog there, and feed the contact alert of decision 073; a lost camera
+raises an alert. Enemy cameras are drawn only while known, with a red mark.
+
+The AI places no cameras yet. Its jammers blind and reveal the player's, and its troops
+pull down the ones they pass. The golden hash did not move: its scenario has no camera
+and no jammed drone, and free camera slots are not hashed.

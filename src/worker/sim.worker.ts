@@ -26,12 +26,15 @@ import {
   createWorld,
   hashWorld,
   type World,
+  MAX_CAMERAS,
 } from '../sim/world';
 import { CAPTURE_POINTS } from '../sim/units';
 import {
   INFO_CARRIED,
   INFO_INSIDE,
   INFO_SPOTTED,
+  CAMERA_BLIND,
+  CAMERA_KNOWN,
   INFO_REVEALED,
   INFO_TEAM_SHIFT,
   BASE_STRIDE,
@@ -163,6 +166,18 @@ function postSnapshot(w: World, simMs: number): void {
     }
     structStage[s] = bits;
   }
+  const cams: number[] = [];
+  for (let c = 0; c < MAX_CAMERAS; c++) {
+    if (w.camTeam[c] < 0) continue;
+    cams.push(
+      c,
+      fromFx(w.camX[c]),
+      fromFx(w.camY[c]),
+      w.camTeam[c] |
+        (w.camSeen[c] > w.tick ? CAMERA_KNOWN : 0) |
+        (w.camBlind[c] !== 0 ? CAMERA_BLIND : 0),
+    );
+  }
   const townProgress = new Uint8Array(map.townCount);
   for (let t = 0; t < map.townCount; t++) {
     townProgress[t] = Math.min(100, Math.round((w.townProgress[t] * 100) / CAPTURE_POINTS));
@@ -209,6 +224,7 @@ function postSnapshot(w: World, simMs: number): void {
     alive,
     structHp,
     structStage,
+    cameras: Float32Array.from(cams),
     townOwner: w.townOwner.slice(0, map.townCount),
     townCapturer: w.townCapturer.slice(0, map.townCount),
     townProgress,

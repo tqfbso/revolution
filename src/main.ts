@@ -6,6 +6,7 @@ import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS } from './sim/world';
 import { Alerts } from './client/alerts';
+import { Cameras } from './client/cameras';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
 import { Hud } from './client/hud';
@@ -133,6 +134,12 @@ async function start(): Promise<void> {
   structures.clutter = clutter;
   works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
+  const cameras = new Cameras(
+    terrain,
+    fog,
+    () => alerts,
+    () => units.playerTeam,
+  );
   const sound = new Sound();
   units.sound = sound;
   units.lodNear *= lodScale;
@@ -173,6 +180,7 @@ async function start(): Promise<void> {
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
     structures.applySnapshot(e.data, performance.now() / 1000);
     works.applySnapshot(e.data);
+    cameras.applySnapshot(e.data, performance.now() / 1000);
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
     alerts?.applySnapshot(e.data, performance.now() / 1000);
@@ -312,6 +320,7 @@ async function start(): Promise<void> {
     works.group,
     scars.mesh,
     units.group,
+    cameras.group,
     effects.group,
     input.marker,
     card.group,
@@ -454,6 +463,8 @@ async function start(): Promise<void> {
     const c0 = performance.now();
     units.update(now, dt, rts.camera);
     const c1 = performance.now();
+    cameras.zoom = rts.distance;
+    cameras.update();
     structures.update(now / 1000, dt);
     works.update(now / 1000);
     const c2 = performance.now();
@@ -528,6 +539,7 @@ async function start(): Promise<void> {
     send,
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),
     camera: rts.camera,
+    cameras,
   };
   document.getElementById('loading')?.remove();
 }
