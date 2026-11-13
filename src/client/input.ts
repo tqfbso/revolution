@@ -196,6 +196,11 @@ export class Input {
   }
 
   /** Each selected gun puts one smoke shell on the ground under a screen point. */
+  /** The ground under the pointer, or null. */
+  pointerGround(): { x: number; z: number } | null {
+    return this.structureAt(this.pointerX, this.pointerY).ground;
+  }
+
   private smokeAt(clientX: number, clientY: number): void {
     const units = this.units;
     const guns = units.selectedIds().filter((id) => KINDS[units.kindOf(id)].indirect);

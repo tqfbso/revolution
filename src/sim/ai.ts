@@ -1376,6 +1376,13 @@ function wantedMix(ai: Ai, w: World): void {
     want[KIND_ARTILLERY] += 4;
     want[KIND_TANK] += 2;
   }
+  // Armour does not go out alone (Normal and above; decision 092): for every four tanks it
+  // means to field, one more air-defence vehicle, and from tier 3 one more jammer, so that
+  // strike drones get no free run at the column.
+  if (want[KIND_TANK] > 0) {
+    want[KIND_AD] += Math.ceil(want[KIND_TANK] / 4);
+    if (tier >= 3) want[KIND_EW] += 1;
+  }
   for (let k = 0; k < KIND_COUNT; k++) {
     if (want[k] < 0 || UNIT_PRICE[k].tier > tier) want[k] = 0;
   }

@@ -200,8 +200,16 @@ the way to test a change to the AI or to prices (a 40-minute game takes a few se
 garrison a building, shell a structure, mount carriers, dismount, bombard a point, hold,
 and for the economy: gather, build, assist, train, cancel, rally, research, stance. A
 command holds integers only; float-to-fixed conversion happens once on the client before
-sending. In single player a command applies on the next tick. In lockstep multiplayer the
-same commands get scheduled a few ticks ahead and broadcast; the sim does not change.
+sending. A command applies on the next tick.
+
+## Co-op (`src/client/net.ts`, decision 092)
+
+Two browsers, one army. The host's worker runs as in a game alone and reports, per tick,
+the players' orders that went in (`Frame`); the guest's worker has no clock and runs only
+the frames it is sent (`follow` in `sim.worker.ts`). Orders, frames, hashes and a little
+presence travel over a WebRTC data channel found through the public PeerJS broker;
+`?net=local` uses a `BroadcastChannel` between two tabs instead. Both sides hash the world
+every two seconds and compare. The sim itself does not know the game is shared.
 
 ## Rendering
 

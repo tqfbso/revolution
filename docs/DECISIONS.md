@@ -1434,7 +1434,8 @@ stored as the layers of one array texture. A number per vertex picks the layer, 
 city is still one material. Walls and roof slopes are mapped along their length and up
 their rise: brick courses lie level and tiles run in rows under the ridge whichever way a
 roof faces. If the bake fails or takes more than four seconds every layer stays the plain
-plaster made on the processor; `?bake=0` forces that. The land's own textures (grass,
+plaster made on the processor; `?bake=0` forces that, and `?city=plain` goes further and
+draws every wall with the old single texture, without the layers at all. The land's own textures (grass,
 asphalt, rock) still come from `textures.ts`; moving them is not worth a second system.
 
 **Signs (R6, `src/client/signs.ts`).** One sheet of 64 cells painted with canvas text at
@@ -1454,3 +1455,66 @@ Left out of U4 as planned in URBAN.md: far-distance facades and the roof fade wh
 camera is over a held building. Neither is needed until the frame rate or readability
 asks for it. Not verified in the cloud: the bake on a real graphics card under WebGPU
 (checked only on the software WebGL path), and the cost of the array texture lookup.
+
+## 092. Co-op: two browsers, one army, the host's sim as the clock (2026-11-13)
+
+Fabio's signature feature: two people share one team against the computer, anyone can do
+anything, each has a role. This is the foundation and a first, light layer of roles.
+
+**How the two games stay the same game.** Nothing of the battle is sent, only orders. The
+host's sim runs on its own clock exactly as a game alone does. For every tick it runs it
+reports a frame: the tick number and the players' orders that went in on it. The guest's
+sim has no clock: it runs the ticks it is sent, with those orders, and nothing else. The
+computer opponent and the sub-commanders run inside both sims and need no network at all.
+The guest's own orders go to the host and come back in a frame.
+
+Why this and not the textbook "both wait for both" lockstep: with a host clock the host
+never stalls on a slow partner, the guest simply runs a little behind and catches up (up
+to 24 ticks in one go after a hitch); and either side can carry on alone when the other
+drops, because each holds the whole world. The price is that the guest's orders are late
+by one round trip (typically 50 to 150 ms) and the host's are not. For two friends on one
+team that is the right trade; it would not be for opponents.
+
+**Finding each other without a server.** WebRTC, peer to peer. The meeting point is the
+free public PeerJS broker (`0.peerjs.com`), which also lends relay servers for networks
+that block direct connections. The host gets an address (`rev-` and eight characters),
+the invite link is the game's own address with `?join=` and that. The game is still only
+static files on GitHub Pages. Limits, stated plainly: the broker is a free service run by
+someone else, with no promise of being up; its relays are best effort, so two people both
+behind strict company or mobile networks may fail to connect; the link dies with the
+host's tab. If it proves unreliable the fix is our own tiny broker, which is a server.
+
+**Starting.** Menu, "Co-op: invite a partner" reloads the host into a lobby that shows
+the link. When the guest opens it the two compare build ids (different builds would
+drift, so they are refused with instructions to reload), the host sends its map, seed and
+opponent, and both build the game. The guest may load slower: frames wait for it.
+
+**Staying honest.** Every two seconds both sims hash the whole world on the same tick and
+swap the numbers. A difference puts a red line on both screens: out of sync, start again.
+There is no repair. `tests/lockstep.test.ts` plays the worker's loop on both sides with
+frames passed as text and checks hash for hash, and that one dropped order is caught.
+
+**Pause, speed, leaving.** One clock, so pause and speed are the host's; the guest's
+Space and speed control ask the host, and both screens follow. If the host leaves, the
+guest's sim runs what it had received and goes on alone on its own clock. If the guest
+leaves, the host plays on; when the guest opens the link again the host is offered a
+restart together (a game cannot be joined half way: that needs the whole world sent, and
+is the next piece of work if drops turn out to be common).
+
+**Roles, first layer.** Each player picks a role in the lobby (Armour, Infantry, Air and
+drones, Economy, or Everything). Both see both roles; the production screen marks the
+rows that are yours and your partner's. Z rings a point on both minimaps; the partner's
+view is a cyan box on the minimap. Nothing is locked. Left for the next step, because it
+needs the sim to know who gave an order: handing units over, per-player budgets, and
+selecting "my" units.
+
+**`?net=local`** replaces the network with a channel between two tabs of one browser: for
+trying co-op alone and for the automated two-page check.
+
+Not verified in the cloud: a real connection through the broker (the sandbox cannot reach
+it), two different browsers (Chrome against Safari could differ in some corner of integer
+arithmetic we have not hit; the hash check will say so at once), and play over a bad line.
+
+Also in this change, asked for after the drone rebalance (088): on Normal and above the
+computer adds one air-defence vehicle for every four tanks it means to field, and one
+more jammer from tier 3, so its armour does not go out without cover against drones.

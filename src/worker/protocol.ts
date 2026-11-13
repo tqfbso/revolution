@@ -38,6 +38,19 @@ export const CAMERA_KNOWN = 16;
 export const CAMERA_BLIND = 32;
 export const NO_AIM = 0xffff;
 
+export type NetMode = 'solo' | 'host' | 'guest';
+/** One tick of a shared game: its number and the players' orders that went in on it. */
+export type Frame = [tick: number, commands: Command[]];
+/** What a sim in a shared game reports along with its picture of the world. */
+export interface NetReport {
+  /** Host: the ticks just run, for the guest. */
+  frames?: Frame[];
+  /** Pairs of tick and state hash, for the two sides to compare. */
+  hashes?: number[];
+  /** Guest: ticks received and not yet run. */
+  behind?: number;
+}
+
 /** Main thread -> simulation worker. */
 export type ToWorker =
   | {
@@ -52,8 +65,14 @@ export type ToWorker =
       demo: boolean;
       /** Game speed, 1 = real time. */
       speed: number;
+      /** Co-op (client/net.ts): alone, the clock of a shared game, or following one. */
+      net?: NetMode;
     }
   | { type: 'command'; command: Command }
+  /** Guest: ticks the host has run, in order. The sim runs these and no others. */
+  | { type: 'frames'; frames: Frame[] }
+  /** Guest: the host is gone. Run what was received, then go on alone on your own clock. */
+  | { type: 'alone' }
   /** Game speed (0.5 to 16) and pause: both only change when ticks run, never what a tick does. */
   | { type: 'speed'; speed: number }
   | { type: 'pause'; paused: boolean };
@@ -142,6 +161,8 @@ export interface Snapshot {
   works?: Int32Array;
   /** Wall-clock cost of the last sim tick, in milliseconds. */
   simMs: number;
+  /** Only in a shared game. */
+  net?: NetReport;
   /** State hash, sent once per second. Two clients in sync show the same value. */
   hash?: number;
 }

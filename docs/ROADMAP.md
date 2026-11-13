@@ -283,6 +283,15 @@ is designed around the urban rules instead of being redesigned for them.
 That order changed the same evening: see "Strategic command" below, which now comes
 before co-op and before U2.
 
+## Co-op (foundation built 2026-11-13, awaiting a first real two-player test)
+
+Decision 092. Host-clock lockstep over WebRTC, invite link, build check, hash check every
+two seconds, shared pause and speed, either side plays on alone after a drop. Roles, first
+layer: picked in the lobby, shown to both, marked on the production screen; ping (Z) and
+the partner's view on the minimap. Next, in this order: rejoining a game in progress (send
+the world), orders that know who gave them (unit handover, "my units", soft budgets per
+role), role-first screens, more than two players.
+
 ## Strategic command (built; a deliberate change of order)
 
 Fabio, 2026-11-13 evening: wants to command the war instead of the firefight. Larger

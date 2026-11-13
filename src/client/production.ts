@@ -175,6 +175,12 @@ export class ProductionCentre {
     );
   }
 
+  /**
+   * Co-op: for each kind of unit, whose role it falls under (0 nobody's, 1 yours, 2 your
+   * partner's). Shown as a mark on its row; it locks nothing.
+   */
+  whose: number[] = [];
+
   /** The rows: one block per factory type, one row per unit it makes. */
   private build(factories: number[], posts: Posting[]): void {
     let html = `<div class="bank" data-cell="bank"></div><table>`;
@@ -203,7 +209,7 @@ export class ProductionCentre {
         const keep = (count: number, label: string) =>
           `<button data-act="keep" data-k="${kind}" data-n="${count}">${label}</button>`;
         html +=
-          `<tr${dim}><td title="${Math.round(p.ticks / TICK_RATE)} s each, ${POINTS[kind]} army point${POINTS[kind] === 1 ? '' : 's'}">${KINDS[kind].name}</td>` +
+          `<tr${dim}><td title="${Math.round(p.ticks / TICK_RATE)} s each, ${POINTS[kind]} army point${POINTS[kind] === 1 ? '' : 's'}">${KINDS[kind].name}${this.whose[kind] === 1 ? ' <b style="color:#78e1ff" title="Your role">◆ yours</b>' : this.whose[kind] === 2 ? ' <span style="color:#8a938f" title="Your partner\'s role">◇ partner</span>' : ''}</td>` +
           `<td>${cost}</td>` +
           `<td data-cell="have${kind}"></td><td data-cell="make${kind}"></td><td data-cell="order${kind}"></td>` +
           `<td>${add(1, '+1')}${add(5, '+5')}${add(20, '+20')}${add(-5, '−5')}</td>` +

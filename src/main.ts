@@ -14,6 +14,7 @@ import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
 import { makeLook, readQuality, skyScene } from './client/look';
+import { dutyOf, openCoop } from './client/net';
 import { bakeSurfaces } from './client/surfaces';
 import { Clutter } from './client/clutter';
 import { Effects } from './client/effects';
@@ -70,6 +71,10 @@ async function createRenderer(forceWebGL: boolean) {
 
 async function start(): Promise<void> {
   const params = new URLSearchParams(location.search);
+  // Co-op: meet the other player before anything is built. A guest takes the host's map,
+  // seed and opponent; a shared game is always the plain skirmish.
+  const coop = await openCoop(params);
+  if (coop) for (const k of ['scenario', 'demo', 'units', 'control', 'speed']) params.delete(k);
   const unitCount = Math.min(Math.max(Number(params.get('units') ?? 3000) | 0, 0), MAX_UNITS);
   const seed = Number(params.get('seed') ?? 1) | 0;
   const wanted = params.get('scenario');
@@ -173,21 +178,32 @@ async function start(): Promise<void> {
     }
     if (pauseBtn) pauseBtn.textContent = paused ? 'Resume (Space)' : 'Pause (Space)';
   };
+  let speedNow = 1;
+  const guest = () => coop !== null && coop.role === 'guest' && coop.live;
   const setPaused = (p: boolean) => {
+    // A guest asks; the host's clock is the only one, and its answer sets the screen.
+    if (guest()) {
+      coop?.control(p, undefined);
+      return;
+    }
     paused = p;
     if (!p) queued = 0;
     post({ type: 'pause', paused });
     showPause();
+    coop?.state(paused, speedNow);
+  };
+  const deliver = (command: Command) => {
+    if (guest()) coop?.sendCommand(command);
+    else post({ type: 'command', command });
   };
   const send = (command: Command) => {
     // An order the player gives a unit himself takes it out of its commander's hands
     // (or the staff would countermand it a second later).
     if ('units' in command && command.type !== CMD_ASSIGN) {
       const taken = command.units.filter((id) => units.cmdr[id] >= 0 && units.isMine(id));
-      if (taken.length > 0)
-        post({ type: 'command', command: { type: CMD_ASSIGN, units: taken, slot: -1 } });
+      if (taken.length > 0) deliver({ type: CMD_ASSIGN, units: taken, slot: -1 });
     }
-    post({ type: 'command', command });
+    deliver(command);
     if (paused) {
       queued++;
       showPause();
@@ -206,6 +222,7 @@ async function start(): Promise<void> {
     hud.simTick(e.data.simMs);
     hud.stats.alive = e.data.alive;
     if (e.data.hash !== undefined) hud.stats.hash = e.data.hash.toString(16).padStart(8, '0');
+    if (e.data.net) coop?.fromWorker(e.data.net);
   };
   const lookAt = (x: number, z: number) => rts.moveTo(x, z);
   let alerts: Alerts | null = null;
@@ -294,12 +311,49 @@ async function start(): Promise<void> {
     // storage may be blocked; the default is fine
   }
   const speed = Number(params.get('speed') ?? saved ?? 1) || 1;
-  post({ type: 'init', seed, layout, units: unitCount, scenario, ai, demo, speed });
+  speedNow = speed;
+  post({
+    type: 'init',
+    seed,
+    layout,
+    units: unitCount,
+    scenario,
+    ai,
+    demo,
+    speed,
+    net: coop ? coop.role : 'solo',
+  });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
+  const setSpeed = (v: number) => {
+    speedNow = v;
+    post({ type: 'speed', speed: v });
+    if (speedEl && (v === 0.75 || v === 1)) speedEl.value = String(v);
+    coop?.state(paused, speedNow);
+  };
+  if (coop) {
+    coop.onFrames = (frames) => post({ type: 'frames', frames });
+    coop.onCommand = (command) => post({ type: 'command', command });
+    coop.onControl = (p, v) => {
+      if (p !== undefined) setPaused(p);
+      if (v === 0.75 || v === 1) setSpeed(v);
+    };
+    coop.onState = (p, v) => {
+      paused = p;
+      speedNow = v;
+      queued = 0;
+      showPause();
+      if (speedEl && (v === 0.75 || v === 1)) speedEl.value = String(v);
+    };
+    coop.onAlone = () => post({ type: 'alone' });
+    production.whose = dutyOf(coop.duty, coop.partnerDuty, KINDS.length);
+    coop.start();
+    coop.state(paused, speedNow);
+  }
   if (speedEl) {
     if (speed === 0.75 || speed === 1) speedEl.value = String(speed);
     speedEl.addEventListener('change', () => {
-      post({ type: 'speed', speed: Number(speedEl.value) });
+      if (guest()) coop?.control(undefined, Number(speedEl.value));
+      else setSpeed(Number(speedEl.value));
       try {
         localStorage.setItem('revolution.speed', speedEl.value);
       } catch {
@@ -544,6 +598,16 @@ async function start(): Promise<void> {
   });
   // Base buildings change this copy of the map too, so a reset starts from a fresh page.
   document.getElementById('reset')?.addEventListener('click', () => location.reload());
+  document.getElementById('coop-host')?.addEventListener('click', () => {
+    // A fresh game as the host: the lobby gives the link to send.
+    const next = new URLSearchParams();
+    for (const k of ['map', 'ai', 'seed', 'quality', 'renderer', 'net']) {
+      const v = params.get(k);
+      if (v !== null) next.set(k, v);
+    }
+    next.set('coop', 'host');
+    location.search = next.toString();
+  });
 
   const resize = () => {
     maxRatio = ratioFor(quality, window.innerWidth, window.innerHeight, window.devicePixelRatio);
@@ -586,6 +650,21 @@ async function start(): Promise<void> {
   let frameNo = 0;
   let workMs = 0;
   let last = performance.now();
+  let camSent = 0;
+  if (coop) {
+    // Z: point something out to your partner. It rings on their minimap and yours.
+    const CYAN = [120, 225, 255];
+    coop.onMark = (x, z) => {
+      minimap.ping(x, z, CYAN);
+    };
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'KeyZ' || e.repeat || e.ctrlKey || e.metaKey) return;
+      const g = input.pointerGround();
+      if (!g) return;
+      minimap.ping(g.x, g.z, CYAN);
+      coop.mark(g.x, g.z);
+    });
+  }
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const dtMs = now - last;
@@ -614,6 +693,14 @@ async function start(): Promise<void> {
     terrain.update(dt);
     input.update(dt);
     card.update();
+    if (coop) {
+      // Tell the partner where we look, three times a second, and show where they look.
+      if (now - camSent > 330) {
+        camSent = now;
+        coop.camera(rts.focus.x, rts.focus.z);
+      }
+      minimap.partner = coop.live && coop.partner.x >= 0 ? coop.partner : null;
+    }
     minimap.update(now);
     alerts?.update(now / 1000);
     // The shadow map follows the point the camera looks at and covers only what is close
@@ -672,6 +759,7 @@ async function start(): Promise<void> {
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),
     camera: rts.camera,
     cameras,
+    coop,
   };
   document.getElementById('loading')?.remove();
 }
