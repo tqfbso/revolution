@@ -1,6 +1,8 @@
 import {
   CELL_COUNT,
   CLASS_COUNT,
+  S_BUILDING,
+  wallMax,
   MAX_STRUCTS,
   MAX_TEAMS,
   MAX_TOWNS,
@@ -95,6 +97,8 @@ export const EV_TIER = 13; // a = team, b = the tier reached
 export const EV_WORK = 14; // a = cell, b = kind of field work | team << 8: finished
 export const EV_WORK_LOST = 15; // a = cell, b = kind of field work: destroyed
 export const EV_BREACH = 16; // a = unit, b = cell of the field work it hit
+export const EV_GUTTED = 17; // a = structure: its roof and floors have come down
+export const EV_WALL = 18; // a = structure, b = the face whose wall was breached
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
 export function packPoint(x: number, y: number): number {
@@ -186,6 +190,11 @@ export interface World {
   jammed: Uint8Array;
   /** Structures: health (0 or less = destroyed), repair work done, occupants and their team. */
   sHp: Int32Array;
+  /**
+   * Buildings: what is left of the wall on each of the four faces (see FACE_* in the map).
+   * Direct fire breaks the face it hits; a breached face protects nobody behind it.
+   */
+  sWall: Int32Array;
   sRepair: Int32Array;
   sOcc: Uint8Array;
   sOccTeam: Uint8Array;
@@ -313,6 +322,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     smokeCells: new Int32Array(MAX_SMOKE),
     jammed: new Uint8Array(MAX_UNITS),
     sHp: map.sMaxHp.slice(),
+    sWall: new Int32Array(MAX_STRUCTS * 4),
     sRepair: new Int32Array(MAX_STRUCTS),
     sOcc: new Uint8Array(MAX_STRUCTS),
     sOccTeam: new Uint8Array(MAX_STRUCTS),
@@ -361,6 +371,10 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     chaseWanted: new Int32Array(CHASE_FIELDS).fill(-1000),
     events: [],
   };
+  for (let s = 0; s < map.structCount; s++) {
+    if (map.sKind[s] !== S_BUILDING) continue;
+    for (let f = 0; f < 4; f++) world.sWall[4 * s + f] = wallMax(map, s, f);
+  }
   seedRng(world.rng, seed);
   return world;
 }
@@ -386,6 +400,7 @@ export function hashWorld(w: World): number {
   for (let s = 0; s < w.map.structCount; s++) {
     mix(w.sHp[s]);
     mix(w.sRepair[s] ^ (w.sOcc[s] << 20) ^ (w.sOccTeam[s] << 28));
+    if (w.map.sKind[s] === S_BUILDING) for (let f = 0; f < 4; f++) mix(w.sWall[4 * s + f]);
     if (w.sTeam[s] === NO_TEAM) continue;
     mix(w.map.sX[s] | (w.map.sY[s] << 8) | (w.sType[s] << 16) | (w.sTeam[s] << 24));
     mix(w.sBuild[s]);

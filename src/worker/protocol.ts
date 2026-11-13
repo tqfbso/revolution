@@ -73,6 +73,11 @@ export interface Snapshot {
   alive: number[];
   /** Per structure: health as 0..255 of its maximum; 0 = destroyed. */
   structHp: Uint8Array;
+  /**
+   * Per structure: its state (STAGE_* in the map) in the low two bits, then one bit per
+   * face (FACE_*) whose wall has been breached.
+   */
+  structStage: Uint8Array;
   /** Per town: owner and capturing team (255 = none), capture progress 0..100. */
   townOwner: Uint8Array;
   townCapturer: Uint8Array;

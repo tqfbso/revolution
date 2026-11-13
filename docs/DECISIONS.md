@@ -907,3 +907,39 @@ sends, so the golden hash stands:
 
 Not done: watchtowers were considered and dropped at Fabio's wish; deployable cameras
 feed the same Contact alert in a later step (`Alerts.watchers`).
+
+## 074 Buildings that die slowly (U1)
+
+Fabio, 2026-11-12: buildings are too easy to destroy. One tank flattened a house in 45
+seconds, so towns were erased, not fought over. This is phase U1 of `URBAN.md` (4.1, 4.2),
+built on the maps that exist.
+
+- **Three classes** by ground plan and height (`buildClass` in map.ts): house (up to three
+  floors) 450 structure per cell, apartment or office block (four floors and up) 900,
+  hall (nine cells or more, low) 1,300. It was 220 for everything. Base buildings and
+  bridges keep their own numbers.
+- **Four states** from the structure left (`stageOf`): intact, damaged below 70%, gutted
+  below 35%, ruin at zero. The garrison takes 25, 35 and 45 percent of a hit; a ruin is
+  rubble, which halves it as before and cannot be damaged at all. A gutted building has
+  no upper floors: no height in sight or range.
+- **Two kinds of damage.** Direct fire (tank guns, vehicle cannon, missiles) hits the wall
+  on the face it comes from (`faceToward`, `World.sWall`, four per building) and does a
+  quarter of its damage to the structure. Shells from the guns and engineers' charges go
+  into the structure whole. A breached face protects one state worse against fire from
+  its side, and from that side only.
+- **Losses in two steps:** a quarter of each squad inside when the building is gutted
+  (they stay in the shell), a quarter when it falls (they are left in the rubble).
+  It was half at once.
+
+Measured: one tank breaches a house wall in under half a minute and guts the house in
+about four; four tanks need a minute and a half to bring a small house down (was 12
+seconds). Normal against normal still ends in 16 minutes on seeds 1 and 3, so the AI's
+attacks did not stall.
+
+The client shows each state: scorched and holed when damaged, a roofless shell with
+ragged walls when gutted, a ragged hole and a spill of masonry at a breached face. Two
+new events (`EV_GUTTED`, `EV_WALL`) carry the dust and the noise. The golden hash moved
+to 3890551401.
+
+Not in U1, by the plan: fortifying and repairing houses, linked buildings, storming,
+top attack, rubble in the streets (U2 and U3). A breached face is not yet an entrance.

@@ -22,12 +22,14 @@ import {
   EV_BREACH,
   EV_COLLAPSE,
   EV_DEATH,
+  EV_GUTTED,
   EV_IMPACT,
   EV_SMOKE,
   EV_LAUNCH,
   EV_SHOT,
   EV_SIEGE,
   EV_UNLOAD,
+  EV_WALL,
   MAX_UNITS,
   STATE_ALIVE,
   STATE_FREE,
@@ -441,6 +443,18 @@ export class UnitView {
         const seen = this.fog.sees(c.x, c.z);
         this.sound?.at(SND_COLLAPSE, c.x, c.z, seen);
         if (seen) this.structures.collapse(a);
+        continue;
+      }
+      if (ev[e] === EV_GUTTED || ev[e] === EV_WALL) {
+        const c = this.structures.centreOf(a);
+        const seen = this.fog.sees(c.x, c.z);
+        if (ev[e] === EV_GUTTED) {
+          this.sound?.at(SND_COLLAPSE, c.x, c.z, seen);
+          if (seen) this.structures.gut(a);
+        } else {
+          this.sound?.at(SND_IMPACT, c.x, c.z, seen);
+          if (seen) this.structures.breach(a, b);
+        }
         continue;
       }
       if (ev[e] === EV_UNLOAD) continue;
