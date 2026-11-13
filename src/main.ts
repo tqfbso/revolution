@@ -373,7 +373,8 @@ async function start(): Promise<void> {
     const chip = (e.target as HTMLElement).closest('button');
     if (!chip) return;
     e.preventDefault();
-    input.recallGroup(Number(chip.dataset.n), e.shiftKey);
+    if (chip.dataset.n === 'new') input.saveNewGroup();
+    else input.recallGroup(Number(chip.dataset.n), e.shiftKey);
   });
   setInterval(() => {
     if (!groupsEl) return;
@@ -382,7 +383,10 @@ async function start(): Promise<void> {
       const ids = input.groupIds(n);
       if (ids.length === 0) continue;
       const on = ids.length === units.selectedCount && ids.every((id) => units.selected[id]);
-      html += `<button data-n="${n}" class="${on ? 'on' : ''}" title="Group ${n}: press ${n} to select, twice to jump to it. Ctrl+${n} saves a new group, Ctrl+Shift+${n} adds the selection to it"><b>${n}</b>${ids.length}</button>`;
+      html += `<button data-n="${n}" class="${on ? 'on' : ''}" title="Group ${n}: press ${n} to select, twice to jump to it. Ctrl or Option/Alt + ${n} saves the selection as this group; with Shift it is added to it"><b>${n}</b>${ids.length}</button>`;
+    }
+    if (units.selectedCount > 0 && !html.includes('class="on"')) {
+      html += `<button data-n="new" title="Save the selected units as the next free group. Keys: Ctrl + number, or Option/Alt + number (on a Mac, Ctrl + number belongs to the system)">+ Group</button>`;
     }
     if (html !== groupsHtml) groupsEl.innerHTML = groupsHtml = html;
   }, 300);

@@ -222,6 +222,16 @@ export class Input {
       .map((m) => m.id);
   }
 
+  /** Save the selection as the first group number that is free. Returns it, or -1. */
+  saveNewGroup(): number {
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]) {
+      if (this.groupIds(n).length > 0) continue;
+      this.controlGroup(n, true, false);
+      return n;
+    }
+    return -1;
+  }
+
   /** Select control group `n` (as the number key does); twice quickly looks at it. */
   recallGroup(n: number, additive: boolean): void {
     this.controlGroup(n, false, additive);
