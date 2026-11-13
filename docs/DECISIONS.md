@@ -1403,3 +1403,54 @@ Not verified in the cloud: the cost of the occlusion pass on a real graphics car
 performance test of decision 089 measures it: "no post effects"), and whether its noise
 shows at half resolution without a blur pass. If it does, the fix is the depth-aware blur
 three.js ships, at the price of one more full-screen pass.
+
+## 091. The city is destroyed and held: street rubble, fortified ruins, baked materials, signs (U4, R5, R6) (2026-11-13)
+
+Fabio's urban ask: buildings too easy to remove from the map, ruins
+that can be used as fortresses, building and reinforcing structures, a city full of detail.
+
+**Rules (sim, `src/sim/urban.ts`).**
+
+- A building of four floors or more that falls throws rubble into the ring of street
+  cells round it (55% of them, drawn from the world's own random numbers). Rubble is a
+  field work that belongs to no army: infantry climbs over it, no vehicle crosses
+  it, shells barely move it, engineers clear it with charges (right click it). Shelling a
+  block shuts the streets beside it for whoever fired as much as for the enemy. The AI
+  does not count rubble as enemy works and treats it as a wall when it looks for a gap.
+- Repair / fortify (B, or the button on the card, then right click a building; trucks
+  alone need no button). Trucks and engineers first mend the structure and the breached
+  walls, for supplies; engineers then fortify it, 15 seconds for one squad, up to three
+  squads at once. A gutted shell can be fortified as it stands: that is the fortress ruin.
+- A fortified building holds half as many men again, lets a quarter less fire through its
+  walls (a fortified ruin shelters at 35% where a bare ruin gives 50%), and takes a
+  quarter less structural damage. Fortification is lost when the building collapses. Not
+  while the enemy is inside. The AI does not fortify yet: that is U5.
+
+**Materials (R5, `src/client/surfaces.ts`).** Eight surfaces (plaster, brick, precast
+panels, clay tiles, corrugated sheet, roofing felt, sacking, broken masonry) are each a
+small shader drawn once at start-up, read back, their heights turned into normals on the
+processor (so the result is the same whichever way up a graphics card reads back) and
+stored as the layers of one array texture. A number per vertex picks the layer, so the
+city is still one material. Walls and roof slopes are mapped along their length and up
+their rise: brick courses lie level and tiles run in rows under the ridge whichever way a
+roof faces. If the bake fails or takes more than four seconds every layer stays the plain
+plaster made on the processor; `?bake=0` forces that. The land's own textures (grass,
+asphalt, rock) still come from `textures.ts`; moving them is not worth a second system.
+
+**Signs (R6, `src/client/signs.ts`).** One sheet of 64 cells painted with canvas text at
+start-up, then streaked, scratched and chipped: shop fascias, enamel street plates, roof
+hoardings. Every name is invented. A sign is a flat panel in the building's own mesh that
+shows its cell, so signs cost no draw calls and fall with the building.
+
+**Look.** Roofs: tiled gables with dormers or a cross gable, low hipped zinc roofs, a
+set-back glazed top storey, rows of sheet gables on halls, flat roofs with their clutter.
+Fronts: brick or plaster houses, panel blocks with piers, a dressed ground floor on tall
+houses, shops with glass, a fascia and often an awning, drainpipes. A fortified building
+shows sandbags along the foot of every wall and in its breaches, boarded windows, and
+positions on a flat roof; a fortified ruin has a sandbag nest on the heap inside and a
+sheet propped over one corner.
+
+Left out of U4 as planned in URBAN.md: far-distance facades and the roof fade when the
+camera is over a held building. Neither is needed until the frame rate or readability
+asks for it. Not verified in the cloud: the bake on a real graphics card under WebGPU
+(checked only on the software WebGL path), and the cost of the array texture lookup.

@@ -54,7 +54,16 @@ export const WORK_WIRE = 3;
 export const WORK_TRAP = 4;
 export const WORK_TRENCH = 5;
 export const WORK_SANDBAG = 6;
-export const WORK_COUNT = 7;
+/**
+ * Rubble thrown into a street by a falling block (urban.ts). Nobody builds it and nobody
+ * owns it; it stops vehicles like a tank obstacle and comes apart with an engineer's charge.
+ */
+export const WORK_RUBBLE = 7;
+export const WORK_COUNT = 8;
+/** Kinds below this one can be ordered built. */
+export const WORK_BUILDABLE = 7;
+/** The "army" that owns street rubble: nobody. Fits the three bits a snapshot gives a team. */
+export const NO_ARMY = 7;
 
 export interface Work {
   name: string;
@@ -157,6 +166,18 @@ export const WORKS: readonly Work[] = [
     blast: 100,
     charge: 100,
   },
+  {
+    // Slabs and brick across a street. Guns only stir it; a charge clears a lane.
+    name: 'Rubble',
+    terrain: T_TRAP,
+    supplies: 0,
+    ticks: 1,
+    hp: 260,
+    ford: false,
+    direct: 0,
+    blast: 12,
+    charge: 150,
+  },
 ];
 
 /** Where a hit on a field work comes from (see Work.direct, .blast, .charge). */
@@ -209,7 +230,8 @@ export function canFortify(map: GameMap, kind: number, cell: number): boolean {
 }
 
 /** Does this kind of work change who can walk where? */
-const blocks = (kind: number): boolean => kind >= WORK_WALL && kind <= WORK_TRAP;
+const blocks = (kind: number): boolean =>
+  (kind >= WORK_WALL && kind <= WORK_TRAP) || kind === WORK_RUBBLE;
 
 /** Plan a work on a free cell. Returns false if there is no room in the table. */
 function plan(w: World, team: number, kind: number, cell: number): boolean {
@@ -239,7 +261,7 @@ function finish(w: World, cell: number): void {
   }
   map.baseType[cell] = t;
   map.type[cell] = work.terrain;
-  map.workTeam[cell] = w.wTeam[cell];
+  map.workTeam[cell] = w.wTeam[cell] === NO_ARMY ? NO_OWNER : w.wTeam[cell];
   if (kind === WORK_GATE) map.gates[w.wTeam[cell]]++;
   if (blocks(kind)) markWorks(true);
   w.worksRev++;
@@ -269,6 +291,14 @@ export function remove(w: World, cell: number, lost: boolean): void {
   w.wIndex[cell] = 0;
   w.worksRev++;
 }
+
+/** Put a finished work that nobody owns on a free cell (street rubble). */
+export function placeWork(w: World, kind: number, cell: number): void {
+  if (plan(w, NO_ARMY, kind, cell)) finish(w, cell);
+}
+
+/** Does a standing work of this kind bar the way (as against giving cover)? */
+export const bars = (kind: number): boolean => kind !== WORK_TRENCH && kind !== WORK_SANDBAG;
 
 /** Can a unit of this type do anything to a work of this kind? */
 export function canBreach(unit: UnitKind, kind: number): boolean {
@@ -348,6 +378,7 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
       const builders = validUnits(w, cmd.units).filter((id) => isBuilder(w.kind[id]));
       const kind = cmd.work;
       if (builders.length === 0 || !Array.isArray(cmd.cells)) return true;
+      if (!(kind > 0 && kind < WORK_BUILDABLE)) return true;
       const team = w.team[builders[0]];
       const sites: number[] = [];
       for (let k = 0; k < cmd.cells.length && k < MAX_ORDER; k++) {
@@ -376,6 +407,7 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
       const team = clampInt(cmd.team | 0, 0, MAX_TEAMS - 1);
       if (!Array.isArray(cmd.cells)) return true;
       for (const c of cmd.cells) {
+        if (!(cmd.work > 0 && cmd.work < WORK_BUILDABLE)) continue;
         if (canFortify(map, cmd.work, c) && w.wKind[c] === 0 && plan(w, team, cmd.work, c)) {
           finish(w, c);
         }

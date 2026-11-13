@@ -6,6 +6,7 @@ import * as THREE from 'three/webgpu';
 import {
   cameraViewMatrix,
   float,
+  int,
   mix,
   normalWorld,
   positionGeometry,
@@ -13,10 +14,12 @@ import {
   smoothstep,
   step,
   texture,
+  uniformArray,
   vec2,
   vec3,
 } from 'three/tsl';
 import type { Look } from './look';
+import { SURF_SCALE } from './surfaces';
 
 type F = THREE.Node<'float'>;
 type V3 = THREE.Node<'vec3'>;
@@ -51,6 +54,36 @@ export function masonry(look: Look, scale: number): Detail {
   const bent = n.add(mix(side, top, flat)).normalize();
   return {
     tone: t.b.mul(0.9).add(0.55),
+    roughness: t.a,
+    normal: cameraViewMatrix.transformDirection(bent),
+  };
+}
+
+/**
+ * The city's walls and roofs: `surf` picks the material (surfaces.ts). Walls and slopes are
+ * mapped along their length and up their rise, so brick courses lie level and tiles run in
+ * rows under the ridge whichever way a roof faces; flat roofs are mapped from above.
+ */
+export function cityFace(look: Look, surf: F): Detail {
+  const n = normalWorld;
+  const p = positionWorld;
+  const flat = step(0.97, n.y.abs());
+  const along = p.x.mul(n.z.abs()).add(p.z.mul(n.x.abs()));
+  // How far up the slope, not how high: a roof's courses keep their spacing.
+  const lean = n.xz.length().max(0.2);
+  const layer = int(surf.add(0.5));
+  const scale = uniformArray(SURF_SCALE).element(layer) as unknown as F;
+  const uv = mix(vec2(along, p.y.div(lean)), p.xz, flat).div(scale);
+  const t = texture(look.surf, uv).depth(layer);
+  const tilt = t.xy.mul(2).sub(1).mul(0.8);
+  const side = vec3(n.z.abs(), 0, n.x.abs())
+    .mul(tilt.x)
+    .add(vec3(0, tilt.y, 0));
+  const bent = n.add(mix(side, vec3(tilt.x, 0, tilt.y), flat)).normalize();
+  // A slow drift of tone across the town, so the repeat never shows from above.
+  const drift = texture(look.tex.noise, p.xz.mul(0.013).add(p.y.mul(0.021))).y;
+  return {
+    tone: t.b.mul(0.9).add(0.55).mul(drift.mul(0.3).add(0.85)),
     roughness: t.a,
     normal: cameraViewMatrix.transformDirection(bent),
   };

@@ -58,6 +58,9 @@ export type ToWorker =
   | { type: 'speed'; speed: number }
   | { type: 'pause'; paused: boolean };
 
+/** In `structStage`: the building is fortified (sandbagged and loopholed). */
+export const STRUCT_FORTIFIED = 64;
+
 /** Simulation worker -> main thread, once per simulated tick batch. */
 export interface Snapshot {
   type: 'snapshot';
@@ -85,7 +88,7 @@ export interface Snapshot {
   structHp: Uint8Array;
   /**
    * Per structure: its state (STAGE_* in the map) in the low two bits, then one bit per
-   * face (FACE_*) whose wall has been breached.
+   * face (FACE_*) whose wall has been breached, then STRUCT_FORTIFIED.
    */
   structStage: Uint8Array;
   /**

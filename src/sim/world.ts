@@ -90,6 +90,8 @@ export const JOB_RETURN = 3;
 export const JOB_BUILD = 4;
 /** Putting up the field work on cell `jobCell`, then the next one near it. */
 export const JOB_WORK = 5;
+/** Mending or fortifying the building `jobStruct`. */
+export const JOB_ENTRENCH = 6;
 /** Field works (planned and standing) on the map at once. */
 export const MAX_WORKS = 4096;
 /** Stances: fire at will (the default), or hold fire until told otherwise. */
@@ -134,6 +136,7 @@ export const EV_CAMERA = 19; // a = camera slot, b = team: a surveillance camera
 export const EV_STORM = 21; // a = structure, b = the army storming it: a second of the fight inside
 export const EV_STORMED = 22; // a = structure, b = the army that took it from its garrison
 export const EV_STRIKE = 23; // a = target, b = drone: strike drones are lining up on it
+export const EV_FORTIFIED = 24; // a = structure, b = 1 fortified, 0 mended back to whole
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
@@ -246,6 +249,8 @@ export interface World {
    */
   sWall: Int32Array;
   sRepair: Int32Array;
+  /** Per building: work-ticks of fortification done (FORT_TICKS in urban.ts = fortified). */
+  sFort: Uint16Array;
   sOcc: Uint8Array;
   sOccTeam: Uint8Array;
   /** Towns: owner (or NO_TEAM), the team capturing it and how far it has got. */
@@ -418,6 +423,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     sHp: map.sMaxHp.slice(),
     sWall: new Int32Array(MAX_STRUCTS * 4),
     sRepair: new Int32Array(MAX_STRUCTS),
+    sFort: new Uint16Array(MAX_STRUCTS),
     sOcc: new Uint8Array(MAX_STRUCTS),
     sOccTeam: new Uint8Array(MAX_STRUCTS),
     townOwner: new Uint8Array(MAX_TOWNS).fill(NO_TEAM),
@@ -520,6 +526,7 @@ export function hashWorld(w: World): number {
   for (let s = 0; s < w.map.structCount; s++) {
     mix(w.sHp[s]);
     mix(w.sRepair[s] ^ (w.sOcc[s] << 20) ^ (w.sOccTeam[s] << 28));
+    mix(w.sFort[s]);
     if (w.map.sKind[s] === S_BUILDING) for (let f = 0; f < 4; f++) mix(w.sWall[4 * s + f]);
     if (w.sTeam[s] === NO_TEAM) continue;
     mix(w.map.sX[s] | (w.map.sY[s] << 8) | (w.sType[s] << 16) | (w.sTeam[s] << 24));

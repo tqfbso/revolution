@@ -76,6 +76,7 @@ import {
   WORK_SANDBAG,
   WORK_TRAP,
   WORK_TRENCH,
+  bars,
   WORK_WIRE,
   canBreach,
   canFortify,
@@ -2630,7 +2631,7 @@ export function press(
   let gapD = fx(60);
   for (let k = 0; k < w.workCount; k++) {
     const c = w.workCells[k];
-    if (w.wTeam[c] === ai.team || !workStands(w, c) || w.wKind[c] >= WORK_TRENCH) continue;
+    if (w.wTeam[c] === ai.team || !workStands(w, c) || !bars(w.wKind[c])) continue;
     const wx = cellX(c);
     const wy = cellY(c);
     const d = dist(wx, wy, cx, cy);

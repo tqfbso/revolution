@@ -268,7 +268,9 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   436 buildings, streets and street furniture, now the default map. Still to do (Fable
   5.2): columns in corridors, local map updates, rubble that shuts streets and engineers
   that clear it
-- U4 The city's look (heavy, Fable 5.2 with Sonnet 5.5 for props): block meshes per state,
+- U4 The city's look. MOSTLY BUILT 2026-11-13 (decision 091): street rubble, repair and
+  fortify, fortified ruins, varied roofs and fronts, materials and signs. Still open: far
+  facades and the roof fade. The plan was: (heavy, Fable 5.2 with Sonnet 5.5 for props): block meshes per state,
   the prop kit, far facades, roof fade, against a stated budget
 - U5 Urban AI and urban units (heavy, Fable 5.2): an AI that holds, fortifies and storms
   blocks; marksman team; top attack on tanks in streets; drone rules
@@ -346,14 +348,17 @@ Each item rides with the work it belongs to, in this order:
   from the sun. Analytic fog on every level; light shafts marched through the shadow map
   on `high` only. Render-only: weather that changes sight or movement would be a sim
   feature and is not part of this
-- R5 Material sets baked on the graphics card (medium, Fable 5.2 for the baker, Sonnet
+- R5 Material sets baked on the graphics card. BUILT 2026-11-13 for the city (decision
+  091): eight surfaces as layers of one array texture; the land's textures stay in
+  `textures.ts`. The plan was: (medium, Fable 5.2 for the baker, Sonnet
   5.5 for the surfaces). With U4, the city's look. Replaces the canvas bake in
   `textures.ts`: each surface (asphalt, concrete, brick, plaster, corrugated steel,
   painted metal, rust) is a small shader baked at start-up into colour, height and
   roughness, with normals derived from the height, large-scale variation to hide the
   repeat, and a wetness term the weather presets can drive. Still nothing to download
   (decision 060 stands)
-- R6 Drawn signage and road markings (small to medium, Sonnet 5.5). With U4. Street
+- R6 Drawn signage. BUILT 2026-11-13 (decision 091): shop fascias, street plates and
+  roof hoardings on one sheet. Road markings already existed. The plan was: (small to medium, Sonnet 5.5). With U4. Street
   signs, shop fronts, house numbers, lane lines and crossings drawn as canvas text and
   shapes into one atlas, then scratched and faded; placed as props that dress and never
   play

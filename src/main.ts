@@ -14,6 +14,7 @@ import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
 import { makeLook, readQuality, skyScene } from './client/look';
+import { bakeSurfaces } from './client/surfaces';
 import { Clutter } from './client/clutter';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
@@ -108,6 +109,14 @@ async function start(): Promise<void> {
   // You command the red army (team 0) and see what it sees. `?fog=0` lifts the fog,
   // `?control=all` lets you select and order every army.
   const look = makeLook(quality, shadows);
+  if (look.rich && params.get('bake') !== '0') {
+    // The city's materials: drawn once by the graphics card, half a second at the most.
+    const baked = await Promise.race([
+      bakeSurfaces(renderer, look.tex.noise, look.surf),
+      new Promise<boolean>((done) => setTimeout(() => done(false), 4000)),
+    ]);
+    if (!baked) console.warn('city materials: plain plaster (bake unavailable)');
+  }
   const fog = new Fog(params.get('fog') !== '0');
   if (look.rich) {
     fog.clouds = look.tex.noise;

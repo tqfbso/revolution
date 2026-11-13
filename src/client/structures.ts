@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix } from 'three/tsl';
+import { attribute, float, mix, texture, uv } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fromFx } from '../sim/fixed';
 import { BUILDINGS, B_BARRACKS, B_DEPOT, B_DRONES, B_HQ, B_WORKS } from '../sim/economy';
@@ -9,10 +9,12 @@ import {
   MAP_SIZE,
   MAX_SITES,
   MAX_STRUCTS,
+  BUILD_HALL,
   BUILD_HOUSE,
   FACE_EAST,
   FACE_NORTH,
   FACE_SOUTH,
+  FACE_WEST,
   STAGE_DAMAGED,
   STAGE_GUTTED,
   SITE_SUPPLIES,
@@ -23,13 +25,24 @@ import {
   type GameMap,
 } from '../sim/map';
 import { GARRISON_MAX } from '../sim/units';
-import { BASE_STRIDE, type Snapshot } from '../worker/protocol';
+import { BASE_STRIDE, STRUCT_FORTIFIED, type Snapshot } from '../worker/protocol';
 import { Batch } from './batch';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import type { Look } from './look';
 import type { Clutter } from './clutter';
-import { masonry } from './surface';
+import { SIGN_HOARDINGS, SIGN_SHOPS, SIGN_STREETS, makeSigns, signUV } from './signs';
+import { cityFace } from './surface';
+import {
+  SURF_BRICK,
+  SURF_FELT,
+  SURF_PANEL,
+  SURF_PLASTER,
+  SURF_RUBBLE,
+  SURF_SACK,
+  SURF_SHEET,
+  SURF_TILE,
+} from './surfaces';
 import type { Terrain } from './terrain';
 
 // Buildings, bridges and town flags. Structures are few (dozens), so each is its own mesh,
@@ -48,6 +61,13 @@ const WALLS = [0x8a8478, 0x7d6a58, 0x9a9384, 0x6f7272, 0x86705a, 0x77786a];
 const TILES = [0x7b4d3c, 0x6c4436, 0x855a43, 0x4d5055, 0x43403d];
 const TRIM = [0xa39c8c, 0x6d5a4a, 0x8f8a7c, 0x55585a, 0x9a8468, 0x8b8c7c];
 const ROOF = 0x3e3c3a;
+/** Brick as it is fired: reds, a brown, a buff. */
+const BRICKS = [0x7d4e3e, 0x8a5a44, 0x6e4a3c, 0x9a7a5c, 0x74503f];
+const ZINC = [0x4d5055, 0x5a5f5f, 0x43403d, 0x565248];
+const AWNINGS = [0x7a2b24, 0x2c4a3a, 0x24385a, 0xb9a476, 0x8a6a2c, 0x5a5a56];
+const SACK = 0x9c8c69;
+const PLANK = 0x54432f;
+const SHEET_RUST = 0x5f4a3c;
 const GLASS = 0x1b2126;
 const SOOT = 0x0d0c0b;
 const CONCRETE = 0x77756e;
@@ -88,6 +108,13 @@ export interface Part {
    * the longer side, and is drawn in from each end by `hip` (0 = plain gables).
    */
   hip?: number;
+  /** Which of the city's materials it is made of (surfaces.ts). Plaster if not given. */
+  surf?: number;
+  /**
+   * A sign instead of a box: a flat panel `size[0]` wide and `size[1]` high showing this
+   * cell of the sign sheet (signs.ts), facing +z before `rot`.
+   */
+  sign?: number;
 }
 
 /** A pitched roof as a closed solid: two slopes and two ends, flat-shaded. */
@@ -134,13 +161,26 @@ export function build(parts: Part[]): THREE.BufferGeometry {
   const c = new THREE.Color();
   const geometries = parts.map((p) => {
     const g =
-      p.hip === undefined
-        ? new THREE.BoxGeometry(...p.size)
-        : roofGeometry(p.size[0], p.size[1], p.size[2], p.hip);
+      p.sign !== undefined
+        ? new THREE.PlaneGeometry(p.size[0], p.size[1])
+        : p.hip === undefined
+          ? new THREE.BoxGeometry(...p.size)
+          : roofGeometry(p.size[0], p.size[1], p.size[2], p.hip);
     if (p.rot) g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...p.rot)));
     g.translate(...p.at);
-    g.deleteAttribute('uv');
     const n = g.getAttribute('position').count;
+    if (p.sign !== undefined) {
+      const [u0, v0, du, dv] = signUV(p.sign);
+      const t = g.getAttribute('uv');
+      for (let i = 0; i < n; i++) t.setXY(i, u0 + t.getX(i) * du, v0 + t.getY(i) * dv);
+    } else if (!g.getAttribute('uv')) {
+      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+    }
+    g.setAttribute('surf', new THREE.BufferAttribute(new Float32Array(n).fill(p.surf ?? 0), 1));
+    g.setAttribute(
+      'sign',
+      new THREE.BufferAttribute(new Float32Array(n).fill(p.sign === undefined ? 0 : 1), 1),
+    );
     const colors = new Float32Array(n * 3);
     c.set(p.color).multiplyScalar(p.shade ?? 1);
     for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
@@ -165,17 +205,82 @@ function buildingParts(
   stage: number,
   breached: number,
   cls: number,
+  fort: boolean,
 ): Part[] {
   const damaged = stage >= STAGE_DAMAGED;
   const parts: Part[] = [];
   const cx = x0 + w / 2;
   const cz = z0 + d / 2;
   const h = floors * FLOOR;
-  // Concrete for the blocks and halls, plaster and brick for houses.
-  const wall =
-    cls === BUILD_HOUSE
+  // Plaster and brick for houses; precast panels for most blocks and halls.
+  const brick = cls === BUILD_HOUSE && rand(id, 41) < 0.42;
+  const wall = brick
+    ? BRICKS[Math.floor(rand(id, 1) * BRICKS.length)]
+    : cls === BUILD_HOUSE
       ? WALLS[Math.floor(rand(id, 1) * WALLS.length)]
       : [0x8a8a84, 0x7c7d78, 0x93908a][Math.floor(rand(id, 1) * 3)];
+  const wsurf = brick
+    ? SURF_BRICK
+    : cls !== BUILD_HOUSE && rand(id, 42) < 0.7
+      ? SURF_PANEL
+      : SURF_PLASTER;
+  // Things fixed to a face: `t` along it from its middle, `y` up, `out` proud of the wall.
+  const faceX = (f: number): boolean => f === FACE_NORTH || f === FACE_SOUTH;
+  const faceLen = (f: number): number => (faceX(f) ? w : d);
+  const onFace = (f: number, t: number, y: number, out: number): [number, number, number] => {
+    const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+    return faceX(f)
+      ? [cx + t, y, cz + side * (d / 2 + out)]
+      : [cx + side * (w / 2 + out), y, cz + t];
+  };
+  const faceBox = (
+    f: number,
+    along: number,
+    up: number,
+    thick: number,
+  ): [number, number, number] => (faceX(f) ? [along, up, thick] : [thick, up, along]);
+  const faceTurn = (f: number): number =>
+    f === FACE_SOUTH
+      ? 0
+      : f === FACE_NORTH
+        ? Math.PI
+        : f === FACE_EAST
+          ? Math.PI / 2
+          : -Math.PI / 2;
+  // Sandbags along the foot of every wall: the mark of a house made into a strongpoint.
+  const sandbags = (): void => {
+    for (let f = 0; f < 4; f++) {
+      const len = faceLen(f);
+      parts.push({
+        size: faceBox(f, len + 0.5, 0.42, 0.36),
+        at: onFace(f, 0, base + 0.21, 0.16),
+        color: SACK,
+        shade: 0.9,
+        surf: SURF_SACK,
+      });
+      for (const s of [-1, 1]) {
+        const part = len * (0.22 + rand(id, 1700 + f * 4 + s) * 0.14);
+        parts.push({
+          size: faceBox(f, part, 0.36, 0.3),
+          at: onFace(f, s * (len / 2 - part / 2 - 0.1), base + 0.6, 0.14),
+          color: SACK,
+          surf: SURF_SACK,
+        });
+      }
+      // A breach is stopped with a breastwork of its own.
+      if ((breached & (1 << f)) !== 0) {
+        const gap = Math.min(len * 0.5, 3.4);
+        const t = (rand(id, 880 + f) - 0.5) * (len - gap) * 0.5;
+        parts.push({
+          size: faceBox(f, gap + 0.5, 0.8, 0.55),
+          at: onFace(f, t, base + 0.4, 0.05),
+          color: SACK,
+          shade: 0.95,
+          surf: SURF_SACK,
+        });
+      }
+    }
+  };
   const wear = damaged ? 0.62 : 0.92 + rand(id, 2) * 0.12;
   parts.push({ size: [w + 0.3, 2.4, d + 0.3], at: [cx, base - 1.15, cz], color: 0x55524c });
   // A breached wall: a ragged hole from the ground up, and what came out of it in a heap.
@@ -250,6 +355,40 @@ function buildingParts(
         ],
         color: i % 3 === 0 ? 0x4c4a46 : wall,
         shade: 0.38 + rand(id, 700 + i) * 0.25,
+        surf: SURF_RUBBLE,
+      });
+    }
+    if (fort) {
+      // A fortified ruin: breastworks at the foot of the walls and in the breaches, a nest
+      // of sandbags on the heap inside, a sheet of roofing propped over one corner.
+      sandbags();
+      const r = Math.min(w, d) * 0.22;
+      for (let k = 0; k < 4; k++) {
+        const alongX = k % 2 === 0;
+        const side = k < 2 ? -1 : 1;
+        parts.push({
+          size: alongX ? [r * 2 + 0.4, 0.5, 0.4] : [0.4, 0.5, r * 2 + 0.4],
+          at: alongX ? [cx, base + 0.85, cz + side * r] : [cx + side * r, base + 0.85, cz],
+          color: SACK,
+          shade: 0.92,
+          surf: SURF_SACK,
+        });
+      }
+      const sx = Math.min(w * 0.4, 3.2);
+      const sz = Math.min(d * 0.4, 3.2);
+      const qx = rand(id, 1750) < 0.5 ? -1 : 1;
+      const qz = rand(id, 1751) < 0.5 ? -1 : 1;
+      parts.push({
+        size: [sx, 0.05, sz],
+        at: [cx + qx * (w / 2 - sx / 2 - 0.3), base + 1.25, cz + qz * (d / 2 - sz / 2 - 0.3)],
+        rot: [qz * 0.22, 0, 0],
+        color: SHEET_RUST,
+        surf: SURF_SHEET,
+      });
+      parts.push({
+        size: [0.1, 1.2, 0.1],
+        at: [cx + qx * (w / 2 - sx - 0.2), base + 0.6, cz + qz * (d / 2 - sz - 0.2)],
+        color: PLANK,
       });
     }
     for (let f = 0; f < 4; f++) {
@@ -270,6 +409,7 @@ function buildingParts(
           at: alongX ? [cx + t, base + hh / 2, cz + off] : [cx + off, base + hh / 2, cz + t],
           color: wall,
           shade: 0.4 + rand(id, 1300 + f * 40 + i) * 0.22,
+          surf: wsurf,
         });
         // Empty window openings, as far up as this stretch of wall still goes.
         for (let fl = 0; fl < floors; fl++) {
@@ -285,81 +425,289 @@ function buildingParts(
     }
     return parts;
   }
-  parts.push({ size: [w, h, d], at: [cx, base + h / 2, cz], color: wall, shade: wear });
+  parts.push({
+    size: [w, h, d],
+    at: [cx, base + h / 2, cz],
+    color: wall,
+    shade: wear,
+    surf: wsurf,
+  });
   const top = base + h;
-  // Small houses have pitched roofs; blocks of flats and anything large a flat one.
-  const pitched = floors <= 3 && Math.min(w, d) <= 12 && rand(id, 10) < 0.8;
-  if (pitched) {
-    const tile = TILES[Math.floor(rand(id, 7) * TILES.length)];
-    const rise = Math.min(w, d) * (0.2 + rand(id, 8) * 0.1);
-    const hip = rand(id, 9) < 0.35 ? Math.min(w, d) * 0.45 : 0;
+  const S = Math.min(w, d);
+  const L = Math.max(w, d);
+  const ridgeX = w >= d;
+  // Along the longer side and across it, as a point on the ground.
+  const lay = (along: number, y: number, across: number): [number, number, number] =>
+    ridgeX ? [cx + along, y, cz + across] : [cx + across, y, cz + along];
+  const laid = (along: number, up: number, across: number): [number, number, number] =>
+    ridgeX ? [along, up, across] : [across, up, along];
+  // Small houses have pitched roofs of tile; big ones a flat roof, a set-back top storey
+  // or a low hipped roof of zinc; halls a row of gables in sheet, or one low one.
+  const rr = rand(id, 10);
+  const roof =
+    cls === BUILD_HALL
+      ? rr < 0.55 && L / Math.max(2, Math.round(L / 4)) < S
+        ? 'saw'
+        : rr < 0.85
+          ? 'shed'
+          : 'flat'
+      : floors <= 3 && S <= 12
+        ? rr < 0.8
+          ? 'gable'
+          : 'flat'
+        : rr < 0.22 && floors >= 4 && S >= 7
+          ? 'pent'
+          : rr < 0.5 && S <= 16
+            ? 'hip'
+            : 'flat';
+  const pitched = roof === 'gable' || roof === 'shed';
+  const stack = (along: number, across: number, tall: number): void => {
+    parts.push({
+      size: [0.32, tall, 0.32],
+      at: lay(along, top + tall / 2, across),
+      color: 0x6b4c3d,
+      shade: wear * 0.9,
+      surf: SURF_BRICK,
+    });
+    parts.push({ size: [0.4, 0.06, 0.4], at: lay(along, top + tall, across), color: 0x4a4744 });
+  };
+  if (roof === 'gable' || roof === 'shed') {
+    const sheet = roof === 'shed';
+    const tile = sheet
+      ? ZINC[Math.floor(rand(id, 7) * ZINC.length)]
+      : TILES[Math.floor(rand(id, 7) * TILES.length)];
+    const rise = S * (sheet ? 0.13 : 0.2 + rand(id, 8) * 0.1);
+    const hip = !sheet && rand(id, 9) < 0.35 ? S * 0.45 : 0;
+    const shade = damaged ? 0.5 : 0.68 + rand(id, 12) * 0.2;
     parts.push({
       size: [w + 0.5, rise, d + 0.5],
       at: [cx, top, cz],
       color: tile,
-      shade: damaged ? 0.5 : 0.68 + rand(id, 12) * 0.2,
+      shade,
       hip,
+      surf: sheet ? SURF_SHEET : SURF_TILE,
     });
     // Eaves board under the tiles, and a chimney or two through them.
     parts.push({ size: [w + 0.3, 0.08, d + 0.3], at: [cx, top - 0.02, cz], color: TRIM[0] });
-    const stacks = 1 + (rand(id, 13) < 0.4 ? 1 : 0);
+    const stacks = sheet ? 0 : 1 + (rand(id, 13) < 0.4 ? 1 : 0);
     for (let c = 0; c < stacks; c++) {
-      const along = (rand(id, 14 + c) - 0.5) * (Math.max(w, d) - 2.4 - 2 * hip);
-      const across = (c === 0 ? 0.22 : -0.25) * Math.min(w, d);
+      stack(
+        (rand(id, 14 + c) - 0.5) * (L - 2.4 - 2 * hip),
+        (c === 0 ? 0.22 : -0.25) * S,
+        rise + 0.35,
+      );
+    }
+    if (!sheet && hip === 0 && !damaged) {
+      // Dormers in the slope that faces the street, and now and then a gable across the house.
+      const face = rand(id, 18) < 0.7 ? 1 : -1;
+      const slope = (across: number): number => rise * (1 - Math.abs(across) / (S / 2 + 0.25));
+      if (S >= 7 && rand(id, 17) < 0.3) {
+        const wide = S * 0.45;
+        const reach = S / 2 + 0.25;
+        const at = (rand(id, 19) - 0.5) * (L - wide - 1.5);
+        parts.push({
+          size: laid(wide, rise * 0.85, reach),
+          at: lay(at, top, (face * reach) / 2),
+          color: tile,
+          shade: shade * 0.95,
+          hip: 0,
+          surf: SURF_TILE,
+        });
+        parts.push({
+          size: laid(0.46, 0.4, 0.05),
+          at: lay(at, top + rise * 0.3, face * (reach - 0.02)),
+          color: GLASS,
+          gloss: 1,
+        });
+      } else if (L >= 6 && rand(id, 16) < 0.5) {
+        const count = L > 9 ? 2 : 1;
+        for (let i = 0; i < count; i++) {
+          const along = ((i + 0.5) / count - 0.5) * L * 0.6;
+          const across = face * S * 0.27;
+          const y = top + slope(across);
+          parts.push({
+            size: laid(0.7, 0.5, 0.62),
+            at: lay(along, y + 0.12, across),
+            color: wall,
+            shade: wear,
+            surf: wsurf,
+          });
+          parts.push({
+            size: laid(0.86, 0.2, 0.95),
+            at: lay(along, y + 0.37, across - face * 0.08),
+            color: tile,
+            shade,
+            hip: 0,
+            surf: SURF_TILE,
+          });
+          parts.push({
+            size: laid(0.42, 0.3, 0.04),
+            at: lay(along, y + 0.14, across + face * 0.32),
+            color: GLASS,
+            gloss: 1,
+          });
+        }
+      }
+    }
+  } else if (roof === 'saw') {
+    // A workshop roof: a row of sheet gables across the hall, a vent on each, one tall flue.
+    const n = Math.max(2, Math.round(L / 4));
+    const bay = L / n;
+    const tone = ZINC[Math.floor(rand(id, 7) * ZINC.length)];
+    for (let i = 0; i < n; i++) {
+      const along = ((i + 0.5) / n - 0.5) * L;
       parts.push({
-        size: [0.32, rise + 0.35, 0.32],
-        at: [
-          cx + (w >= d ? along : across),
-          top + (rise + 0.35) / 2,
-          cz + (w >= d ? across : along),
-        ],
-        color: 0x6b4c3d,
-        shade: wear * 0.9,
+        size: laid(bay + 0.06, 0.75, S + 0.4),
+        at: lay(along, top, 0),
+        color: tone,
+        shade: (damaged ? 0.55 : 0.8) + rand(id, 300 + i) * 0.16,
+        hip: 0,
+        surf: SURF_SHEET,
+      });
+      parts.push({
+        size: laid(0.3, 0.16, S * 0.5),
+        at: lay(along, top + 0.78, 0),
+        color: 0x6f726d,
       });
     }
+    stack((rand(id, 14) - 0.5) * (L - 2), S * 0.3, 2.4);
   } else {
-    // Roof slab, parapet, a stair head and what collects on a flat roof.
-    parts.push({ size: [w + 0.24, 0.12, d + 0.24], at: [cx, top + 0.06, cz], color: ROOF });
+    // Roof slab, parapet, and what stands on a flat roof.
+    parts.push({
+      size: [w + 0.24, 0.12, d + 0.24],
+      at: [cx, top + 0.06, cz],
+      color: ROOF,
+      surf: SURF_FELT,
+    });
     for (const side of [-1, 1]) {
       parts.push({
         size: [w + 0.24, 0.22, 0.14],
         at: [cx, top + 0.2, cz + (side * (d + 0.1)) / 2],
         color: wall,
         shade: wear * 0.85,
+        surf: wsurf,
       });
       parts.push({
         size: [0.14, 0.22, d + 0.24],
         at: [cx + (side * (w + 0.1)) / 2, top + 0.2, cz],
         color: wall,
         shade: wear * 0.85,
+        surf: wsurf,
       });
     }
-    parts.push({
-      size: [1.3, 0.7, 1.6],
-      at: [cx + (rand(id, 3) - 0.5) * (w - 2.5), top + 0.45, cz + (rand(id, 4) - 0.5) * (d - 3)],
-      color: wall,
-      shade: wear * 0.8,
-    });
-    const things = 2 + Math.floor(rand(id, 20) * 4);
-    for (let i = 0; i < things; i++) {
-      const tx = cx + (rand(id, 21 + i) - 0.5) * (w - 1.6);
-      const tz = cz + (rand(id, 27 + i) - 0.5) * (d - 1.6);
-      const r = rand(id, 33 + i);
-      if (r < 0.4) {
-        // A ventilation unit.
-        parts.push({ size: [0.7, 0.32, 0.5], at: [tx, top + 0.28, tz], color: 0x8c8f8c });
-        parts.push({ size: [0.5, 0.05, 0.3], at: [tx, top + 0.46, tz], color: 0x4a4d4d });
-      } else if (r < 0.7) {
-        // A vent pipe.
-        parts.push({ size: [0.12, 0.6, 0.12], at: [tx, top + 0.42, tz], color: 0x5c5f5e });
-      } else if (r < 0.85) {
-        // A water tank on a frame.
-        parts.push({ size: [0.8, 0.5, 0.8], at: [tx, top + 0.62, tz], color: 0x5a6468 });
-        parts.push({ size: [0.7, 0.26, 0.7], at: [tx, top + 0.25, tz], color: 0x3b3d3d });
-      } else {
-        // An aerial.
-        parts.push({ size: [0.04, 1.5, 0.04], at: [tx, top + 0.87, tz], color: 0x777a78 });
-        parts.push({ size: [0.5, 0.03, 0.03], at: [tx, top + 1.4, tz], color: 0x777a78 });
+    if (roof === 'hip') {
+      // A low hipped roof of zinc behind the parapet, chimneys along its ridge.
+      const tone = ZINC[Math.floor(rand(id, 7) * ZINC.length)];
+      parts.push({
+        size: [w - 0.5, S * 0.2, d - 0.5],
+        at: [cx, top + 0.12, cz],
+        color: tone,
+        shade: damaged ? 0.55 : 0.78 + rand(id, 12) * 0.16,
+        hip: S * 0.46,
+        surf: rand(id, 8) < 0.5 ? SURF_SHEET : SURF_TILE,
+      });
+      const stacks = 2 + Math.floor(rand(id, 13) * 2);
+      for (let c = 0; c < stacks; c++) {
+        stack(
+          ((c + 0.5) / stacks - 0.5) * (L - S * 0.8),
+          (c % 2 === 0 ? 0.16 : -0.16) * S,
+          S * 0.2 + 0.4,
+        );
+      }
+    } else if (roof === 'pent') {
+      // A top storey set back from the street, glazed all round under its own slab.
+      const ph = FLOOR * 0.9;
+      parts.push({
+        size: [w - 2.4, ph, d - 2.4],
+        at: [cx, top + 0.12 + ph / 2, cz],
+        color: wall,
+        shade: wear * 1.04,
+        surf: wsurf,
+      });
+      parts.push({
+        size: [w - 2.34, ph * 0.42, d - 2.34],
+        at: [cx, top + 0.12 + ph * 0.56, cz],
+        color: GLASS,
+        gloss: 1,
+      });
+      parts.push({
+        size: [w - 1.9, 0.1, d - 1.9],
+        at: [cx, top + 0.17 + ph, cz],
+        color: ROOF,
+        surf: SURF_FELT,
+      });
+    } else {
+      parts.push({
+        size: [1.3, 0.7, 1.6],
+        at: [cx + (rand(id, 3) - 0.5) * (w - 2.5), top + 0.45, cz + (rand(id, 4) - 0.5) * (d - 3)],
+        color: wall,
+        shade: wear * 0.8,
+        surf: wsurf,
+      });
+      const things = 2 + Math.floor(rand(id, 20) * 4);
+      for (let i = 0; i < things; i++) {
+        const tx = cx + (rand(id, 21 + i) - 0.5) * (w - 1.6);
+        const tz = cz + (rand(id, 27 + i) - 0.5) * (d - 1.6);
+        const r = rand(id, 33 + i);
+        if (r < 0.4) {
+          // A ventilation unit.
+          parts.push({ size: [0.7, 0.32, 0.5], at: [tx, top + 0.28, tz], color: 0x8c8f8c });
+          parts.push({ size: [0.5, 0.05, 0.3], at: [tx, top + 0.46, tz], color: 0x4a4d4d });
+        } else if (r < 0.7) {
+          // A vent pipe.
+          parts.push({ size: [0.12, 0.6, 0.12], at: [tx, top + 0.42, tz], color: 0x5c5f5e });
+        } else if (r < 0.85) {
+          // A water tank on a frame.
+          parts.push({ size: [0.8, 0.5, 0.8], at: [tx, top + 0.62, tz], color: 0x5a6468 });
+          parts.push({ size: [0.7, 0.26, 0.7], at: [tx, top + 0.25, tz], color: 0x3b3d3d });
+        } else {
+          // An aerial.
+          parts.push({ size: [0.04, 1.5, 0.04], at: [tx, top + 0.87, tz], color: 0x777a78 });
+          parts.push({ size: [0.5, 0.03, 0.03], at: [tx, top + 1.4, tz], color: 0x777a78 });
+        }
+      }
+      if (floors >= 3 && w >= 5.5 && !damaged && rand(id, 76) < 0.24) {
+        // A hoarding on the roof, turned to the street.
+        const bw = Math.min(w - 1, 4.8);
+        const bh = bw / 4;
+        const by = top + 0.75 + bh / 2;
+        const bz = cz + d / 2 - 0.35;
+        const k = SIGN_HOARDINGS.from + Math.floor(rand(id, 77) * SIGN_HOARDINGS.count);
+        parts.push({ size: [bw + 0.12, bh + 0.12, 0.07], at: [cx, by, bz], color: 0x2e2d2b });
+        parts.push({ size: [bw, bh, 0], at: [cx, by, bz + 0.045], color: 0xffffff, sign: k });
+        for (const s of [-1, 1]) {
+          parts.push({
+            size: [0.08, 0.8 + bh, 0.08],
+            at: [cx + s * bw * 0.36, top + (0.8 + bh) / 2, bz - 0.08],
+            color: 0x3a3d3d,
+          });
+          parts.push({
+            size: [0.05, 0.05, 1.1],
+            at: [cx + s * bw * 0.36, top + 0.55, bz - 0.55],
+            rot: [0.75, 0, 0],
+            color: 0x3a3d3d,
+          });
+        }
+      }
+    }
+    if (fort) {
+      // Sandbagged positions on two corners of the roof.
+      for (const q of [-1, 1]) {
+        const px = cx + q * (w / 2 - 0.9);
+        const pz = cz + q * (d / 2 - 0.9);
+        parts.push({
+          size: [1.5, 0.42, 0.34],
+          at: [px, top + 0.33, pz - q * 0.75],
+          color: SACK,
+          surf: SURF_SACK,
+        });
+        parts.push({
+          size: [0.34, 0.42, 1.5],
+          at: [px - q * 0.75, top + 0.33, pz],
+          color: SACK,
+          shade: 0.92,
+          surf: SURF_SACK,
+        });
       }
     }
   }
@@ -371,6 +719,107 @@ function buildingParts(
     color: wall,
     shade: wear * 0.62,
   });
+  // Shops along the ground floor of one face; a ground floor in dressed render on the
+  // taller houses; piers down the panel blocks; drainpipes; a street plate at a corner.
+  const shopFace =
+    cls === BUILD_HALL || rand(id, 70) >= (floors >= 2 ? 0.5 : 0.22)
+      ? -1
+      : rand(id, 71) < 0.6
+        ? FACE_SOUTH
+        : [FACE_EAST, FACE_WEST, FACE_NORTH][Math.floor(rand(id, 72) * 3)];
+  const band = floors >= 3 && cls !== BUILD_HALL && rand(id, 44) < 0.55;
+  const proud = band ? 0.035 : 0;
+  if (band) {
+    parts.push({
+      size: [w + 0.07, FLOOR * 0.96, d + 0.07],
+      at: [cx, base + FLOOR * 0.48, cz],
+      color: trim,
+      shade: wear * 0.8,
+    });
+  }
+  if (wsurf === SURF_PANEL && rand(id, 43) < 0.5) {
+    for (let f = 0; f < 4; f++) {
+      const len = faceLen(f);
+      const n = Math.max(2, Math.round(len / 1.15));
+      for (let i = 0; i <= n; i += 2) {
+        parts.push({
+          size: faceBox(f, 0.1, h, 0.1),
+          at: onFace(f, (i / n - 0.5) * len, base + h / 2, 0),
+          color: wall,
+          shade: wear * 0.8,
+          surf: wsurf,
+        });
+      }
+    }
+  }
+  for (const f of [FACE_SOUTH, FACE_NORTH]) {
+    parts.push({
+      size: faceBox(f, 0.07, h, 0.07),
+      at: onFace(f, (f === FACE_SOUTH ? 1 : -1) * (w / 2 - 0.25), base + h / 2, 0.05),
+      color: 0x3a3d3d,
+    });
+  }
+  if (shopFace >= 0) {
+    const f = shopFace;
+    const len = faceLen(f);
+    const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+    const n = Math.max(1, Math.min(3, Math.floor(len / 4.2)));
+    const bay = len / n;
+    for (let i = 0; i < n; i++) {
+      const t = ((i + 0.5) / n - 0.5) * len;
+      const sw = Math.min(bay - 0.6, 2.6);
+      const sh = Math.min(0.46, sw / 3.6);
+      const out = damaged && rand(id, 1800 + i) < 0.5;
+      parts.push({
+        size: faceBox(f, bay * 0.56, 0.6, 0.05),
+        at: onFace(f, t - bay * 0.1, base + 0.58, proud),
+        color: out ? SOOT : GLASS,
+        gloss: out ? 0 : 1,
+      });
+      parts.push({
+        size: faceBox(f, 0.36, 0.64, 0.05),
+        at: onFace(f, t + bay * 0.31, base + 0.34, proud),
+        color: 0x2a2622,
+      });
+      parts.push({
+        size: faceBox(f, sw + 0.1, sh + 0.08, 0.05),
+        at: onFace(f, t, base + 1.38, proud),
+        color: 0x2e2c29,
+      });
+      parts.push({
+        size: [sw, sh, 0],
+        at: onFace(f, t, base + 1.38, proud + 0.035),
+        rot: [0, faceTurn(f), 0],
+        color: 0xffffff,
+        shade: damaged ? 0.5 : 0.95,
+        sign: SIGN_SHOPS.from + Math.floor(rand(id, 1810 + i) * SIGN_SHOPS.count),
+      });
+      if (!damaged && rand(id, 1820 + i) < 0.5) {
+        parts.push({
+          size: faceBox(f, bay * 0.66, 0.04, 0.55),
+          at: onFace(f, t - bay * 0.1, base + 1.02, 0.27),
+          rot: faceX(f) ? [side * 0.38, 0, 0] : [0, 0, -side * 0.38],
+          color: AWNINGS[Math.floor(rand(id, 1830 + i) * AWNINGS.length)],
+          shade: 0.9,
+        });
+      }
+    }
+  }
+  if (floors >= 2 && rand(id, 75) < 0.3) {
+    const k = SIGN_STREETS.from + Math.floor(rand(id, 78) * SIGN_STREETS.count);
+    for (const f of [FACE_SOUTH, FACE_EAST]) {
+      if (f === shopFace) continue;
+      parts.push({
+        size: [0.95, 0.24, 0],
+        at: onFace(f, faceLen(f) / 2 - 0.75, base + 1.4, proud + 0.03),
+        rot: [0, faceTurn(f), 0],
+        color: 0xffffff,
+        shade: damaged ? 0.55 : 1,
+        sign: k,
+      });
+    }
+  }
+  if (fort) sandbags();
   if (floors >= 2) {
     parts.push({
       size: [w + 0.1, 0.06, d + 0.1],
@@ -379,20 +828,21 @@ function buildingParts(
       shade: wear,
     });
   }
-  parts.push({
-    size: [0.9, 0.05, 0.4],
-    at: [
-      cx +
-        ((Math.floor(Math.max(2, Math.round(w / 1.15)) / 2) + 0.5) /
-          Math.max(2, Math.round(w / 1.15)) -
-          0.5) *
-          w,
-      base + 0.7,
-      cz + d / 2 + 0.2,
-    ],
-    color: trim,
-    shade: wear * 0.8,
-  });
+  if (shopFace !== FACE_SOUTH)
+    parts.push({
+      size: [0.9, 0.05, 0.4],
+      at: [
+        cx +
+          ((Math.floor(Math.max(2, Math.round(w / 1.15)) / 2) + 0.5) /
+            Math.max(2, Math.round(w / 1.15)) -
+            0.5) *
+            w,
+        base + 0.7,
+        cz + d / 2 + 0.2,
+      ],
+      color: trim,
+      shade: wear * 0.8,
+    });
   // Balconies on the upper floors of the bigger houses, here and there.
   if (!pitched && floors >= 3) {
     for (let f = 1; f < floors; f++) {
@@ -425,17 +875,27 @@ function buildingParts(
           k++;
           // A ground-floor doorway on one face; shot-out or boarded windows when damaged.
           const door = f === 0 && alongX && side === 1 && i === Math.floor(n / 2);
+          const face = alongX
+            ? side === 1
+              ? FACE_SOUTH
+              : FACE_NORTH
+            : side === 1
+              ? FACE_EAST
+              : FACE_WEST;
+          if (f === 0 && face === shopFace) continue;
           const blown = damaged && rand(id, k) < 0.45;
+          // Fortified: most windows are boarded over, a slit left to fire through.
+          const boarded = fort && !door && !blown && rand(id, k + 7000) < 0.7;
           const size: [number, number, number] = alongX
             ? [door ? 0.5 : 0.46, door ? 0.62 : 0.4, 0.05]
             : [0.05, 0.4, 0.46];
           const yy = door ? base + 0.31 : y;
-          const off = (side * (alongX ? d : w)) / 2;
+          const off = side * ((alongX ? d : w) / 2 + (f === 0 ? proud : 0));
           parts.push({
             size: blown ? [size[0] * 1.5, size[1] * 1.6, size[2] * 1.5] : size,
             at: alongX ? [cx + t, yy, cz + off] : [cx + off, yy, cz + t],
-            color: blown ? SOOT : door ? 0x2a2622 : GLASS,
-            gloss: blown || door ? 0 : 1,
+            color: blown ? SOOT : boarded ? PLANK : door ? 0x2a2622 : GLASS,
+            gloss: blown || door || boarded ? 0 : 1,
           });
         }
       }
@@ -534,6 +994,7 @@ function baseParts(
       color: SHEET,
       shade: wear,
       hip: 0,
+      surf: SURF_SHEET,
     });
     const long = Math.max(sw, sd);
     for (let k = 0; k < Math.floor(long / 3); k++) {
@@ -790,6 +1251,7 @@ function rubbleParts(
       ],
       color: i % 3 === 0 ? 0x4c4a46 : wall,
       shade: 0.42 + rand(id, 700 + i) * 0.3,
+      surf: SURF_RUBBLE,
     });
   }
   // Corners and stretches of wall that did not come down, at ragged heights.
@@ -908,6 +1370,8 @@ export class StructureView {
   /** Latest state per structure (STAGE_*) and its breached faces, one bit each (FACE_*). */
   readonly stage = new Uint8Array(MAX_STRUCTS);
   readonly breached = new Uint8Array(MAX_STRUCTS);
+  /** 1 where engineers have fortified the building. */
+  readonly fort = new Uint8Array(MAX_STRUCTS);
   /**
    * What is drawn: 0 standing, 1 damaged, 2 destroyed, 3 going up, 4 gutted, plus the
    * breached faces times eight.
@@ -929,16 +1393,20 @@ export class StructureView {
   ) {
     this.shadows = look.shadows;
     this.material = new THREE.MeshStandardNodeMaterial({ roughness: 0.93, metalness: 0 });
+    // Signs: a panel shows its cell of the sign sheet instead of its own colour.
+    const signs = makeSigns();
+    const tint = attribute('color', 'vec3');
+    const sign = attribute('sign', 'float');
+    const painted = (plain: THREE.Node<'vec3'>): THREE.Node<'vec3'> =>
+      signs ? mix(plain, texture(signs, uv()).xyz.mul(tint), sign) : plain;
     if (look.rich) {
-      // Stained plaster and concrete; window glass stays clean enough to show the sky.
-      const wall = masonry(look, 7);
+      // Each wall and roof in its own material; glass stays clean enough to show the sky.
+      const wall = cityFace(look, attribute('surf', 'float'));
       const gloss = attribute('gloss', 'float');
-      this.material.colorNode = attribute('color', 'vec3')
-        .mul(mix(wall.tone, float(1), gloss))
-        .mul(fog.shade());
+      this.material.colorNode = painted(tint.mul(mix(wall.tone, float(1), gloss))).mul(fog.shade());
       this.material.roughnessNode = mix(wall.roughness, float(0.3), gloss);
       this.material.normalNode = wall.normal;
-    } else this.material.colorNode = attribute('color', 'vec3').mul(fog.shade());
+    } else this.material.colorNode = painted(tint).mul(fog.shade());
     const ui = new THREE.MeshBasicNodeMaterial();
     ui.colorNode = attribute('aTint', 'vec4').xyz;
     this.pips = new Batch(new THREE.BoxGeometry(0.62, 0.14, 0.62), ui, MAX_STRUCTS * 10 + 64);
@@ -1016,7 +1484,8 @@ export class StructureView {
 
   private show(s: number, state: number): void {
     const holes = state === 2 || state === 3 ? 0 : this.breached[s];
-    if (this.shown[s] === state + 8 * holes) return;
+    const fort = state === 2 || state === 3 ? 0 : this.fort[s];
+    if (this.shown[s] === state + 8 * holes + 128 * fort) return;
     const sm = this.map;
     if (sm.sKind[s] === S_BASE) {
       // A base building takes the place of whatever hedge or fence stood there.
@@ -1056,6 +1525,7 @@ export class StructureView {
               state === 4 ? STAGE_GUTTED : state === 1 ? STAGE_DAMAGED : 0,
               holes,
               m.sClass[s],
+              fort === 1,
             );
     if (m.sKind[s] === S_BUILDING) {
       const k =
@@ -1070,7 +1540,7 @@ export class StructureView {
       this.meshes[s] = mesh;
       this.group.add(mesh);
     }
-    this.shown[s] = state + 8 * holes;
+    this.shown[s] = state + 8 * holes + 128 * fort;
     // Units drive on a standing deck; a standing house blocks the view.
     if (bridge) this.terrain.bridgeUp[s] = state === 2 ? 0 : 1;
     else {
@@ -1134,7 +1604,8 @@ export class StructureView {
       this.hp[k] = hp;
       const bits = s.structStage[k] ?? 0;
       this.stage[k] = bits & 3;
-      this.breached[k] = bits >> 2;
+      this.breached[k] = (bits >> 2) & 15;
+      this.fort[k] = bits & STRUCT_FORTIFIED ? 1 : 0;
       if (this.hidden(k) && !this.spot(k)) continue;
       const rising = this.baseTeam[k] >= 0 && this.basePct[k] < 100;
       this.show(
