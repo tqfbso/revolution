@@ -5,6 +5,7 @@ import { CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS } from './sim/world';
+import { Alerts } from './client/alerts';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
 import { Hud } from './client/hud';
@@ -174,11 +175,13 @@ async function start(): Promise<void> {
     works.applySnapshot(e.data);
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
+    alerts?.applySnapshot(e.data, performance.now() / 1000);
     hud.simTick(e.data.simMs);
     hud.stats.alive = e.data.alive;
     if (e.data.hash !== undefined) hud.stats.hash = e.data.hash.toString(16).padStart(8, '0');
   };
   const lookAt = (x: number, z: number) => rts.moveTo(x, z);
+  let alerts: Alerts | null = null;
   const card = new CommandCard(
     document.getElementById('card') as HTMLElement,
     document.getElementById('resources') as HTMLElement,
@@ -276,6 +279,29 @@ async function start(): Promise<void> {
     structures,
     map,
     works,
+  );
+  // Where a ground point is on screen, for the alerts' edge arrows.
+  const probe = new THREE.Vector3();
+  alerts = new Alerts(
+    map,
+    units,
+    structures,
+    fog,
+    minimap,
+    sound,
+    (x, z) => {
+      probe.set(x, terrain.heightAt(x, z), z).project(rts.camera);
+      // Behind the camera the projection is mirrored: turn it back so the arrow points right.
+      const back = probe.z > 1;
+      const nx = back ? -probe.x : probe.x;
+      const ny = back ? -probe.y : probe.y;
+      return {
+        sx: (nx * 0.5 + 0.5) * window.innerWidth,
+        sy: (-ny * 0.5 + 0.5) * window.innerHeight,
+        on: !back && Math.abs(probe.x) < 0.92 && Math.abs(probe.y) < 0.92,
+      };
+    },
+    lookAt,
   );
   scene.add(
     terrain.mesh,
@@ -437,6 +463,7 @@ async function start(): Promise<void> {
     input.update(dt);
     card.update();
     minimap.update(now);
+    alerts?.update(now / 1000);
     // The shadow map follows the point the camera looks at and covers only what is close
     // enough to show shadow detail; far units are drawn without shadows.
     const focus = rts.focus;
@@ -496,6 +523,7 @@ async function start(): Promise<void> {
     structures,
     works,
     card,
+    alerts,
     map,
     send,
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),

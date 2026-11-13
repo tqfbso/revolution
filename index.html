@@ -204,6 +204,47 @@
         background: #0c1014;
         cursor: pointer;
       }
+      #alerts {
+        position: fixed;
+        left: 10px;
+        bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        pointer-events: none;
+      }
+      .alert {
+        background: rgba(12, 16, 20, 0.86);
+        color: #fff;
+        font-size: 15px;
+        font-weight: bold;
+        padding: 9px 14px;
+        border-left: 5px solid #ff5a4a;
+        border-radius: 4px;
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      .alert span {
+        margin-left: 12px;
+        font-size: 11px;
+        font-weight: normal;
+        color: #9aa7b3;
+      }
+      #alert-arrows {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+      .alert-arrow {
+        position: absolute;
+        font-size: 34px;
+        line-height: 1;
+        text-shadow:
+          0 0 4px #000,
+          0 0 10px #000;
+        pointer-events: auto;
+        cursor: pointer;
+      }
       #select-box {
         position: fixed;
         display: none;
@@ -294,10 +335,15 @@
       right click to order<br />
       Space: pause. Orders given while paused all start when you resume, so you can plan a line of
       works or an attack in peace. Speed 0.75x slows the whole game a little<br />
+      Alerts: when you are attacked off screen, or a recon drone finds enemy troops, a banner, a
+      ping on the minimap and an arrow at the screen edge show where. Backspace (or a click on any
+      of them) takes you there; Backspace again goes to the one before<br />
       WASD / arrows / screen edge: pan · Wheel: zoom · Q/E or middle drag: rotate
     </div>
     <canvas id="minimap"></canvas>
     <div id="select-box"></div>
+    <div id="alert-arrows"></div>
+    <div id="alerts"></div>
     <div id="loading">Loading Revolution…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>

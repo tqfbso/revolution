@@ -872,3 +872,38 @@ synthesis keeps the licence question closed. What changed in `src/client/sound.t
 None of it can be heard in the cloud. Checked offline: every buffer renders finite at
 the expected level, and the page starts sound without errors. Whether it sounds right is
 Fabio's call; the levels to turn are `BED`, the echo send in `at()`, and the bird gain.
+
+## 073 An easy opponent that plays worse, and alerts for what happens off screen
+
+Fabio, 2026-11-13, after an hour on easy without a result: the balance is right, easy
+should be a little less clever, and the map is too big to notice an attack elsewhere.
+
+Easy and recruit were already small and late (decision 070). Making them smaller again
+would only shorten the game, so this time the judgement drops instead. Four new entries in
+`AI_TUNING`:
+
+- `react`: an intrusion must last 24 seconds (recruit 40) before the reserve moves, half
+  that for its own base. Normal and hard answer at once.
+- `eyes`, `drones`, `patrol`: easy keeps the two recon teams it starts with and one drone
+  that changes place every 90 seconds, and sends no team to hide in sight of your base.
+- `focus`: off for easy and recruit. Strike drones fly at the nearest vehicle instead of
+  the most valuable one, and only the guns shell a strongpoint, not the tanks as well.
+- `sulk`: beaten at a town or at your base, easy leaves it alone for 20 minutes (recruit
+  for an hour) instead of coming back with more. Its own side of the map it still
+  fights for.
+
+Alerts are client only (`src/client/alerts.ts`), read from the events the sim already
+sends, so the golden hash stands:
+
+- Four kinds of "under attack" (base, town, forces, supply trucks), each raised once per
+  160 m square for about 50 seconds, and never two of a kind within a few seconds. A
+  fight on screen raises nothing.
+- "Contact" when a recon drone has enemy troops in sight that nobody had seen for 25
+  seconds, grouped by square: forty soldiers are one line that names the heaviest thing
+  among them. A jammed drone reports nothing.
+- Each alert is a banner, a tone, a spoken line (the browser's own voice; quiet when the
+  sound is off), a ping on the minimap and an arrow at the screen edge. Backspace, or a
+  click on any of them, goes there; Backspace again goes to the one before.
+
+Not done: watchtowers were considered and dropped at Fabio's wish; deployable cameras
+feed the same Contact alert in a later step (`Alerts.watchers`).

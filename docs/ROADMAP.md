@@ -211,6 +211,17 @@ on the ridge map); its squads ride to the attack in carriers.
 - Sound pass 2: layered small arms, echo that grows with distance, a far-battle bed,
   wind and birds (decision 072).
 
+## Easier easy, and battle alerts (built, awaiting Fabio's test)
+
+Fabio, 2026-11-13: balance is right, easy still unbeaten, and the map is too big to see
+an attack elsewhere. Decision 073.
+
+- Easy and recruit react late, scout less, do not concentrate fire and stay away from a
+  place where they were beaten
+- Alerts for attacks off screen (base, town, forces, supply trucks) and for enemy troops
+  found by a recon drone: banner, tone, spoken line, minimap ping, edge arrow; Backspace
+  jumps to the latest
+
 ## Urban warfare (planned, not built; order awaits Fabio)
 
 Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,
