@@ -50,6 +50,8 @@ import {
   COMMANDER_FIGHTING,
   COMMANDER_NEED,
   COMMANDER_STRIDE,
+  type Frame,
+  type NetMode,
   type Snapshot,
   type ToWorker,
   STRUCT_FORTIFIED,
@@ -58,7 +60,20 @@ import {
 const MAX_CATCH_UP_TICKS = 4;
 
 let world: World | null = null;
+/** Orders for the next tick: the scenario's opening ones, then whatever arrives. */
 let pending: Command[] = [];
+/**
+ * Co-op (client/net.ts). The host runs on its own clock like a game alone, and reports the
+ * players' orders that went into each tick; the guest runs exactly the ticks it is sent.
+ */
+let mode: NetMode = 'solo';
+/** Host: ticks run since the last report. Guest: ticks received and waiting to be run. */
+let frames: Frame[] = [];
+let hashes: number[] = [];
+/** Both sides hash the world on the same ticks, two seconds apart. */
+const HASH_EVERY = TICK_RATE * 2;
+/** Players' orders received since the last tick, kept apart so a frame holds only those. */
+let inbox: Command[] = [];
 /** The computer players. They hand in their commands before each tick, like anyone else. */
 let ais: Ai[] = [];
 /** The staff of the player's sub-commanders: it hands its commands in the same way. */
@@ -95,12 +110,27 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     staff = msg.demo ? null : createStaff(0, msg.seed);
     speed = Math.min(Math.max(msg.speed, 0.5), 16);
     paused = false;
+    mode = msg.net ?? 'solo';
+    frames = [];
+    hashes = [];
+    inbox = [];
     accumulator = TICK_MS; // run the first tick immediately
     lastTime = performance.now();
     if (timer === undefined) timer = setInterval(pump, 5);
   } else if (msg.type === 'command') {
-    // Single player: apply on the next tick. Lockstep will schedule a few ticks ahead instead.
-    pending.push(msg.command);
+    // Applied on the next tick this sim runs on its own clock (alone, or as the host).
+    inbox.push(msg.command);
+  } else if (msg.type === 'frames') {
+    for (const f of msg.frames) frames.push(f);
+  } else if (msg.type === 'alone') {
+    if (world && mode === 'guest') {
+      for (const f of frames) if (f[0] === world.tick) tick(world, f[1]);
+      frames = [];
+      mode = 'solo';
+      accumulator = 0;
+      lastTime = performance.now();
+      postSnapshot(world, 0);
+    }
   } else if (msg.type === 'speed') {
     speed = Math.min(Math.max(msg.speed, 0.5), 16);
   } else if (msg.type === 'pause') {
@@ -109,9 +139,47 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
   }
 };
 
+/** One tick: the players' orders, then the computer's, then the world moves. */
+function tick(w: World, orders: Command[]): number {
+  const t0 = performance.now();
+  for (const c of orders) pending.push(c);
+  for (const ai of ais) aiThink(ai, w, pending);
+  if (staff) staffThink(staff, w, pending);
+  step(w, pending);
+  pending = [];
+  if (mode !== 'solo' && w.tick % HASH_EVERY === 0) hashes.push(w.tick, hashWorld(w));
+  return performance.now() - t0;
+}
+
+let lastReport = 0;
+
+/** The guest's clock is the host's: run what has arrived, faster if we have fallen behind. */
+function follow(w: World, now: number): void {
+  lastTime = now;
+  const cap = frames.length > 60 ? 24 : frames.length > 6 ? 4 : frames.length > 2 ? 2 : 1;
+  let simMs = 0;
+  let ticks = 0;
+  const t0 = performance.now();
+  while (frames.length > 0 && ticks < cap && performance.now() - t0 < 40) {
+    const f = frames.shift() as Frame;
+    // A frame for another tick than ours cannot be played; the hash check will report it.
+    if (f[0] !== w.tick) continue;
+    simMs = tick(w, f[1]);
+    ticks++;
+  }
+  if (ticks > 0 || now - lastReport > 500) {
+    lastReport = now;
+    postSnapshot(w, simMs);
+  }
+}
+
 function pump(): void {
   if (!world) return;
   const now = performance.now();
+  if (mode === 'guest') {
+    follow(world, now);
+    return;
+  }
   if (paused) {
     lastTime = now;
     return;
@@ -123,12 +191,10 @@ function pump(): void {
   let simMs = 0;
   let ticks = 0;
   while (accumulator >= TICK_MS && ticks < MAX_CATCH_UP_TICKS * speed) {
-    const t0 = performance.now();
-    for (const ai of ais) aiThink(ai, world, pending);
-    if (staff) staffThink(staff, world, pending);
-    step(world, pending);
-    simMs = performance.now() - t0;
-    pending = [];
+    const orders = inbox;
+    inbox = [];
+    if (mode === 'host') frames.push([world.tick, orders]);
+    simMs = tick(world, orders);
     accumulator -= TICK_MS;
     ticks++;
   }
@@ -300,6 +366,14 @@ function postSnapshot(w: World, simMs: number): void {
     snapshot.works = works;
   }
   if (w.tick % TICK_RATE === 0) snapshot.hash = hashWorld(w);
+  if (mode !== 'solo') {
+    snapshot.net = { hashes, behind: mode === 'guest' ? frames.length : 0 };
+    if (mode === 'host') {
+      snapshot.net.frames = frames;
+      frames = [];
+    }
+    hashes = [];
+  }
   self.postMessage(snapshot, {
     transfer: [
       positions.buffer,
