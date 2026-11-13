@@ -17,6 +17,7 @@ import {
   CMD_TRAIN,
   type Command,
 } from './commands';
+import { claimReinforcement, joinCommander, reinforcementsWanted } from './commanders';
 import { clampInt, fx } from './fixed';
 import {
   CELL_FX,
@@ -648,13 +649,21 @@ function dispatchOrders(w: World): void {
 }
 
 const fielded = new Int32Array(MAX_TEAMS * KIND_SLOTS);
+const coming = new Int32Array(MAX_TEAMS * KIND_SLOTS);
+const wanted = new Int32Array(MAX_TEAMS * KIND_SLOTS);
 
-/** Standing orders: whatever a "keep N" is short of, counting what is being built, is ordered. */
+/**
+ * Standing orders: whatever a "keep N" is short of, or the commanders who have their
+ * losses replaced are (the larger of the two), counting what is being built, is ordered.
+ */
 function standingOrders(w: World): void {
   let any = false;
   for (let k = 0; k < MAX_TEAMS * KIND_SLOTS && !any; k++) any = w.keep[k] > 0;
+  wanted.fill(0);
+  if (reinforcementsWanted(w, wanted)) any = true;
   if (!any) return;
   fielded.fill(0);
+  coming.fill(0);
   for (let i = 0; i < w.count; i++) {
     if (w.state[i] === STATE_ALIVE) fielded[w.team[i] * KIND_SLOTS + w.kind[i]]++;
   }
@@ -663,12 +672,12 @@ function standingOrders(w: World): void {
     if (team === NO_TEAM || w.sHp[s] <= 0) continue;
     for (let q = 0; q < w.sQueueLen[s]; q++) {
       const item = w.sQueue[s * QUEUE_MAX + q];
-      if (item !== TIER_ITEM) fielded[team * KIND_SLOTS + item]++;
+      if (item !== TIER_ITEM) coming[team * KIND_SLOTS + item]++;
     }
   }
   for (let k = 0; k < MAX_TEAMS * KIND_SLOTS; k++) {
-    if (w.keep[k] === 0) continue;
-    const short = w.keep[k] - fielded[k];
+    const kept = w.keep[k] === 0 ? 0 : w.keep[k] - fielded[k];
+    const short = Math.min(Math.max(kept, wanted[k]) - coming[k], ORDER_MAX);
     if (short > w.orders[k]) w.orders[k] = short;
   }
 }
@@ -719,26 +728,20 @@ function updateProduction(w: World): void {
   }
 }
 
-/** Hand a new unit to commander `c` of its army. False if there is no such commander. */
-function joinCommander(w: World, id: number, c: number): boolean {
-  void w;
-  void id;
-  void c;
-  return false;
-}
-
 /** A new unit goes to its building's rally point; a truck rallied onto a site starts hauling. */
 function rally(w: World, id: number, s: number): void {
   const map = w.map;
   let rx = w.sRallyX[s];
   let ry = w.sRallyY[s];
-  // The production centre may send this kind somewhere else: to a town (to a commander
-  // is the staff's business, see the commanders).
+  // The production centre may send this kind somewhere else: to a town, or to a
+  // commander. A commander's new unit still starts for the rally point, to clear the
+  // factory door; its staff sends for it from there.
   const dest = w.dest[w.team[id] * KIND_SLOTS + w.kind[id]];
   if (dest >= DEST_TOWN && dest < DEST_TOWN + map.townCount) {
     rx = map.townX[dest - DEST_TOWN];
     ry = map.townY[dest - DEST_TOWN];
-  } else if (dest >= DEST_COMMANDER && joinCommander(w, id, dest - DEST_COMMANDER)) return;
+  } else if (dest >= DEST_COMMANDER) joinCommander(w, id, dest - DEST_COMMANDER);
+  if (w.cmdr[id] < 0) claimReinforcement(w, id);
   if (w.kind[id] === KIND_TRUCK) {
     for (let k = 0; k < map.siteCount; k++) {
       const dx = map.siteX[k] - rx;

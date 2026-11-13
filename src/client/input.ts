@@ -75,7 +75,17 @@ export class Input {
 
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('pointerdown', (e) => {
-      if (card.placing >= 0) {
+      if (this.pick) {
+        // Someone asked for a place on the map: a left click gives it, anything else calls
+        // it off.
+        const done = this.pick;
+        this.ask(null);
+        const { ground } = this.structureAt(e.clientX, e.clientY);
+        if (e.button === 0 && ground) {
+          done(ground.x, ground.z);
+          this.mark(ground.x, ground.y + 0.15, ground.z);
+        }
+      } else if (card.placing >= 0) {
         // Placing a building: left click puts it down, anything else calls it off.
         if (e.button === 0) card.confirm(e.shiftKey);
         else card.cancelPlacing();
@@ -139,6 +149,8 @@ export class Input {
       if (digit >= 0) {
         e.preventDefault();
         this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
+      } else if (e.code === 'Escape' && this.pick) {
+        this.ask(null);
       } else if (e.code === 'Escape') {
         card.arm('');
         this.drawing = false;
@@ -155,8 +167,9 @@ export class Input {
       else if (e.code === 'Period') card.selectIdle();
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
+        // All of them that are yours to order about: not those a commander has.
         units.setSelected(
-          range(units.count).filter((i) => this.mayCommand(i)),
+          range(units.count).filter((i) => this.mayCommand(i) && units.cmdr[i] < 0),
           false,
         );
       } else if (e.code === 'KeyX' && units.selectedCount > 0) {
@@ -325,7 +338,32 @@ export class Input {
       }
     }
     this.card.select(-1);
-    this.units.setSelected(picked, additive);
+    // A box that holds both leaves a commander's troops out: sweeping up your own units
+    // must not empty a command by accident. A box of nothing but commanded troops, or a
+    // click on one, selects them.
+    const own = isClick ? picked : picked.filter((i) => this.units.cmdr[i] < 0);
+    this.units.setSelected(own.length > 0 ? own : picked, additive);
+  }
+
+  /** Waiting for a click on the map (see `ask`). */
+  private pick: ((x: number, z: number) => void) | null = null;
+  /** Set by the client: shows (or, with null, clears) the line that says what is asked. */
+  prompt: (text: string | null) => void = () => {};
+
+  /** Ask the player for a place: the next left click on the map (or minimap) goes to `done`. */
+  ask(text: string | null, done?: (x: number, z: number) => void): void {
+    this.pick = text !== null && done ? done : null;
+    this.prompt(this.pick ? text : null);
+    this.dom.style.cursor = this.pick ? 'crosshair' : '';
+  }
+
+  /** A click on the minimap while a place is asked for. True if it was taken. */
+  pickAt(x: number, z: number): boolean {
+    if (!this.pick) return false;
+    const done = this.pick;
+    this.ask(null);
+    done(x, z);
+    return true;
   }
 
   /** What is under a screen point: the ground point, and a standing structure if any. */

@@ -79,7 +79,9 @@ export class Minimap {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
       const p = toWorld(e);
-      if (e.button === 0) {
+      if (e.button === 0 && this.pick(p.x, p.z)) {
+        // The click answered a question (where a commander is to go).
+      } else if (e.button === 0) {
         dragging = true;
         canvas.setPointerCapture(e.pointerId);
         lookAt(p.x, p.z);
@@ -95,6 +97,12 @@ export class Minimap {
     });
     canvas.addEventListener('pointerup', () => (dragging = false));
   }
+
+  /** Set by the client: a left click is offered here first; true if it was taken. */
+  pick: (x: number, z: number) => boolean = () => false;
+  /** Set by the client: the commanders to mark (letter, where its troops are, where it is sent). */
+  commanders: () => { name: string; cx: number; cz: number; x: number; z: number; on: boolean }[] =
+    () => [];
 
   /** Draw attention to a world point: an alert happened there. */
   ping(x: number, z: number, rgb: readonly number[]): void {
@@ -206,6 +214,31 @@ export class Minimap {
       ctx.beginPath();
       ctx.arc(this.map.townX[t] / 4096, this.map.townY[t] / 4096, 5, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Commanders: a letter on their troops, a line to where they have been sent.
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const c of this.commanders()) {
+      const x = (c.cx / MAP_SIZE) * N;
+      const y = (c.cz / MAP_SIZE) * N;
+      if (c.on) {
+        ctx.strokeStyle = 'rgba(255,224,130,0.7)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo((c.x / MAP_SIZE) * N, (c.z / MAP_SIZE) * N);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.fillStyle = 'rgba(12,16,20,0.85)';
+      ctx.fillRect(x - 6, y - 6, 12, 12);
+      ctx.strokeStyle = 'rgb(255,224,130)';
+      ctx.strokeRect(x - 6, y - 6, 12, 12);
+      ctx.fillStyle = 'rgb(255,224,130)';
+      ctx.fillText(c.name[0], x, y + 0.5);
     }
 
     // Alerts: a ring closing in on the place, three times, then a dot that lingers.

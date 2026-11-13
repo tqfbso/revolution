@@ -199,6 +199,8 @@ export class UnitView {
   readonly load = new Uint8Array(MAX_UNITS);
   /** Per unit: job | stance, see TASK_* in the protocol. */
   readonly task = new Uint8Array(MAX_UNITS);
+  /** Per unit: the sub-commander it answers to, or -1. */
+  readonly cmdr = new Int8Array(MAX_UNITS).fill(-1);
   private readonly vehicles: (VehicleDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
@@ -376,6 +378,7 @@ export class UnitView {
     this.kind.set(s.kind);
     this.load.set(s.load);
     this.task.set(s.task);
+    this.cmdr.set(s.cmdr);
     this.hp.set(s.hp);
     this.aim.set(s.aim);
     this.count = n;
@@ -628,6 +631,11 @@ export class UnitView {
 
   kindOf(id: number): number {
     return this.kind[id];
+  }
+
+  /** It has a target it is shooting at. */
+  isFiring(id: number): boolean {
+    return this.aim[id] !== NO_AIM;
   }
 
   /** A living unit of the player's army. */

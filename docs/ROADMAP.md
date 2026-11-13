@@ -271,7 +271,7 @@ is designed around the urban rules instead of being redesigned for them.
 That order changed the same evening: see "Strategic command" below, which now comes
 before co-op and before U2.
 
-## Strategic command (in progress; a deliberate change of order)
+## Strategic command (built; a deliberate change of order)
 
 Fabio, 2026-11-13 evening: wants to command the war instead of the firefight. Larger
 battles, less clicking through barracks, no forgotten units, sub-commanders who run a
@@ -292,9 +292,11 @@ with the computer in the second seat, so co-op gets cheaper, not later for nothi
    (units far from a depot, a held town or a linked truck fire at half rate), rations
    for two minutes, mending in supply, upkeep for a standing army. Control groups are
    visible as chips (decision 080)
-4. Sub-commanders: a group, a mission (hold, defend, attack, patrol), and a board that
-   shows every commander and every unit nobody commands. Built on the skirmish AI, inside
-   the deterministic rules, so a second player can take a commander's seat later
+4. Sub-commanders (built, decision 082): up to eight commanders, each with troops and a
+   mission (attack, hold, defend, patrol, screen), run by a staff made of the skirmish
+   AI's own parts inside the deterministic rules, so a second player can take a
+   commander's seat later. A mission board shows every commander, its strength and
+   state, and the idle units nobody commands; losses can be replaced by themselves
 
 Then, as before: U2 storming and the city map (generated around the flags, where troops
 gather), the soldiers' second pass, co-op roles, U4 to U6, the factions.

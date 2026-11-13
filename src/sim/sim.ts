@@ -22,6 +22,7 @@ import {
   type SpawnCommand,
 } from './commands';
 import { applyEconomyCommand, updateEconomy } from './economy';
+import { applyCommanderCommand } from './commanders';
 import {
   HIT_CHARGE,
   HIT_DIRECT,
@@ -371,6 +372,7 @@ function applyCommand(w: World, cmd: Command): void {
     return;
   }
   if (applyEconomyCommand(w, cmd) || applyWorkCommand(w, cmd)) return;
+  if (applyCommanderCommand(w, cmd)) return;
   // Any other order takes a truck off its job.
   if ('units' in cmd) {
     for (let k = 0; k < cmd.units.length; k++) {
@@ -1024,6 +1026,7 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.jobTimer[id] = 0;
   w.stance[id] = 0;
   w.ration[id] = RATION_MAX;
+  w.cmdr[id] = -1;
 }
 
 /**

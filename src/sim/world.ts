@@ -62,6 +62,16 @@ export const DEST_TOWN = 1;
 export const DEST_COMMANDER = 64;
 /** Sub-commanders an army can have. */
 export const MAX_COMMANDERS = 8;
+/** A commander's mission (see src/sim/commanders.ts and, for how it is carried out, staff.ts). */
+export const M_NONE = 0;
+export const M_ATTACK = 1;
+export const M_HOLD = 2;
+export const M_DEFEND = 3;
+export const M_PATROL = 4;
+export const M_SCREEN = 5;
+export const MISSION_COUNT = 6;
+/** Commander flag: losses are ordered again and sent to it by themselves. */
+export const CF_AUTO = 1;
 /** The most of one kind that can be on bulk order, or kept in the field, at once. */
 export const ORDER_MAX = 999;
 
@@ -269,6 +279,22 @@ export interface World {
   orderTurn: Uint8Array;
   orderWait: Uint8Array;
   /**
+   * Sub-commanders. Per unit: the commander it answers to (-1 = the player). Per team and
+   * commander (index team * MAX_COMMANDERS + slot): the mission, where it is to be carried
+   * out, where the troops stood when it was given (the other end of a patrol), CF_* flags
+   * and a counter that goes up with every new mission. `cEst` is its establishment per
+   * kind (that index * KIND_SLOTS + kind): what it is to be kept at.
+   */
+  cmdr: Int8Array;
+  cMission: Uint8Array;
+  cX: Int32Array;
+  cY: Int32Array;
+  cAX: Int32Array;
+  cAY: Int32Array;
+  cFlags: Uint8Array;
+  cSeq: Uint16Array;
+  cEst: Int16Array;
+  /**
    * Logistics (see src/sim/logistics.ts). Per unit: seconds of rations left. Per team and
    * 16-unit square: 1 where the army is in supply; worked out from the rest of the world
    * once a second (`supplyTick` is when, -1 = never), so not part of the hash.
@@ -402,6 +428,15 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     dest: new Uint8Array(MAX_TEAMS * KIND_SLOTS),
     orderTurn: new Uint8Array(MAX_TEAMS),
     orderWait: new Uint8Array(MAX_TEAMS),
+    cmdr: new Int8Array(MAX_UNITS).fill(-1),
+    cMission: new Uint8Array(MAX_TEAMS * MAX_COMMANDERS),
+    cX: new Int32Array(MAX_TEAMS * MAX_COMMANDERS),
+    cY: new Int32Array(MAX_TEAMS * MAX_COMMANDERS),
+    cAX: new Int32Array(MAX_TEAMS * MAX_COMMANDERS),
+    cAY: new Int32Array(MAX_TEAMS * MAX_COMMANDERS),
+    cFlags: new Uint8Array(MAX_TEAMS * MAX_COMMANDERS),
+    cSeq: new Uint16Array(MAX_TEAMS * MAX_COMMANDERS),
+    cEst: new Int16Array(MAX_TEAMS * MAX_COMMANDERS * KIND_SLOTS),
     ration: new Uint8Array(MAX_UNITS),
     supplyMap: new Uint8Array(MAX_TEAMS * (MAP_CELLS >> 2) * (MAP_CELLS >> 2)),
     supplyTick: -1,
@@ -492,6 +527,14 @@ export function hashWorld(w: World): number {
     mix((w.orders[k] & 0xffff) | (w.keep[k] << 16));
     mix(w.dest[k]);
   }
+  for (let c = 0; c < MAX_TEAMS * MAX_COMMANDERS; c++) {
+    mix(w.cMission[c] | (w.cFlags[c] << 8) | (w.cSeq[c] << 16));
+    mix(w.cX[c]);
+    mix(w.cY[c]);
+    mix(w.cAX[c]);
+    mix(w.cAY[c]);
+  }
+  for (let k = 0; k < MAX_TEAMS * MAX_COMMANDERS * KIND_SLOTS; k++) mix(w.cEst[k]);
   mix(w.shellCount);
   for (let k = 0; k < w.shellCount; k++) {
     mix(w.shX[k]);
@@ -514,7 +557,7 @@ export function hashWorld(w: World): number {
   for (let i = 0; i < n; i++) {
     mix(w.jobCell[i] ^ (w.ration[i] << 24));
     mix(w.inside[i] ^ (w.orderStruct[i] << 12) ^ (w.los[i] << 28));
-    mix(w.reveal[i]);
+    mix(w.reveal[i] ^ (w.cmdr[i] << 24));
     mix(w.posX[i]);
     mix(w.posY[i]);
     mix(w.velX[i]);
