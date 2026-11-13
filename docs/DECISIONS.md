@@ -1434,7 +1434,8 @@ stored as the layers of one array texture. A number per vertex picks the layer, 
 city is still one material. Walls and roof slopes are mapped along their length and up
 their rise: brick courses lie level and tiles run in rows under the ridge whichever way a
 roof faces. If the bake fails or takes more than four seconds every layer stays the plain
-plaster made on the processor; `?bake=0` forces that. The land's own textures (grass,
+plaster made on the processor; `?bake=0` forces that, and `?city=plain` goes further and
+draws every wall with the old single texture, without the layers at all. The land's own textures (grass,
 asphalt, rock) still come from `textures.ts`; moving them is not worth a second system.
 
 **Signs (R6, `src/client/signs.ts`).** One sheet of 64 cells painted with canvas text at

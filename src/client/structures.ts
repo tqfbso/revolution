@@ -32,7 +32,7 @@ import type { Fog } from './fog';
 import type { Look } from './look';
 import type { Clutter } from './clutter';
 import { SIGN_HOARDINGS, SIGN_SHOPS, SIGN_STREETS, makeSigns, signUV } from './signs';
-import { cityFace } from './surface';
+import { cityFace, masonry } from './surface';
 import {
   SURF_BRICK,
   SURF_FELT,
@@ -1401,7 +1401,12 @@ export class StructureView {
       signs ? mix(plain, texture(signs, uv()).xyz.mul(tint), sign) : plain;
     if (look.rich) {
       // Each wall and roof in its own material; glass stays clean enough to show the sky.
-      const wall = cityFace(look, attribute('surf', 'float'));
+      // `?city=plain` is the way out if a graphics card dislikes the material layers: every
+      // wall goes back to the one plaster texture.
+      const plain =
+        typeof location !== 'undefined' &&
+        new URLSearchParams(location.search).get('city') === 'plain';
+      const wall = plain ? masonry(look, 7) : cityFace(look, attribute('surf', 'float'));
       const gloss = attribute('gloss', 'float');
       this.material.colorNode = painted(tint.mul(mix(wall.tone, float(1), gloss))).mul(fog.shade());
       this.material.roughnessNode = mix(wall.roughness, float(0.3), gloss);
