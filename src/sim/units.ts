@@ -109,6 +109,8 @@ const BASE_KINDS: readonly UnitKind[] = [
   {
     // Rifles against soft targets and a few shoulder-fired rockets: enough to finish a
     // carrier, not to stop a tank. In the open it loses to both; its place is in cover.
+    // Against a building it has grenades and those rockets: a thirtieth of a tank gun, so a
+    // squad alone gets nowhere and a company brings an undefended base down in the end.
     name: 'Infantry squad',
     cls: CLASS_FOOT,
     hp: 100,
@@ -116,7 +118,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     range: fx(15),
     reload: 24,
     damage: [3, 9, 9, 5, 10, 9, 1, 1, 10, 10, 10, 9],
-    siege: 0,
+    siege: 2,
     garrison: true,
     wreckTicks: 200,
     armour: null,

@@ -17,7 +17,9 @@ export const ALERT_ARMY = 2;
 export const ALERT_CONVOY = 3;
 /** A recon drone (or, later, a camera) has found enemy troops nobody was watching. */
 export const ALERT_CONTACT = 4;
-export const ALERT_KINDS = 5;
+/** Something to know that is not an attack: a commander's report, troops out of supply. */
+export const ALERT_NOTE = 5;
+export const ALERT_KINDS = 6;
 
 export interface Alert {
   kind: number;
@@ -31,9 +33,9 @@ export interface Alert {
 /** The side of the squares the map is cut into: one alert of a kind per square at a time. */
 export const ALERT_AREA = 160;
 /** Seconds before the same kind of alert is raised again for the same square. */
-const AGAIN = [50, 50, 40, 45, 60];
+const AGAIN = [50, 50, 40, 45, 60, 6];
 /** Seconds between two alerts of the same kind anywhere: a wide front is not ten banners. */
-const GAP = [8, 8, 10, 12, 6];
+const GAP = [8, 8, 10, 12, 6, 0];
 const KEEP = 12;
 
 /**
@@ -99,13 +101,14 @@ export function contactText(counts: readonly number[]): string {
   return `Contact: ${what}, ${counts[top]} ${name}${counts[top] === 1 ? '' : 's'}`;
 }
 
-const CSS = ['#ff5a4a', '#ff5a4a', '#ff8a4a', '#ffb347', '#ffd24a'];
+const CSS = ['#ff5a4a', '#ff5a4a', '#ff8a4a', '#ffb347', '#ffd24a', '#7fc8ff'];
 const RGB: [number, number, number][] = [
   [255, 70, 60],
   [255, 70, 60],
   [255, 120, 60],
   [255, 170, 60],
   [255, 215, 70],
+  [127, 200, 255],
 ];
 const SPOKEN = [
   'Base under attack',
@@ -113,6 +116,7 @@ const SPOKEN = [
   'Forces under attack',
   'Supply trucks under attack',
   'Contact',
+  'Report',
 ];
 /** Seconds a banner stays, and an edge arrow keeps pointing. */
 const BANNER_SECONDS = 9;
@@ -297,7 +301,7 @@ export class Alerts {
     if (alert === null) return;
     this.cursor = 0;
     this.minimap.ping(alert.x, alert.z, RGB[alert.kind]);
-    this.sound.alert(alert.kind === ALERT_CONTACT ? 1 : 0);
+    this.sound.alert(alert.kind === ALERT_CONTACT || alert.kind === ALERT_NOTE ? 1 : 0);
     this.speak(alert);
     const row = document.createElement('div');
     row.className = 'alert';
@@ -333,7 +337,7 @@ export class Alerts {
     this.spokeAt = alert.at;
     try {
       const line = new SpeechSynthesisUtterance(
-        alert.kind === ALERT_TOWN ? alert.text : SPOKEN[alert.kind],
+        alert.kind === ALERT_TOWN || alert.kind === ALERT_NOTE ? alert.text : SPOKEN[alert.kind],
       );
       line.rate = 1.1;
       line.pitch = 0.85;
