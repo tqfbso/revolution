@@ -133,6 +133,7 @@ export const EV_WALL = 18; // a = structure, b = the face whose wall was breache
 export const EV_CAMERA = 19; // a = camera slot, b = team: a surveillance camera was placed
 export const EV_STORM = 21; // a = structure, b = the army storming it: a second of the fight inside
 export const EV_STORMED = 22; // a = structure, b = the army that took it from its garrison
+export const EV_STRIKE = 23; // a = target, b = drone: strike drones are lining up on it
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
@@ -223,6 +224,11 @@ export interface World {
    * of every tick before anything reads it, so it is not part of the hash.
    */
   jammed: Uint8Array;
+  /**
+   * Per unit: the tick from which a strike drone may next hit it (see STRIKE_RING). Open
+   * for STRIKE_WINDOW_TICKS from then; before and after, nothing dives on it.
+   */
+  strikeAt: Int32Array;
   /**
    * Surveillance cameras, one per slot: owner (-1 = free slot), position, and the tick
    * until which the enemy knows where it is. `camBlind` is recomputed every tick.
@@ -403,6 +409,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     smokeCount: 0,
     smokeCells: new Int32Array(MAX_SMOKE),
     jammed: new Uint8Array(MAX_UNITS),
+    strikeAt: new Int32Array(MAX_UNITS),
     camTeam: new Int8Array(MAX_CAMERAS).fill(-1),
     camX: new Int32Array(MAX_CAMERAS),
     camY: new Int32Array(MAX_CAMERAS),
@@ -587,6 +594,7 @@ export function hashWorld(w: World): number {
     mix(w.state[i] | (w.kind[i] << 8) | ((w.hp[i] & 0xffff) << 16));
     mix(w.cooldown[i]);
     mix(w.attack[i]);
+    mix(w.strikeAt[i]);
     mix(w.orderSpeed[i] ^ (w.path[i] << 20));
     mix(w.goal[i]);
     mix(w.job[i] | (w.stance[i] << 4) | (w.cargoKind[i] << 8) | (w.cargo[i] << 16));

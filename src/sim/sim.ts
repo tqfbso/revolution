@@ -127,6 +127,11 @@ import {
   SHELL_TICKS_SHIFT,
   SMOKE_CELLS,
   SMOKE_TICKS,
+  STRIKE_ARM_TICKS,
+  STRIKE_DIVE_TICKS,
+  STRIKE_GAP_TICKS,
+  STRIKE_RING,
+  STRIKE_WINDOW_TICKS,
   SPOT_TICKS,
   TOWN_INCOME,
 } from './units';
@@ -149,6 +154,7 @@ import {
   EV_SHOT,
   EV_SIEGE,
   EV_SMOKE,
+  EV_STRIKE,
   EV_UNLOAD,
   FLAG_AMOVE,
   FLAG_BOARD,
@@ -261,6 +267,9 @@ const PRIORITY = KINDS.flatMap((a) =>
   }),
 );
 const DETECT_RANGE_SQ = DETECT_RANGE * DETECT_RANGE;
+const KAMIKAZE = KINDS.map((k) => k.kamikaze);
+/** A drone this close to its target is at the ring: it lines up, or waits its turn there. */
+const STRIKE_HOLD_SQ = (STRIKE_RING + fx(1)) * (STRIKE_RING + fx(1));
 /** Jammers alive this tick. */
 const jammers = new Int32Array(MAX_UNITS);
 let jammerCount = 0;
@@ -331,6 +340,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateSpotters(w);
   updateCameras(w);
   acquireTargets(w);
+  armStrikes(w);
   steer(w);
   separate(w);
   fire(w);
@@ -1118,6 +1128,7 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   // Random first reload so a fresh army does not fire in one synchronised volley.
   w.cooldown[id] = nextInt(w.rng, KINDS[kindId].reload);
   w.attack[id] = NO_TARGET;
+  w.strikeAt[id] = w.tick - STRIKE_WINDOW_TICKS;
   w.orderSpeed[id] = w.speed[id];
   w.path[id] = -1;
   w.goal[id] = 0;
@@ -1471,6 +1482,26 @@ function acquireTargets(w: World): void {
       w.attack[i] = NO_TARGET;
       w.los[i] = blocked ? SIGHT_NONE : 0;
     }
+  }
+}
+
+/**
+ * Strike drones take turns (see STRIKE_RING). A target nobody has a turn on starts being
+ * lined up on when the first drone reaches the ring round it: its owner is told, and the
+ * first hit is STRIKE_ARM_TICKS away.
+ */
+function armStrikes(w: World): void {
+  const n = w.count;
+  const tick = w.tick;
+  for (let i = 0; i < n; i++) {
+    if (!KAMIKAZE[w.kind[i]] || w.state[i] !== STATE_ALIVE) continue;
+    const t = w.attack[i];
+    if (t === NO_TARGET || w.strikeAt[t] + STRIKE_WINDOW_TICKS > tick) continue;
+    const dx = w.posX[t] - w.posX[i];
+    const dy = w.posY[t] - w.posY[i];
+    if (dx * dx + dy * dy > STRIKE_HOLD_SQ) continue;
+    w.strikeAt[t] = tick + STRIKE_ARM_TICKS;
+    w.events.push(EV_STRIKE, t, i);
   }
 }
 
@@ -1992,6 +2023,8 @@ function fire(w: World): void {
     const range = rangeTo(w, i, t);
     const d2 = dx * dx + dy * dy;
     if (d2 > range * range) continue;
+    // A strike drone hits only in its turn.
+    if (kind.kamikaze && (w.tick - w.strikeAt[t]) >>> 0 >= STRIKE_WINDOW_TICKS) continue;
     let dmg = kind.damage[w.kind[t]];
     if (
       w.kind[i] === KIND_INFANTRY &&
@@ -2030,9 +2063,10 @@ function fire(w: World): void {
     if (w.inside[i] >= 0) w.reveal[i] = w.tick + REVEAL_TICKS;
     w.events.push(EV_SHOT, i, t);
     if (kind.kamikaze) {
-      // The drone is the warhead.
+      // The drone is the warhead, and the next one waits.
       damage[i] += 30000;
       killer[i] = i;
+      w.strikeAt[t] = w.tick + STRIKE_GAP_TICKS;
     }
   }
 }
@@ -2308,7 +2342,25 @@ function steer(w: World): void {
       const dy = w.posY[t] - y;
       const d2 = dx * dx + dy * dy;
       const range = rangeTo(w, i, t);
-      if ((d2 <= range * range && w.los[i] !== 0) || (flags & FLAG_HOLD) !== 0) {
+      if (
+        KAMIKAZE[w.kind[i]] &&
+        d2 <= STRIKE_HOLD_SQ &&
+        w.strikeAt[t] - tick > STRIKE_DIVE_TICKS &&
+        (flags & FLAG_HOLD) === 0
+      ) {
+        // Not its turn yet: circle the target at the ring, half of them each way round.
+        const dist = isqrt(d2);
+        if (dist === 0) {
+          vx = s;
+        } else {
+          const off = dist - STRIKE_RING;
+          const radial = off > s ? s : off < -s ? -s : off;
+          const round = (i & 1) === 0 ? s >> 1 : -(s >> 1);
+          vx = Math.trunc((dx * radial - dy * round) / dist);
+          vy = Math.trunc((dy * radial + dx * round) / dist);
+        }
+        busy = true;
+      } else if ((d2 <= range * range && w.los[i] !== 0) || (flags & FLAG_HOLD) !== 0) {
         busy = true;
       } else if (clearLine(map, cls, x, y, w.posX[t], w.posY[t])) {
         const dist = isqrt(d2);

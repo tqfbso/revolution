@@ -2,7 +2,15 @@
 // announced. A banner with a tone and a spoken line, a ping on the minimap, an arrow at
 // the screen edge pointing at it, and Backspace to jump there.
 import { KINDS, KIND_DRONE, KIND_TRUCK } from '../sim/units';
-import { EV_DEATH, EV_SHOT, EV_SIEGE, EV_STORM, EV_STORMED, MAX_UNITS } from '../sim/world';
+import {
+  EV_DEATH,
+  EV_SHOT,
+  EV_SIEGE,
+  EV_STORM,
+  EV_STORMED,
+  EV_STRIKE,
+  MAX_UNITS,
+} from '../sim/world';
 import { BASE_STRIDE, INFO_CARRIED, INFO_INSIDE, type Snapshot } from '../worker/protocol';
 import type { GameMap } from '../sim/map';
 import type { Fog } from './fog';
@@ -19,7 +27,9 @@ export const ALERT_CONVOY = 3;
 export const ALERT_CONTACT = 4;
 /** Something to know that is not an attack: a commander's report, troops out of supply. */
 export const ALERT_NOTE = 5;
-export const ALERT_KINDS = 6;
+/** Strike drones are lining up on a vehicle: a few seconds to do something about it. */
+export const ALERT_DRONES = 6;
+export const ALERT_KINDS = 7;
 
 export interface Alert {
   kind: number;
@@ -33,9 +43,9 @@ export interface Alert {
 /** The side of the squares the map is cut into: one alert of a kind per square at a time. */
 export const ALERT_AREA = 160;
 /** Seconds before the same kind of alert is raised again for the same square. */
-const AGAIN = [50, 50, 40, 45, 60, 6];
+const AGAIN = [50, 50, 40, 45, 60, 6, 20];
 /** Seconds between two alerts of the same kind anywhere: a wide front is not ten banners. */
-const GAP = [8, 8, 10, 12, 6, 0];
+const GAP = [8, 8, 10, 12, 6, 0, 6];
 const KEEP = 12;
 
 /**
@@ -101,7 +111,7 @@ export function contactText(counts: readonly number[]): string {
   return `Contact: ${what}, ${counts[top]} ${name}${counts[top] === 1 ? '' : 's'}`;
 }
 
-const CSS = ['#ff5a4a', '#ff5a4a', '#ff8a4a', '#ffb347', '#ffd24a', '#7fc8ff'];
+const CSS = ['#ff5a4a', '#ff5a4a', '#ff8a4a', '#ffb347', '#ffd24a', '#7fc8ff', '#ff3b6b'];
 const RGB: [number, number, number][] = [
   [255, 70, 60],
   [255, 70, 60],
@@ -109,6 +119,7 @@ const RGB: [number, number, number][] = [
   [255, 170, 60],
   [255, 215, 70],
   [127, 200, 255],
+  [255, 59, 107],
 ];
 const SPOKEN = [
   'Base under attack',
@@ -117,6 +128,7 @@ const SPOKEN = [
   'Supply trucks under attack',
   'Contact',
   'Report',
+  'Drones inbound',
 ];
 /** Seconds a banner stays, and an edge arrow keeps pointing. */
 const BANNER_SECONDS = 9;
@@ -183,6 +195,13 @@ export class Alerts {
       const b = ev[e + 2];
       if (type === EV_SHOT) {
         if (u.teamOf(b) === me && u.teamOf(a) !== me) this.struck(b, now);
+      } else if (type === EV_STRIKE) {
+        // Said even when it is on screen: the seconds before the first hit are the point.
+        if (u.teamOf(a) !== me || u.teamOf(b) === me) continue;
+        const x = u.renderPos[3 * a];
+        const z = u.renderPos[3 * a + 2];
+        const what = KINDS[u.kindOf(a)].name.toLowerCase();
+        this.show(this.book.raise(ALERT_DRONES, x, z, `Strike drones over our ${what}`, now));
       } else if (type === EV_DEATH) {
         if (u.teamOf(a) === me && b >= 0 && b < s.count && u.teamOf(b) !== me) this.struck(a, now);
       } else if (type === EV_STORM) {
