@@ -8,6 +8,7 @@ import {
   ST_ATTACK,
   ST_DEFEND,
   ST_FALLBACK,
+  ST_GATHER,
   ST_HOLD,
   ST_IDLE,
   ST_MARCH,
@@ -35,6 +36,7 @@ import {
   TASK_MOVING,
   type Snapshot,
 } from '../worker/protocol';
+import { COMMANDER_RGB } from './icons';
 import type { Posting } from './production';
 import type { UnitView } from './units';
 
@@ -95,6 +97,7 @@ const STATUS: Record<number, string> = {
   [ST_SCREEN]: 'Screening',
   [ST_FALLBACK]: 'Falling back',
   [ST_REGROUP]: 'Regrouping',
+  [ST_GATHER]: 'Gathering for the attack',
 };
 
 export interface CommanderInfo {
@@ -350,7 +353,7 @@ export class MissionBoard {
       const openRow = this.focus === c.slot;
       html +=
         `<div class="cmd ${tone}${openRow ? ' open' : ''}">` +
-        `<div class="row" data-act="open" data-s="${c.slot}" title="Click: select its troops and show its orders"><b>${c.name}</b><span class="what">${what}</span><span class="n">${c.count}</span></div>` +
+        `<div class="row" data-act="open" data-s="${c.slot}" title="Click: select its troops and show its orders"><i style="display:inline-block;width:9px;height:11px;margin-right:5px;border:1px solid #0b0d0f;background:rgb(${COMMANDER_RGB[c.slot].map((v) => Math.round(v * 255)).join(',')})" title="The colour of the pennant its troops carry on the battlefield"></i><b>${c.name}</b><span class="what">${what}</span><span class="n">${c.count}</span></div>` +
         `<div class="bar"><i style="width:${pct}%"></i></div>` +
         `<div class="state">${notes.join(' · ')}</div>`;
       // Troops selected that are not this commander's: one click puts them under it.

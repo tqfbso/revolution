@@ -78,6 +78,7 @@ export const ST_PATROL = 6;
 export const ST_SCREEN = 7;
 export const ST_FALLBACK = 8;
 export const ST_REGROUP = 9;
+export const ST_GATHER = 10;
 
 /** Ticks between two thinks: once a second, like the hard computer player. */
 const PERIOD = 20;
@@ -88,6 +89,12 @@ const ODDS = 11;
 const RALLIED = 75;
 /** It asks for reinforcements below this share. */
 const WEAK = 60;
+/**
+ * An attack waits short of its objective until this share of its line has closed up (per
+ * cent), but no longer than GATHER_WAIT once half of it is there, and not at all under fire.
+ */
+const GATHERED = 85;
+const GATHER_WAIT = 60 * TICK_RATE;
 
 /** One commander, as its staff sees it. */
 export interface Post {
@@ -113,6 +120,8 @@ export interface Post {
   fighting: boolean;
   /** It has fallen back and is waiting to be fit to go again. */
   regroup: boolean;
+  /** The tick at which half of an attack had closed up short of the objective, or -1. */
+  gather: number;
   /** Houses its infantry holds at the objective, the nearest first. */
   houses: number[];
 }
@@ -146,6 +155,7 @@ export function createStaff(team: number, seed = 1): Staff {
       need: false,
       fighting: false,
       regroup: false,
+      gather: -1,
       houses: [],
     });
   }
@@ -254,7 +264,7 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
     p.status = mission === M_PATROL ? ST_PATROL : ST_MARCH;
     // Whoever is told to hold a place goes there, whatever is in the way.
     if (mission !== M_HOLD && beaten(ai, w, f, power, cx, cy)) breakOff(ai, w, out, p, cx, cy);
-    else if (march(ai, w, out, p, cx, cy, mission === M_PATROL)) {
+    else if (march(ai, w, out, p, cx, cy, mission === M_PATROL, mission === M_ATTACK)) {
       f.state = F_ASSAULT;
       f.quiet = 0;
     }
@@ -294,6 +304,7 @@ function begin(
   const ty = w.cY[k];
   p.seq = w.cSeq[k];
   p.regroup = false;
+  p.gather = -1;
   f.launch = power;
   f.since = w.tick;
   f.quiet = 0;
@@ -517,7 +528,9 @@ function regrouping(
 
 /**
  * One think of a march. The body moves on when half of its line has closed up on the way
- * point. True when it has arrived at the last one (a patrol, `loop`, never does).
+ * point. True when it has arrived at the last one (a patrol, `loop`, never does). An
+ * attack (`gather`) waits at the last one, short of the objective, for its stragglers and
+ * for new arrivals that are nearly there, so that it goes in as one body.
  */
 function march(
   ai: Ai,
@@ -527,11 +540,13 @@ function march(
   cx: number,
   cy: number,
   loop: boolean,
+  gather = false,
 ): boolean {
   const f = p.f;
   const units = p.units;
   const tx = f.wps[2 * f.wp];
   const ty = f.wps[2 * f.wp + 1];
+  const last = 2 * (f.wp + 1) >= f.wps.length;
   let line = 0;
   let there = 0;
   for (let pass = 0; pass < 2 && line === 0; pass++) {
@@ -543,9 +558,36 @@ function march(
   }
   const waited = w.tick - f.since;
   const close = dist(cx, cy, tx, ty) < fx(55);
-  if (there * 2 >= line || (close && waited > 75 * TICK_RATE) || waited > 5 * MINUTE) {
+  const half = there * 2 >= line;
+  if (gather && last && !loop && waited <= 5 * MINUTE) {
+    // A large body does not fit in the small circle that counts as "there".
+    const room = fx(45) + Math.trunc(Math.sqrt(units.length)) * fx(1);
+    let all = 0;
+    let up = 0;
+    for (const i of units) {
+      if (!LINE[w.kind[i]]) continue;
+      all++;
+      if (dist(w.posX[i], w.posY[i], tx, ty) < room) up++;
+    }
+    for (const i of p.joining) {
+      if (LINE[w.kind[i]] && dist(w.posX[i], w.posY[i], tx, ty) < fx(220)) all++;
+    }
+    if (half && p.gather < 0) p.gather = w.tick;
+    const held = p.gather >= 0 ? w.tick - p.gather : 0;
+    if (all > 0 && up * 100 < all * GATHERED && !(half && p.fighting) && held <= GATHER_WAIT) {
+      if (half) p.status = ST_GATHER;
+      advance(ai, w, out, p, false);
+      // Those who came by another way and stopped short are called in.
+      const out2 = p.joining.filter(
+        (i) => (w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET,
+      );
+      order(out, CMD_ATTACK_MOVE, out2, tx, ty);
+      return false;
+    }
+    return true;
+  }
+  if (half || (close && waited > 75 * TICK_RATE) || waited > 5 * MINUTE) {
     f.since = w.tick;
-    const last = 2 * (f.wp + 1) >= f.wps.length;
     if (last && !loop) return true;
     f.wp = last ? 0 : f.wp + 1;
     advance(ai, w, out, p, true);

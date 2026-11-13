@@ -20,7 +20,20 @@ import {
 } from '../sim/units';
 import { Batch } from './batch';
 
-const GRID = 4; // symbols per row of the sheet
+const GRID = 5; // symbols per row of the sheet
+/** The first of the eight commander pennants on the sheet (A to H), after the unit types. */
+export const ICON_PENNANT = KIND_COUNT;
+/** A colour per sub-commander, bright enough to carry over camouflage and over snowless mud. */
+export const COMMANDER_RGB: readonly (readonly [number, number, number])[] = [
+  [1, 0.7, 0.05],
+  [0.1, 0.78, 1],
+  [1, 0.25, 0.75],
+  [0.4, 1, 0.15],
+  [1, 0.4, 0.05],
+  [0.55, 0.4, 1],
+  [0.95, 0.95, 0.95],
+  [0.05, 1, 0.65],
+];
 const TILE = 64;
 /** Camera distance at which the symbols start to show, and at which they are solid. */
 export const ICON_FROM = 250;
@@ -104,6 +117,31 @@ function sheet(): THREE.CanvasTexture {
     c.lineCap = 'round';
     c.lineJoin = 'round';
     draw[k](c);
+    c.restore();
+  }
+  // Commander pennants: a small flag with the commander's letter, tinted per commander.
+  for (let k = 0; k < 8; k++) {
+    const n = ICON_PENNANT + k;
+    c.save();
+    c.translate((n % GRID) * TILE, Math.floor(n / GRID) * TILE);
+    c.fillStyle = '#fff';
+    c.strokeStyle = '#0b0d0f';
+    c.lineWidth = 4;
+    c.lineJoin = 'round';
+    c.beginPath();
+    c.moveTo(10, 8);
+    c.lineTo(54, 8);
+    c.lineTo(54, 40);
+    c.lineTo(32, 58);
+    c.lineTo(10, 40);
+    c.closePath();
+    c.fill();
+    c.stroke();
+    c.fillStyle = '#0b0d0f';
+    c.font = 'bold 30px sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(String.fromCharCode(65 + k), 32, 27);
     c.restore();
   }
   const t = new THREE.CanvasTexture(canvas);

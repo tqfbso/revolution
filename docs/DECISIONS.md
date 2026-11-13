@@ -1187,3 +1187,16 @@ are their own alert kind, blue and spoken as written; they used the army-attack 
 which said "forces under attack". A box now selects commanded troops like any others:
 leaving them out read as a selection bug. Every commander row shows "+ Add N selected"
 when troops that are not its own are selected. Golden hash 665890359.
+
+## 084. Pennants over commanded troops, and an attack that waits for its tail (2026-11-13)
+
+Two gaps decision 082 listed. Troops under a sub-commander carry a small pennant with
+its letter in its colour (eight colours, the same chip on the mission board), drawn by
+the map-symbol batch at every zoom, so the player sees on the battlefield which troops
+are not his to forget about. And an attack now waits at its last way point, 60 m short
+of the objective, until 85 per cent of its line has closed up, new arrivals within
+220 m counted in; it stops waiting after a minute from the moment half were there, and
+at once if it comes under fire. The board says "Gathering for the attack". Before, it
+went in when half had arrived, so a mixed body attacked with its vehicles and the
+infantry walked into the aftermath. The staff is not hashed state: the golden hash is
+unchanged.
