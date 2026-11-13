@@ -7,6 +7,9 @@ import {
   CMD_CANCEL,
   CMD_FOUND,
   CMD_GATHER,
+  CMD_DEST,
+  CMD_KEEP,
+  CMD_ORDER,
   CMD_RALLY,
   CMD_REPEAT,
   CMD_RESEARCH,
@@ -46,6 +49,12 @@ import {
   POINTS,
 } from './units';
 import {
+  DEST_COMMANDER,
+  MAX_COMMANDERS,
+  DEST_RALLY,
+  DEST_TOWN,
+  KIND_SLOTS,
+  ORDER_MAX,
   EV_BUILT,
   EV_TIER,
   EV_TRAINED,
@@ -383,6 +392,28 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       for (const id of validUnits(w, cmd.units)) w.stance[id] = stance;
       return true;
     }
+    case CMD_ORDER:
+    case CMD_KEEP:
+    case CMD_DEST: {
+      const team = cmd.team;
+      const kind = cmd.kind;
+      if (!Number.isInteger(team) || team < 0 || team >= MAX_TEAMS) return true;
+      if (!Number.isInteger(kind) || kind < 0 || kind >= KIND_COUNT) return true;
+      const k = team * KIND_SLOTS + kind;
+      if (cmd.type === CMD_ORDER)
+        w.orders[k] = clampInt(w.orders[k] + (cmd.count | 0), 0, ORDER_MAX);
+      else if (cmd.type === CMD_KEEP) {
+        w.keep[k] = clampInt(cmd.count | 0, 0, ORDER_MAX);
+        // Ending a standing order also drops what it had asked for and not yet started.
+        if (w.keep[k] === 0) w.orders[k] = 0;
+      } else {
+        const d = cmd.dest | 0;
+        const town = d >= DEST_TOWN && d < DEST_TOWN + w.map.townCount;
+        const commander = d >= DEST_COMMANDER && d < DEST_COMMANDER + MAX_COMMANDERS;
+        w.dest[k] = town || commander ? d : DEST_RALLY;
+      }
+      return true;
+    }
     case CMD_FOUND: {
       const type = clampInt(cmd.building | 0, 0, B_COUNT - 1);
       const team = clampInt(cmd.team | 0, 0, MAX_TEAMS - 1);
@@ -555,8 +586,96 @@ function repeatTrain(w: World, s: number): void {
   w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = w.sLast[s];
 }
 
+/** Factories take orders from the centre only while their own queue is this short. */
+const DISPATCH_QUEUE = 2;
+/** Bulk orders handed out per team each time (twice a second). */
+const DISPATCH_BATCH = 4;
+/** Rounds a kind the army cannot pay for holds the others up before it lets them pass. */
+const DISPATCH_PATIENCE = 40;
+
+/** The finished factory of `team` and `type` with the shortest queue under the limit, or -1. */
+function freeFactory(w: World, team: number, type: number): number {
+  let best = -1;
+  let bestLen = DISPATCH_QUEUE;
+  for (let s = 0; s < w.map.structCount; s++) {
+    if (w.sTeam[s] !== team || w.sType[s] !== type || w.sHp[s] <= 0) continue;
+    if (w.sBuild[s] < BUILDINGS[type].ticks || w.sQueueLen[s] >= bestLen) continue;
+    best = s;
+    bestLen = w.sQueueLen[s];
+  }
+  return best;
+}
+
+/**
+ * The war production centre: bulk orders go to whichever factory has room, one unit at a
+ * time and each paid for as it goes on a queue. The kinds on order take turns, so a
+ * hundred cheap squads cannot starve one tank of its money: a kind the army cannot afford
+ * holds the line until it can (or, after a while, lets the others through for a round).
+ */
+function dispatchOrders(w: World): void {
+  for (let team = 0; team < MAX_TEAMS; team++) {
+    const base = team * KIND_SLOTS;
+    for (let n = 0; n < DISPATCH_BATCH; n++) {
+      // The next kind, from whose turn it is, that is on order and has a factory free.
+      let kind = -1;
+      let s = -1;
+      for (let step = 0; step < KIND_COUNT && kind < 0; step++) {
+        const k = (w.orderTurn[team] + step) % KIND_COUNT;
+        if (w.orders[base + k] <= 0 || w.tier[team] < UNIT_PRICE[k].tier) continue;
+        s = freeFactory(w, team, UNIT_PRICE[k].from);
+        if (s >= 0) kind = k;
+      }
+      if (kind < 0) {
+        w.orderWait[team] = 0;
+        break;
+      }
+      const p = UNIT_PRICE[kind];
+      if (!canPay(w, team, p)) {
+        w.orderTurn[team] = kind;
+        if (++w.orderWait[team] >= DISPATCH_PATIENCE) {
+          w.orderWait[team] = 0;
+          w.orderTurn[team] = (kind + 1) % KIND_COUNT;
+        }
+        break;
+      }
+      pay(w, team, p, 1);
+      w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = kind;
+      w.orders[base + kind]--;
+      w.orderTurn[team] = (kind + 1) % KIND_COUNT;
+      w.orderWait[team] = 0;
+    }
+  }
+}
+
+const fielded = new Int32Array(MAX_TEAMS * KIND_SLOTS);
+
+/** Standing orders: whatever a "keep N" is short of, counting what is being built, is ordered. */
+function standingOrders(w: World): void {
+  let any = false;
+  for (let k = 0; k < MAX_TEAMS * KIND_SLOTS && !any; k++) any = w.keep[k] > 0;
+  if (!any) return;
+  fielded.fill(0);
+  for (let i = 0; i < w.count; i++) {
+    if (w.state[i] === STATE_ALIVE) fielded[w.team[i] * KIND_SLOTS + w.kind[i]]++;
+  }
+  for (let s = 0; s < w.map.structCount; s++) {
+    const team = w.sTeam[s];
+    if (team === NO_TEAM || w.sHp[s] <= 0) continue;
+    for (let q = 0; q < w.sQueueLen[s]; q++) {
+      const item = w.sQueue[s * QUEUE_MAX + q];
+      if (item !== TIER_ITEM) fielded[team * KIND_SLOTS + item]++;
+    }
+  }
+  for (let k = 0; k < MAX_TEAMS * KIND_SLOTS; k++) {
+    if (w.keep[k] === 0) continue;
+    const short = w.keep[k] - fielded[k];
+    if (short > w.orders[k]) w.orders[k] = short;
+  }
+}
+
 function updateProduction(w: World): void {
   const map = w.map;
+  if (w.tick % 10 === 0) dispatchOrders(w);
   for (let s = 0; s < map.structCount; s++) {
     if (w.sTeam[s] === NO_TEAM) continue;
     if (w.sQueueLen[s] === 0) {
@@ -600,11 +719,26 @@ function updateProduction(w: World): void {
   }
 }
 
+/** Hand a new unit to commander `c` of its army. False if there is no such commander. */
+function joinCommander(w: World, id: number, c: number): boolean {
+  void w;
+  void id;
+  void c;
+  return false;
+}
+
 /** A new unit goes to its building's rally point; a truck rallied onto a site starts hauling. */
 function rally(w: World, id: number, s: number): void {
   const map = w.map;
-  const rx = w.sRallyX[s];
-  const ry = w.sRallyY[s];
+  let rx = w.sRallyX[s];
+  let ry = w.sRallyY[s];
+  // The production centre may send this kind somewhere else: to a town (to a commander
+  // is the staff's business, see the commanders).
+  const dest = w.dest[w.team[id] * KIND_SLOTS + w.kind[id]];
+  if (dest >= DEST_TOWN && dest < DEST_TOWN + map.townCount) {
+    rx = map.townX[dest - DEST_TOWN];
+    ry = map.townY[dest - DEST_TOWN];
+  } else if (dest >= DEST_COMMANDER && joinCommander(w, id, dest - DEST_COMMANDER)) return;
   if (w.kind[id] === KIND_TRUCK) {
     for (let k = 0; k < map.siteCount; k++) {
       const dx = map.siteX[k] - rx;
@@ -646,4 +780,5 @@ export function updateEconomy(w: World): void {
     w.siteStock[k] = v > WELL_TANK ? WELL_TANK : v;
   }
   countForces(w);
+  standingOrders(w);
 }

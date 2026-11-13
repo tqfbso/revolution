@@ -97,6 +97,13 @@ export interface Snapshot {
   tier: number[];
   pop: number[];
   popCap: number[];
+  /**
+   * The war production centre, per team and kind (index team * KIND_SLOTS + kind): units
+   * on bulk order, the number to keep in the field, where new ones go (DEST_*).
+   */
+  orders: Int16Array;
+  keep: Int16Array;
+  dest: Uint8Array;
   /** Per unit: job | stance | moving (see TASK_*). */
   task: Uint8Array;
   /** Per resource site: what is left. */

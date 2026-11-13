@@ -1038,3 +1038,35 @@ and what is selected with its command card bottom centre at a fixed width betwee
 - Help is a scrolling sheet in the middle instead of a block down the left edge.
 
 Client only; the golden hash did not move.
+
+## 078. Orders to the army, not to a building (2026-11-13)
+
+Fabio: "If I want a game with lots of units its hard to be coming back to the barracks
+... how about a centralised place to manage unit creation? not sure how to execute and
+make sure they come out in the right place".
+
+The war production centre (P) is a sheet listing every unit by the factory type that
+makes it. What it changes is who an order is addressed to: the army, per unit kind.
+
+- `CMD_ORDER` adds to a per-team, per-kind count of units on bulk order (999 at most).
+  Twice a second the economy hands them out: the kind whose turn it is goes on the
+  queue of the finished factory of the right type with the shortest queue, as long as
+  that queue holds fewer than two. So three barracks fill an order three times as fast,
+  and a factory finished later joins in by itself.
+- Paid as each unit goes on a queue, not when ordered. An order is an intention the
+  player can give ahead of the money; taking it back costs nothing.
+- Kinds take turns. A kind the army cannot afford holds the others up until it can be
+  paid (or for 20 seconds, then they pass for a round). Without this two hundred cheap
+  squads on order would eat every supply as it arrived and the one tank would never
+  be built.
+- `CMD_KEEP`: a number to keep in the field. Once a second, what is alive plus what is
+  on a queue is compared with it and the shortfall becomes the order. Ending it drops
+  the unstarted orders too.
+- `CMD_DEST`: where new units of a kind go: the factory's rally point (as before), a
+  town, or a commander (slot reserved for the sub-commanders). This answers "the right
+  place": the place is chosen per kind, once, not per building.
+
+The per-building queue, Repeat and rally point stay, and the AI still uses them. The
+state is in the world (`orders`, `keep`, `dest`, `orderTurn`, `orderWait`) and in the
+hash, so it is lockstep-safe. Golden hash 3142039993 (the new arrays are hashed; the
+battle in the golden scenario plays out as before).

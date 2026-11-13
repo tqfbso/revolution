@@ -277,7 +277,45 @@ export interface CameraCommand {
   units: number[];
 }
 
+export const CMD_ORDER = 28;
+export const CMD_KEEP = 29;
+export const CMD_DEST = 30;
+
+/**
+ * A bulk order to the army's whole production: `count` more of `kind` (negative takes
+ * orders back; they were never paid for). The economy hands them out to whichever factory
+ * of the right type has room, one at a time, and pays for each as it goes on a queue.
+ */
+export interface OrderCommand {
+  type: typeof CMD_ORDER;
+  team: number;
+  kind: number;
+  count: number;
+}
+
+/** Keep `count` of `kind` in the field: losses are ordered again by themselves. 0 ends it. */
+export interface KeepCommand {
+  type: typeof CMD_KEEP;
+  team: number;
+  kind: number;
+  count: number;
+}
+
+/**
+ * Where new units of `kind` go when they roll out: DEST_RALLY (their factory's rally
+ * point), DEST_TOWN + a town, or DEST_COMMANDER + a commander, who takes them in.
+ */
+export interface DestCommand {
+  type: typeof CMD_DEST;
+  team: number;
+  kind: number;
+  dest: number;
+}
+
 export type Command =
+  | OrderCommand
+  | KeepCommand
+  | DestCommand
   | CameraCommand
   | RepeatCommand
   | FortifyCommand
