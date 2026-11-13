@@ -264,9 +264,38 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   blocks; marksman team; top attack on tanks in streets; drone rules
 - U6 Tuning after play (light, Sonnet 5.5)
 
-Order agreed with Fabio on 2026-11-13: U1, then the soldiers and the cameras, then co-op
-(if approved), then U2 to U5, then the factions, so that each faction's roster is designed
-around the urban rules instead of being redesigned for them.
+Order agreed with Fabio on 2026-11-13 (morning): U1, then the soldiers and the cameras,
+then co-op (if approved), then U2 to U5, then the factions, so that each faction's roster
+is designed around the urban rules instead of being redesigned for them.
+
+That order changed the same evening: see "Strategic command" below, which now comes
+before co-op and before U2.
+
+## Strategic command (in progress; a deliberate change of order)
+
+Fabio, 2026-11-13 evening: wants to command the war instead of the firefight. Larger
+battles, less clicking through barracks, no forgotten units, sub-commanders who run a
+mission by themselves, a screen that does not overlap itself, and an economy that lets
+him build more while making battles harder to fight far from home.
+
+Why this goes ahead of co-op and U2, which were next: the chaos is in single player
+today and needs no netcode to fix; and "one team, several people each with a job" is the
+co-op roles feature. Sub-commanders and a shared production screen are the same plumbing
+with the computer in the second seat, so co-op gets cheaper, not later for nothing.
+
+1. Screen layout (built, decision 077): zones that never overlap, a production queue of
+   fixed slots, and a button with its key for every order that was a key you had to know
+   (attack-move, smoke, mount, dismount, the engineers' camera)
+2. War production centre: one screen for every factory, bulk orders spread across them,
+   "keep N of these", and new units sent straight to a town or a commander
+3. Logistics economy: faster income, paid for by supply range (units far from a depot,
+   a held town or a supply truck fight worse), upkeep for a standing army, forward depots
+4. Sub-commanders: a group, a mission (hold, defend, attack, patrol), and a board that
+   shows every commander and every unit nobody commands. Built on the skirmish AI, inside
+   the deterministic rules, so a second player can take a commander's seat later
+
+Then, as before: U2 storming and the city map (generated around the flags, where troops
+gather), the soldiers' second pass, co-op roles, U4 to U6, the factions.
 
 ## M10 Factions
 

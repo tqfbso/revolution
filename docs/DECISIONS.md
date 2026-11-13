@@ -1014,3 +1014,27 @@ raises an alert. Enemy cameras are drawn only while known, with a red mark.
 The AI places no cameras yet. Its jammers blind and reveal the player's, and its troops
 pull down the ones they pass. The golden hash did not move: its scenario has no camera
 and no jammed drone, and free camera slots are not hashed.
+
+## 077. A screen cut into zones (2026-11-13)
+
+Fabio: "some elements of the page are in front of others and are hard to see", and the
+production box "breaks as we click to build more units when the box stretches".
+
+Every panel was placed by itself with a fixed offset, so they met as soon as one grew.
+Now the screen has zones that cannot meet: a bar along the top (resources left; pause,
+speed, help and a Menu holding opponent, map, sound, graphics and new game right), a
+column down the left (performance, towns), alerts bottom left, the minimap bottom right,
+and what is selected with its command card bottom centre at a fixed width between them.
+
+- The performance readout is one line (frame rate, units, build) until clicked or F3;
+  the choice is remembered. The build id stays visible because that is how a test
+  session is tied to a commit.
+- A production queue is eight slots of one size, drawn whether filled or not, with the
+  army-limit warning on a line of fixed height. Nothing below moves when an order lands.
+- Orders that were only keys are buttons that show their key and explain themselves on
+  hover: attack-move (C), smoke (F, now also "press, then click"), mount (L), dismount
+  (U), deploy camera (V). Fabio played a whole game without finding the cameras. Unit
+  buttons say what the unit is for.
+- Help is a scrolling sheet in the middle instead of a block down the left edge.
+
+Client only; the golden hash did not move.

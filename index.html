@@ -31,25 +31,71 @@
         border-radius: 6px;
         pointer-events: none;
       }
-      #perf {
-        top: 10px;
+      /*
+       * The screen is cut into zones that never share ground: a bar along the top
+       * (resources left, game controls right), a column down the left (performance,
+       * towns, alerts at its foot), the minimap bottom right, and what is selected with
+       * its command card bottom centre, between the two.
+       */
+      #top {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 10px;
+        box-sizing: border-box;
+        background: rgba(12, 16, 20, 0.82);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        z-index: 5;
+      }
+      #left {
+        position: fixed;
+        top: 50px;
         left: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        max-width: 300px;
+        pointer-events: none;
+      }
+      #left .panel,
+      #bottom .panel,
+      #top .panel {
+        position: static;
+        transform: none;
+      }
+      #perf {
         margin: 0;
-        min-width: 250px;
+        pointer-events: auto;
+        cursor: pointer;
+        white-space: pre;
       }
       #help {
-        top: 190px;
-        left: 10px;
-        color: #b9c4cf;
-        display: none;
-      }
-      #resources {
-        /* Below the row of menus, which reaches past the middle of the screen. */
-        top: 54px;
+        top: 50px;
         left: 50%;
         transform: translateX(-50%);
+        width: min(760px, 86vw);
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        color: #b9c4cf;
+        background: rgba(12, 16, 20, 0.94);
+        display: none;
+        pointer-events: auto;
+        z-index: 8;
+      }
+      #resources {
+        background: none;
+        padding: 0;
         white-space: nowrap;
         font-size: 13px;
+        overflow: hidden;
       }
       #resources button {
         pointer-events: auto;
@@ -75,13 +121,62 @@
       .short {
         color: #ff7b6b;
       }
-      #card {
+      #bottom {
+        position: fixed;
         bottom: 10px;
         left: 50%;
         transform: translateX(-50%);
+        /* Never under the minimap (right) or the alerts (left). */
+        width: min(720px, calc(100vw - 560px));
+        min-width: 420px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        pointer-events: none;
+      }
+      #card {
         display: none;
         pointer-events: auto;
-        max-width: 46vw;
+        max-height: 44vh;
+        overflow-y: auto;
+      }
+      /* The production queue: eight slots of one size, filled or not, so nothing below
+         them moves as orders come and go. */
+      #card .slots {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 4px;
+        margin: 4px 0 6px;
+      }
+      #card .slot {
+        position: relative;
+        height: 34px;
+        box-sizing: border-box;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 4px;
+        padding: 2px 4px;
+        font-size: 10px;
+        line-height: 1.25;
+        overflow: hidden;
+        color: #c8d2db;
+      }
+      #card .slot.empty {
+        border-style: dashed;
+        opacity: 0.4;
+      }
+      #card .slot b {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        height: 3px;
+        background: #8fd0a0;
+      }
+      #card .note {
+        height: 16px;
+        font-size: 11px;
+        color: #ff7b6b;
+        overflow: hidden;
+        white-space: nowrap;
       }
       #card .title {
         font-size: 13px;
@@ -105,6 +200,16 @@
       #card button {
         text-align: left;
         min-width: 104px;
+      }
+      #card button kbd {
+        float: right;
+        margin-left: 8px;
+        padding: 0 4px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 3px;
+        font: inherit;
+        font-size: 10px;
+        color: #d8c27a;
       }
       #card button span {
         display: block;
@@ -152,23 +257,55 @@
         margin-top: 4px;
       }
       #towns {
-        top: 48px;
-        left: 50%;
-        transform: translateX(-50%);
         min-width: 190px;
       }
       #selection {
-        top: 10px;
-        right: 300px;
         display: none;
-        max-width: 26vw;
+        align-self: center;
+        max-width: 100%;
+        box-sizing: border-box;
+        text-align: center;
       }
       #actions {
-        position: fixed;
-        top: 10px;
-        right: 10px;
         display: flex;
-        gap: 8px;
+        gap: 6px;
+        align-items: center;
+        flex: none;
+      }
+      #top button,
+      #top select {
+        padding: 4px 9px;
+      }
+      #menu {
+        position: relative;
+      }
+      #menu summary {
+        list-style: none;
+        font-size: 12px;
+        color: #e6edf3;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 6px;
+        padding: 4px 9px;
+        cursor: pointer;
+      }
+      #menu summary::-webkit-details-marker {
+        display: none;
+      }
+      #menu[open] summary {
+        background: rgba(40, 52, 64, 0.9);
+      }
+      #menu .drop {
+        position: absolute;
+        top: 34px;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px;
+        min-width: 190px;
+        background: rgba(12, 16, 20, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
       }
       #actions select {
         font: inherit;
@@ -208,6 +345,7 @@
         position: fixed;
         left: 10px;
         bottom: 10px;
+        width: 250px;
         display: flex;
         flex-direction: column;
         gap: 6px;
@@ -216,16 +354,16 @@
       .alert {
         background: rgba(12, 16, 20, 0.86);
         color: #fff;
-        font-size: 15px;
+        font-size: 13px;
         font-weight: bold;
-        padding: 9px 14px;
+        padding: 7px 10px;
         border-left: 5px solid #ff5a4a;
         border-radius: 4px;
         pointer-events: auto;
         cursor: pointer;
       }
       .alert span {
-        margin-left: 12px;
+        display: block;
         font-size: 11px;
         font-weight: normal;
         color: #9aa7b3;
@@ -264,51 +402,73 @@
   </head>
   <body>
     <canvas id="game"></canvas>
-    <pre id="perf" class="panel">starting…</pre>
-    <div id="resources" class="panel"></div>
-    <div id="towns" class="panel"></div>
-    <div id="card" class="panel"></div>
+    <div id="top">
+      <div id="resources" class="panel"></div>
+      <div id="actions">
+        <button id="pause" title="Pause (Space). Orders given while paused start when you resume">
+          Pause (Space)
+        </button>
+        <select id="game-speed" aria-label="Game speed" title="Game speed">
+          <option value="1">Speed 1x</option>
+          <option value="0.75">Speed 0.75x</option>
+        </select>
+        <button id="help-toggle" title="How to play: every order and key">Help (F1)</button>
+        <details id="menu">
+          <summary title="Opponent, map, sound, graphics, new game">Menu</summary>
+          <div class="drop">
+            <select
+              id="ai-level"
+              aria-label="Opponent"
+              title="Opponent. Changing this starts a new game"
+            >
+              <option value="recruit">AI: recruit</option>
+              <option value="easy">AI: easy</option>
+              <option value="normal">AI: normal</option>
+              <option value="hard">AI: hard</option>
+              <option value="off">AI: none</option>
+            </select>
+            <select
+              id="map-pick"
+              aria-label="Map"
+              title="Battlefield. Changing this starts a new game"
+            >
+              <option value="ridge">Map: ridge</option>
+              <option value="river">Map: river</option>
+            </select>
+            <select id="volume" aria-label="Sound" title="Sound volume">
+              <option value="0">Sound: off</option>
+              <option value="0.35">Sound: quiet</option>
+              <option value="0.7">Sound: normal</option>
+              <option value="1">Sound: loud</option>
+            </select>
+            <select
+              id="quality"
+              aria-label="Graphics"
+              title="Graphics detail. Changing this reloads the page and starts a new game"
+            >
+              <option value="low">Graphics: low</option>
+              <option value="normal">Graphics: normal</option>
+              <option value="high">Graphics: high</option>
+            </select>
+            <button id="add-units" title="Stress test: 500 more units for each side">
+              +1000 units
+            </button>
+            <button id="reset" title="Start this game again">New game</button>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div id="left">
+      <pre id="perf" class="panel" title="Click (or F3) for the full performance readout">
+starting…</pre>
+      <div id="towns" class="panel"></div>
+    </div>
+    <div id="bottom">
+      <div id="selection" class="panel"></div>
+      <div id="card" class="panel"></div>
+    </div>
     <div id="banner" class="panel"></div>
     <div id="paused" class="panel"></div>
-    <div id="selection" class="panel"></div>
-    <div id="actions">
-      <button id="pause" title="Pause (Space). Orders given while paused start when you resume">
-        Pause (Space)
-      </button>
-      <select id="game-speed" aria-label="Game speed" title="Game speed">
-        <option value="1">Speed 1x</option>
-        <option value="0.75">Speed 0.75x</option>
-      </select>
-      <button id="help-toggle">Help (F1)</button>
-      <select id="ai-level" aria-label="Opponent" title="Opponent. Changing this starts a new game">
-        <option value="recruit">AI: recruit</option>
-        <option value="easy">AI: easy</option>
-        <option value="normal">AI: normal</option>
-        <option value="hard">AI: hard</option>
-        <option value="off">AI: none</option>
-      </select>
-      <select id="map-pick" aria-label="Map" title="Battlefield. Changing this starts a new game">
-        <option value="ridge">Map: ridge</option>
-        <option value="river">Map: river</option>
-      </select>
-      <select id="volume" aria-label="Sound" title="Sound volume">
-        <option value="0">Sound: off</option>
-        <option value="0.35">Sound: quiet</option>
-        <option value="0.7">Sound: normal</option>
-        <option value="1">Sound: loud</option>
-      </select>
-      <select
-        id="quality"
-        aria-label="Graphics"
-        title="Graphics detail. Changing this reloads the page and starts a new game"
-      >
-        <option value="low">Graphics: low</option>
-        <option value="normal">Graphics: normal</option>
-        <option value="high">Graphics: high</option>
-      </select>
-      <button id="add-units">+1000 units</button>
-      <button id="reset">Reset</button>
-    </div>
     <div id="help" class="panel">
       The enemy base is off the map until one of your units sees it: scout. The AI menu (top right)
       sets the opponent and starts a new game.<br />
@@ -347,7 +507,10 @@
       Alerts: when you are attacked off screen, or a recon drone finds enemy troops, a banner, a
       ping on the minimap and an arrow at the screen edge show where. Backspace (or a click on any
       of them) takes you there; Backspace again goes to the one before<br />
-      WASD / arrows / screen edge: pan · Wheel: zoom · Q/E or middle drag: rotate
+      WASD / arrows / screen edge: pan · Wheel: zoom · Q/E or middle drag: rotate<br />
+      Every order with a key also has a button at the bottom when the right units are selected;
+      hover over a button to read what it does. F3 (or a click on the frame-rate line): the full
+      performance readout
     </div>
     <canvas id="minimap"></canvas>
     <div id="select-box"></div>

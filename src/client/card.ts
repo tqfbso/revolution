@@ -14,6 +14,8 @@ import {
   CMD_STANCE,
   CMD_STOP,
   CMD_TRAIN,
+  CMD_LOAD,
+  CMD_UNLOAD,
   type Command,
 } from '../sim/commands';
 import {
@@ -43,6 +45,36 @@ import type { UnitView } from './units';
 import type { WorksView } from './works';
 
 const CELL = 4;
+const QUEUE_SLOTS = 8;
+/** Names short enough for a queue slot, and what each unit is for (the button's tooltip). */
+const SHORT = [
+  'Tank',
+  'Rifles',
+  'Missile',
+  'IFV',
+  'Gun',
+  'Recon',
+  'Drone',
+  'Strike',
+  'Air def.',
+  'Jammer',
+  'Truck',
+  'Engineer',
+];
+const HINT = [
+  'Main battle tank. Kills vehicles and breaks walls; weak to missile teams and to infantry up close in streets.',
+  'Infantry squad. Cheap and fast to raise. Holds buildings, trenches and forest; rockets hurt vehicles within 8 m.',
+  'Missile team. Kills vehicles from beyond gun range. Helpless against infantry: keep riflemen with it.',
+  'Infantry fighting vehicle. Carries two squads fast (L to mount, U to dismount) and mows down infantry.',
+  'Self-propelled gun. Shells what others have spotted from far behind. Ctrl + right click: shell a spot. F: smoke.',
+  'Recon team. Sees far, hard to see, unarmed. Everything else is half blind without it.',
+  'Recon drone. Eyes in the sky over hills and houses. Dies to air defence and jammers.',
+  'Strike drone. Flies into what it finds, once.',
+  'Air-defence vehicle. The only thing that shoots drones down reliably.',
+  'Jammer. Enemy drones in its ring crash; enemy cameras in it are blinded and revealed. Works by itself.',
+  'Logistics truck. Hauls supplies and fuel, builds and repairs base buildings and field works.',
+  "Engineer squad. Builds field works, blows up the enemy's, and leaves surveillance cameras (V).",
+];
 /** The tool after the kinds of field work: take works down. */
 export const TOOL_REMOVE = WORK_COUNT;
 const ME = 0;
@@ -84,6 +116,11 @@ export class CommandCard {
   private html = '';
   private resHtml = '';
   private readonly hadHq = [false, false];
+  /**
+   * An order waiting for a click on the ground: attack-move or a smoke screen. The input
+   * handler reads it and carries it out; `arm` is how both sides change it.
+   */
+  armed: '' | 'attack' | 'smoke' = '';
   private over = false;
 
   constructor(
@@ -155,6 +192,13 @@ export class CommandCard {
     if (this.building >= 0 && this.structures.hp[this.building] === 0) this.select(-1);
   }
 
+  arm(mode: '' | 'attack' | 'smoke'): void {
+    this.armed = mode;
+    const game = document.getElementById('game');
+    if (game) game.style.cursor = mode === '' ? '' : 'cell';
+    this.render();
+  }
+
   select(s: number): void {
     this.building = s;
     this.render();
@@ -215,7 +259,22 @@ export class CommandCard {
     else if (act === 'hold') this.send({ type: CMD_HOLD, units: ids });
     else if (act === 'fire') this.toggleFire();
     else if (act === 'camera') this.placeCamera();
+    else if (act === 'amove') this.arm(this.armed === 'attack' ? '' : 'attack');
+    else if (act === 'smoke') this.arm(this.armed === 'smoke' ? '' : 'smoke');
+    else if (act === 'unload') {
+      this.send({ type: CMD_UNLOAD, units: ids.filter((id) => this.units.load[id] > 0) });
+    } else if (act === 'load') this.mount();
     this.render();
+  }
+
+  /** Every selected squad boards the nearest selected carrier with a seat. */
+  mount(): void {
+    const ids = this.units.selectedIds();
+    const carriers = ids.filter((id) => KINDS[this.units.kindOf(id)].carry > 0);
+    const squads = ids.filter((id) => KINDS[this.units.kindOf(id)].garrison);
+    if (carriers.length > 0 && squads.length > 0) {
+      this.send({ type: CMD_LOAD, units: squads, carriers });
+    }
   }
 
   /** Each selected engineer squad of yours leaves a surveillance camera where it stands. */
@@ -455,11 +514,14 @@ export class CommandCard {
     p: Price | null,
     note = '',
     on = false,
+    tip = '',
+    key = '',
   ): string {
     const locked = p !== null && this.tier < p.tier;
     const off = p !== null && !this.can(p);
     const sub = locked ? `<i class="short">tier ${p.tier}</i>` : p ? this.cost(p) : note;
-    return `<button data-act="${act}" data-k="${k}" class="${off ? 'off' : ''}${on ? ' on' : ''}">${label}<span>${sub}</span></button>`;
+    const hot = key === '' ? '' : `<kbd>${key}</kbd>`;
+    return `<button data-act="${act}" data-k="${k}" title="${tip}" class="${off ? 'off' : ''}${on ? ' on' : ''}">${hot}${label}<span>${sub || '&nbsp;'}</span></button>`;
   }
 
   private render(): void {
@@ -486,22 +548,26 @@ export class CommandCard {
         html += `<div class="hint">Right click it with trucks selected to speed up the work.</div>`;
       } else {
         const queued = bases[rec + 6];
-        if (queued > 0) {
-          const names: string[] = [];
-          for (let q = 0; q < queued; q++) {
-            const item = bases[rec + 8 + q];
-            const name = item === TIER_ITEM ? `Tier ${this.tier + 1}` : KINDS[item].name;
-            names.push(q === 0 ? `<b>${name} ${bases[rec + 7]}%</b>` : name);
+        // Eight slots, always drawn: the buttons below must not move as the queue fills.
+        html += '<div class="slots">';
+        for (let q = 0; q < QUEUE_SLOTS; q++) {
+          if (q >= queued) {
+            html += '<div class="slot empty"></div>';
+            continue;
           }
-          const first = bases[rec + 8];
-          const waiting = first !== TIER_ITEM && this.pop + POINTS[first] > this.popCap;
-          html += `<div class="queue">${names.join(' · ')}${waiting ? ' <i class="short">army limit reached: build depots</i>' : ''}</div>`;
+          const item = bases[rec + 8 + q];
+          const name = item === TIER_ITEM ? `Tier ${this.tier + 1}` : SHORT[item];
+          html += `<div class="slot" title="${item === TIER_ITEM ? name : KINDS[item].name}">${name}${q === 0 ? `<b style="width:${bases[rec + 7]}%"></b>` : ''}</div>`;
         }
+        html += '</div>';
+        const first = bases[rec + 8];
+        const waiting = queued > 0 && first !== TIER_ITEM && this.pop + POINTS[first] > this.popCap;
+        html += `<div class="note">${waiting ? 'Army limit reached: build supply depots' : ''}</div>`;
         html += '<div class="row">';
         UNIT_PRICE.forEach((p, kind) => {
           if (p.from === type) {
             const pts = POINTS[kind] > 1 ? ` ${POINTS[kind]} pts` : '';
-            html += this.button('train', kind, KINDS[kind].name + pts, p);
+            html += this.button('train', kind, KINDS[kind].name + pts, p, '', false, HINT[kind]);
           }
         });
         const next = TIER_PRICE[this.tier];
@@ -554,15 +620,102 @@ export class CommandCard {
         }
       } else if (this.tool !== 0) this.cancelTool();
       const held = ids.every((id) => (this.units.task[id] & TASK_HOLD_FIRE) !== 0);
+      const u = this.units;
+      const has = (test: (kind: number) => boolean) =>
+        ids.some((id) => u.isMine(id) && test(u.kindOf(id)));
       html += '<div class="row">';
-      html += this.button('stop', 0, 'Stop', null, 'X');
-      html += this.button('hold', 0, 'Hold position', null, 'H');
-      html += this.button('fire', 0, held ? 'Fire at will' : 'Hold fire', null, 'G');
-      if (ids.some((id) => this.units.isMine(id) && KINDS[this.units.kindOf(id)].engineer)) {
-        const p = { supplies: CAMERA_COST, fuel: 0, credits: 0, ticks: 0, tier: 1 };
-        html += this.button('camera', 0, 'Camera (V)', p);
-      }
+      html += this.button(
+        'amove',
+        0,
+        'Attack-move',
+        null,
+        this.armed === 'attack' ? 'click the ground' : 'then click',
+        this.armed === 'attack',
+        'Advance to a point and fight whatever is met on the way. Press C (or this), then click the ground. Alt + right click does the same.',
+        'C',
+      );
+      html += this.button('stop', 0, 'Stop', null, '', false, 'Halt and drop all orders.', 'X');
+      html += this.button(
+        'hold',
+        0,
+        'Hold position',
+        null,
+        '',
+        false,
+        'Stay on the spot: shoot what comes into range, never chase.',
+        'H',
+      );
+      html += this.button(
+        'fire',
+        0,
+        held ? 'Fire at will' : 'Hold fire',
+        null,
+        '',
+        false,
+        'Hold fire keeps recon teams and ambushes hidden until you say so.',
+        'G',
+      );
       html += '</div>';
+      // What only some units can do. These used to be keys you had to know about.
+      let special = '';
+      if (has((k) => KINDS[k].engineer)) {
+        const p = { supplies: CAMERA_COST, fuel: 0, credits: 0, ticks: 0, tier: 1 };
+        special += this.button(
+          'camera',
+          0,
+          'Deploy camera',
+          p,
+          '',
+          false,
+          'Each selected engineer squad leaves a hidden surveillance camera where it stands. It watches a small circle and raises an alert when the enemy walks in. 12 at most.',
+          'V',
+        );
+      }
+      if (has((k) => KINDS[k].indirect)) {
+        special += this.button(
+          'smoke',
+          0,
+          'Smoke screen',
+          null,
+          this.armed === 'smoke' ? 'click the ground' : 'then click',
+          this.armed === 'smoke',
+          'Each selected gun fires one smoke shell at the point you click. Smoke blinds both sides for 30 seconds. F fires at the pointer at once.',
+          'F',
+        );
+      }
+      const riders = has((k) => KINDS[k].garrison);
+      const carriers = has((k) => KINDS[k].carry > 0);
+      if (carriers) {
+        if (riders) {
+          special += this.button(
+            'load',
+            0,
+            'Mount up',
+            null,
+            '',
+            false,
+            'The selected squads climb aboard the selected carriers. Right clicking a carrier does the same.',
+            'L',
+          );
+        }
+        special += this.button(
+          'unload',
+          0,
+          'Dismount',
+          null,
+          '',
+          false,
+          'The selected carriers put down everyone aboard, here and now.',
+          'U',
+        );
+      }
+      if (special !== '') html += `<div class="row">${special}</div>`;
+      if (has((k) => KINDS[k].jam > 0)) {
+        html += `<div class="hint">Jammer: enemy drones inside its ring fall blind and crash, and enemy cameras in it are blinded and shown to you. It works by itself: park it near what you want covered.</div>`;
+      }
+      if (has((k) => KINDS[k].carry > 0) && !riders) {
+        html += `<div class="hint">Carrier: select squads with it and press L, or right click it with squads selected.</div>`;
+      }
     } else {
       if (this.placing >= 0) this.placing = -1;
       if (this.tool !== 0) this.cancelTool();
