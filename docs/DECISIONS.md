@@ -1200,3 +1200,68 @@ at once if it comes under fire. The board says "Gathering for the attack". Befor
 went in when half had arrived, so a mixed body attacked with its vehicles and the
 infantry walked into the aftermath. The staff is not hashed state: the golden hash is
 unchanged.
+
+## 085. Storming a held building (U2, first part) (2026-11-13)
+
+Infantry ordered into a building the enemy holds now fights its way in instead of standing
+at the door. The order is the one the player already knows (right click the building); the
+sim marks the squads that reach the wall as storming and resolves the fight twice a second:
+each side loses men in proportion to the other's strength, with the defender's edge
+depending on the building (7 to 4 for a hall, 6 to 4 for a block, 5 to 4 for a house) and
+gone altogether when at least half the attackers come through a breached wall or smoke
+lies on the building. Engineers count four riflemen in the assault, other squads with a
+siege value two. When the last defender falls the attackers move in and hold it.
+
+Measured, rifle squads against four in an intact block: 14 take it and 13 survive, 10
+take it and 7 survive, 8 fail. Through a breach 10 take it without loss worth the name.
+24 take an intact block held by 8. So the rule of thumb in the help text: three to one,
+or less with a breach or smoke first. That is the point of the system: the tank's job in
+a town is to open the wall, not to level the block (U1 made levelling slow).
+
+The AI storms too: when the objective it presses is a building it has seen held, it sends
+the nearest foot squads within 90 m, and only once 13 are there (9 with a breach or a
+gutted shell), so it does not feed squads in one at a time.
+
+Client: shots and dust at the building while the fight is on, "Garrison being stormed"
+as an attack alert, "Building taken" as a note.
+
+Not done from the U2 list in URBAN.md: fortifying and repairing, barricades, linked
+buildings and mouseholes, "garrison this block". Engineers alone are weak stormers (four
+to six fail against four); they are a multiplier, not an assault force.
+
+## 086. The city map, built round the flags (U3, first part) (2026-11-13)
+
+A third map layout, `city`, now the default (`?map=ridge` and `?map=river` still work, and
+the menu offers all three). Fabio asked for towns generated round the flags, dense and
+full of detail, with longer routes so that supply and sub-commanders matter, and no
+bridge to fight over.
+
+Nine flags: West End and East End (the home districts), Millbrook and Foundry Row,
+Southfield and Eastfield, and on the diagonal between the armies City Centre, Northgate
+and Station. Each is a grid of blocks 36 m square with 12 m streets between them; the
+blocks are drawn from a table (courtyard block, slabs, a quad, a hall, a row of houses, a
+park, a car park) and the centre has towers and halls. Arterial roads join the districts,
+with houses and shops along them; outside is hedged farmland and woods. 436 buildings
+on seed 1, against about 60 on the ridge. The west half is generated and mirrored, as on
+the ridge. Bases sit in opposite corners, 24 cells clear round each; the way from base to
+base is about a third longer than on the ridge and there are five lanes for the AI.
+
+What it costs. MAX_STRUCTS went from 512 to 1024 and MAX_TOWNS to 16. The client drew one
+mesh a building; it now merges the buildings of each 128 m square into one mesh and
+remerges a square (two a frame at most) when a building in it changes state. Streets,
+pavements, kerbs, centre lines and patches are painted into the ground marks; lamps,
+parked cars, vans, bins and bus shelters are instanced props.
+
+A hitch found and fixed on the way: every squad and truck with its own goal had its own
+flowfield built in the tick it asked, about 3 ms each, and a city full of distinct goals
+(buildings to garrison, field works to dig) asked for up to 62 in one tick. Fields are
+now built three a tick at most; the rest walk straight for a tick or two until theirs is
+made. Headless, two normal AIs, 40 minutes on the city: worst tick 199 ms before, 31 ms
+after, mean 2.1 ms. 3,000 units fighting in the centre: 2.2 ms a tick, the same as on
+the ridge. This changes who gets a field when, so the golden hash is now 2071988442.
+
+Not done from the U3 list in URBAN.md: column movement in streets, rubble spilling into
+the street and being cleared, local map updates. Vehicles are not held to the streets by
+rule; the blocks do that. Roofs are all one colour and there is no signage (R5, R6 with
+U4). The client frame rate on this map has only been checked in software rendering here:
+it needs Fabio's machine.

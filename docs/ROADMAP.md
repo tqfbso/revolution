@@ -243,7 +243,7 @@ Fabio, 2026-11-13. Decision 076.
   pulled down by any enemy ground unit that reaches it; jammed drones show through the fog
 - Not yet: the AI placing cameras of its own; cameras on the minimap
 
-## Urban warfare (U1 built, awaiting Fabio's test; U2 to U6 planned)
+## Urban warfare (U1 built; U2 storming and the U3 city map built, awaiting Fabio's test)
 
 Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,
 something like building buildings, fighting through a city as it is destroyed, and a
@@ -254,10 +254,14 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   damaged, gutted, ruin), each still a position; building classes two to six times
   tougher; tank guns break walls, artillery brings structures down; a ruin cannot be
   destroyed further; the garrison's losses come in two steps
-- U2 Hold and take a block (heavy, Fable 5.2 with Sonnet 5.5 for the interface): fortify,
-  repair, barricades, linked buildings with mouseholes, storming an enemy-held building
-- U3 Streets (heavy, Fable 5.2): street terrain, columns in corridors, local map updates,
-  rubble that shuts streets and engineers that clear it, a grey-box city generator
+- U2 Hold and take a block. BUILT 2026-11-13 (decision 085): storming an enemy-held
+  building, with breaches and smoke taking away the defender's edge; the AI storms too.
+  Still to do (Fable 5.2 with Sonnet 5.5 for the interface): fortify, repair, barricades,
+  linked buildings with mouseholes, "garrison this block"
+- U3 Streets. BUILT 2026-11-13 (decision 086): the city map, generated round nine flags,
+  436 buildings, streets and street furniture, now the default map. Still to do (Fable
+  5.2): columns in corridors, local map updates, rubble that shuts streets and engineers
+  that clear it
 - U4 The city's look (heavy, Fable 5.2 with Sonnet 5.5 for props): block meshes per state,
   the prop kit, far facades, roof fade, against a stated budget
 - U5 Urban AI and urban units (heavy, Fable 5.2): an AI that holds, fortifies and storms

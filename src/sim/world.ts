@@ -342,6 +342,9 @@ export interface World {
   fieldDist: (Uint16Array | null)[];
   /** Tick on which every field slot was found in use (no more are tried that tick). */
   fieldsFullTick: number;
+  /** Flowfields built this tick, and which tick that is: a few a tick at most (see acquireField). */
+  fieldsBuilt: number;
+  fieldsBuiltTick: number;
   /** Per team and class: cost to the nearest enemy, the tick it was built and last needed. */
   chaseDist: (Uint16Array | null)[];
   chaseBuilt: Int32Array;
@@ -467,6 +470,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     fieldClass: new Uint8Array(MAX_FIELDS),
     fieldDist: new Array<Uint16Array | null>(MAX_FIELDS).fill(null),
     fieldsFullTick: -1,
+    fieldsBuilt: 0,
+    fieldsBuiltTick: -1,
     chaseDist: new Array<Uint16Array | null>(CHASE_FIELDS).fill(null),
     chaseBuilt: new Int32Array(CHASE_FIELDS).fill(-1),
     chaseWanted: new Int32Array(CHASE_FIELDS).fill(-1000),

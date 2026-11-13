@@ -1043,6 +1043,9 @@ function routeUnits(w: World, units: readonly number[], gx: number, gy: number):
  * built in a slot no moving unit still uses. Returns -1 if every slot is in use (the unit
  * then walks straight, as before pathfinding existed).
  */
+/** Flowfields built in one tick at most; each takes about 3 ms. */
+const FIELDS_PER_TICK = 3;
+
 function acquireField(w: World, goal: number, layer: number): number {
   // Armies whose passability is the same share their fields.
   const cls = w.map.shared[layer];
@@ -1066,6 +1069,13 @@ function acquireField(w: World, goal: number, layer: number): number {
   const dist = (w.fieldDist[slot] ??= newField());
   goalScratch[0] = goal;
   buildField(w.map, cls, dist, goalScratch, 1, UNREACHABLE - 1);
+  // A field costs a few milliseconds and a city gives every squad and truck its own goal:
+  // build a few a tick and let the rest walk straight until theirs is made.
+  if (w.fieldsBuiltTick !== w.tick) {
+    w.fieldsBuiltTick = w.tick;
+    w.fieldsBuilt = 0;
+  }
+  if (++w.fieldsBuilt >= FIELDS_PER_TICK) w.fieldsFullTick = w.tick;
   w.fieldGoal[slot] = goal;
   w.fieldClass[slot] = cls;
   return slot;

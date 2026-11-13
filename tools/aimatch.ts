@@ -32,6 +32,8 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
   const sm = performance.now() - t1;
   stepTotal += sm;
   if (sm > stepWorst) stepWorst = sm;
+  if (sm > 40 && process.env.SPIKES)
+    console.log(`  spike ${sm.toFixed(0)} ms at tick ${tick}, ${w.count} units`);
   cmds = [];
   w.events.length = 0;
   for (const ai of ais) {
@@ -53,7 +55,9 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
     break;
   }
 }
-console.log(`step: worst ${stepWorst.toFixed(1)} ms, mean ${(stepTotal / w.tick).toFixed(2)} ms/tick`);
+console.log(
+  `step: worst ${stepWorst.toFixed(1)} ms, mean ${(stepTotal / w.tick).toFixed(2)} ms/tick`,
+);
 console.log(
   `ai think: worst ${worst.toFixed(2)} ms, mean ${(total / w.tick).toFixed(4)} ms/tick; hash ${hashWorld(w).toString(16)}`,
 );
