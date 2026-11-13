@@ -44,6 +44,9 @@ import {
   KIND_INFANTRY,
   KIND_RECON,
   KIND_STRIKE,
+  STRIKE_ARM_TICKS,
+  STRIKE_GAP_TICKS,
+  STRIKE_WINDOW_TICKS,
   KIND_TANK,
 } from '../src/sim/units';
 import { step } from '../src/sim/sim';
@@ -57,6 +60,7 @@ import {
   EV_SHOT,
   EV_SIEGE,
   EV_SMOKE,
+  EV_STRIKE,
   FLAG_HOLD,
   FLAG_MOVING,
   MAP_SIZE_FX,
@@ -200,7 +204,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 2071988442;
+const GOLDEN = 495916327;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -939,36 +943,64 @@ describe('combined arms', () => {
   it('strike drones kill a tank that cannot shoot back, and die doing it', () => {
     const w = flat();
     const tank = lone(w, 1, KIND_TANK, 500, 500);
-    const a = lone(w, 0, KIND_STRIKE, 472, 500);
-    const b = lone(w, 0, KIND_STRIKE, 472, 506);
-    for (let t = 0; t < 200 && w.state[tank] === STATE_ALIVE; t++) step(w, []);
+    const drones = [0, 1, 2, 3].map((k) => lone(w, 0, KIND_STRIKE, 472, 494 + 4 * k));
+    for (let t = 0; t < 600 && w.state[tank] === STATE_ALIVE; t++) step(w, []);
     expect(w.state[tank]).toBe(STATE_WRECK);
     expect(w.attack[tank]).toBe(-1);
     step(w, []);
-    expect(w.state[a]).toBe(STATE_FREE);
-    expect(w.state[b]).toBe(STATE_FREE);
+    for (const d of drones) expect(w.state[d]).toBe(STATE_FREE);
   });
 
-  const swarm = (defender: number) => {
+  it('strike drones line up first and then hit one at a time, with a warning', () => {
+    const w = flat();
+    const tank = lone(w, 1, KIND_TANK, 500, 500);
+    for (let k = 0; k < 8; k++) lone(w, 0, KIND_STRIKE, 470, 486 + 4 * k);
+    const hits: number[] = [];
+    let warned = -1;
+    let hp = w.hp[tank];
+    for (let t = 0; t < 700 && w.state[tank] === STATE_ALIVE; t++) {
+      step(w, []);
+      for (let e = 0; e < w.events.length; e += 3) {
+        if (w.events[e] === EV_STRIKE && w.events[e + 1] === tank && warned < 0) warned = w.tick;
+      }
+      w.events.length = 0;
+      if (w.hp[tank] < hp || w.state[tank] !== STATE_ALIVE) hits.push(w.tick);
+      hp = w.hp[tank];
+    }
+    // Four to kill it, the first no sooner than the lining up, the rest a gap apart.
+    expect(hits.length).toBe(4);
+    expect(warned).toBeGreaterThan(0);
+    expect(hits[0] - warned).toBeGreaterThanOrEqual(STRIKE_ARM_TICKS);
+    for (let k = 1; k < hits.length; k++) {
+      expect(hits[k] - hits[k - 1]).toBeGreaterThanOrEqual(STRIKE_GAP_TICKS);
+      expect(hits[k] - hits[k - 1]).toBeLessThan(STRIKE_GAP_TICKS + STRIKE_WINDOW_TICKS);
+    }
+    // From the warning to the wreck: long enough to do something about it.
+    expect(hits[3] - warned).toBeGreaterThan(15 * 20);
+    expect(hits[3] - warned).toBeLessThan(30 * 20);
+  });
+
+  const swarm = (defender: number, size = 3) => {
     const w = flat();
     const tank = lone(w, 1, KIND_TANK, 600, 500);
     if (defender >= 0) lone(w, 1, defender, 596, 506);
     lone(w, 0, KIND_RECON, 540, 500);
     const drones: number[] = [];
-    for (let k = 0; k < 3; k++) drones.push(lone(w, 0, KIND_STRIKE, 500, 494 + 6 * k));
+    for (let k = 0; k < size; k++)
+      drones.push(lone(w, 0, KIND_STRIKE, 500, 494 + 6 * k - 3 * size));
     step(w, [{ type: CMD_ATTACK_MOVE, units: drones, x: fx(600), y: fx(500) }]);
-    for (let t = 0; t < 400; t++) step(w, []);
+    for (let t = 0; t < 700; t++) step(w, []);
     return { w, tank, lost: drones.filter((d) => w.state[d] !== STATE_ALIVE).length };
   };
 
   it('air defence shoots a small swarm down; a jammer drops it out of the sky', () => {
-    const open = swarm(-1);
+    const open = swarm(-1, 6);
     expect(open.w.state[open.tank]).toBe(STATE_WRECK);
-    const guarded = swarm(KIND_AD);
-    expect(guarded.lost).toBe(3);
+    const guarded = swarm(KIND_AD, 6);
+    expect(guarded.lost).toBe(6);
     expect(guarded.w.hp[guarded.tank]).toBe(KINDS[KIND_TANK].hp);
-    const jammed = swarm(KIND_EW);
-    expect(jammed.lost).toBe(3);
+    const jammed = swarm(KIND_EW, 6);
+    expect(jammed.lost).toBe(6);
     expect(jammed.w.hp[jammed.tank]).toBe(KINDS[KIND_TANK].hp);
   });
 
