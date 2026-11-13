@@ -12,7 +12,10 @@ import {
   P_BUSH,
   P_FENCE,
   P_HEDGE,
+  P_BIN,
+  P_CAR,
   P_KINDS,
+  P_VAN,
   P_LAMP,
   P_POLE,
   P_ROCK,
@@ -166,10 +169,30 @@ function shapes(): THREE.BufferGeometry[] {
     box(1.9, 0.9, 0.65, 0, 0.45, 0, 0x6c5339),
     box(1.95, 0.08, 0.75, 0, 0.94, 0, 0x4a4138),
   ]);
+  // Parked along the kerb, nose along +x.
+  const car = (body: number, glass: number) =>
+    merge([
+      box(4.2, 0.62, 1.72, 0, 0.62, 0, body),
+      box(2.2, 0.56, 1.56, -0.2, 1.2, 0, glass),
+      box(2.3, 0.06, 1.6, -0.2, 1.5, 0, body),
+      box(0.62, 0.62, 1.8, 1.3, 0.31, 0, 0x1c1c1e),
+      box(0.62, 0.62, 1.8, -1.3, 0.31, 0, 0x1c1c1e),
+    ]);
+  g[P_CAR] = car(0x6d7478, 0x23292e);
+  g[P_VAN] = merge([
+    box(5.0, 1.55, 1.9, 0, 1.12, 0, 0xa8a69c),
+    box(1.2, 0.6, 1.92, 1.75, 1.5, 0, 0x23292e),
+    box(0.66, 0.66, 2.0, 1.55, 0.33, 0, 0x1c1c1e),
+    box(0.66, 0.66, 2.0, -1.55, 0.33, 0, 0x1c1c1e),
+  ]);
+  g[P_BIN] = merge([
+    box(0.6, 1.0, 0.7, 0, 0.5, 0, 0x33473a),
+    box(0.64, 0.08, 0.76, 0, 1.03, 0, 0x26352b),
+  ]);
   return g;
 }
 
-const SMALL = new Set([P_TUFT, P_ROCK, P_BALE, P_STACK]);
+const SMALL = new Set([P_TUFT, P_ROCK, P_BALE, P_STACK, P_BIN]);
 const NO_SHADOW = new Set([P_TUFT]);
 
 interface Batch {

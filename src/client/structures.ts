@@ -6,6 +6,7 @@ import { BUILDINGS, B_BARRACKS, B_DEPOT, B_DRONES, B_HQ, B_WORKS } from '../sim/
 import {
   FLOOR_HEIGHT,
   MAP_CELLS,
+  MAP_SIZE,
   MAX_SITES,
   MAX_STRUCTS,
   BUILD_HOUSE,
@@ -37,7 +38,11 @@ import type { Terrain } from './terrain';
 // holds the town) is drawn with two small instanced batches.
 
 const CELL = 4;
-const FLOOR = fromFx(FLOOR_HEIGHT);
+/**
+ * A storey as drawn: taller than the sim's (which only ranks buildings by height), so that
+ * a five-floor block stands well over a tank and a street reads as a street.
+ */
+const FLOOR = fromFx(FLOOR_HEIGHT) * 1.7;
 const WALLS = [0x8a8478, 0x7d6a58, 0x9a9384, 0x6f7272, 0x86705a, 0x77786a];
 /** Roofing: clay tiles in three ages, slate, tarred felt. */
 const TILES = [0x7b4d3c, 0x6c4436, 0x855a43, 0x4d5055, 0x43403d];
@@ -58,6 +63,9 @@ const DAMAGED_BELOW = 150; // of 255
 const SMOKE_SECONDS = 90;
 /** How far a base building of yours sees, in cells. */
 const BASE_SIGHT = 7;
+/** Side of a square of ground whose buildings share one mesh, in metres and in squares. */
+const CHUNK = 128;
+const CHUNKS = Math.ceil(MAP_SIZE / CHUNK);
 
 function rand(seed: number, k: number): number {
   let h = Math.imul(seed + 1, 0x27d4eb2d) ^ Math.imul(k + 1, 0x165667b1);
@@ -888,6 +896,15 @@ export class StructureView {
 
   private readonly material: THREE.MeshStandardNodeMaterial;
   private readonly meshes: (THREE.Mesh | null)[] = [];
+  /**
+   * The map's own buildings are not drawn one by one (a city has hundreds): each keeps its
+   * geometry here, and all those of a square of ground are merged into one mesh, rebuilt
+   * when one of them changes state.
+   */
+  private readonly geoms: (THREE.BufferGeometry | null)[] = [];
+  private readonly chunks: (THREE.Mesh | null)[] = new Array(CHUNKS * CHUNKS).fill(null);
+  private readonly chunkOf: number[][] = Array.from({ length: CHUNKS * CHUNKS }, () => []);
+  private readonly dirty = new Set<number>();
   /** Latest state per structure (STAGE_*) and its breached faces, one bit each (FACE_*). */
   readonly stage = new Uint8Array(MAX_STRUCTS);
   readonly breached = new Uint8Array(MAX_STRUCTS);
@@ -946,6 +963,7 @@ export class StructureView {
     }
     if (poles.length > 0) this.group.add(this.mesh(build(poles)));
     for (let s = 0; s < map.structCount; s++) this.show(s, 0);
+    this.flush(CHUNKS * CHUNKS);
     for (let k = 0; k < map.siteCount; k++) {
       const x = fromFx(map.siteX[k]);
       const z = fromFx(map.siteY[k]);
@@ -1039,9 +1057,19 @@ export class StructureView {
               holes,
               m.sClass[s],
             );
-    const mesh = this.mesh(build(parts));
-    this.meshes[s] = mesh;
-    this.group.add(mesh);
+    if (m.sKind[s] === S_BUILDING) {
+      const k =
+        Math.min(CHUNKS - 1, Math.floor((z0 + d / 2) / CHUNK)) * CHUNKS +
+        Math.min(CHUNKS - 1, Math.floor((x0 + w / 2) / CHUNK));
+      if (this.geoms[s]) this.geoms[s]!.dispose();
+      else this.chunkOf[k].push(s);
+      this.geoms[s] = build(parts);
+      this.dirty.add(k);
+    } else {
+      const mesh = this.mesh(build(parts));
+      this.meshes[s] = mesh;
+      this.group.add(mesh);
+    }
     this.shown[s] = state + 8 * holes;
     // Units drive on a standing deck; a standing house blocks the view.
     if (bridge) this.terrain.bridgeUp[s] = state === 2 ? 0 : 1;
@@ -1053,6 +1081,25 @@ export class StructureView {
       }
     }
     this.version++;
+  }
+
+  /** Merge anew the squares of ground in which a building changed, a few a frame at most. */
+  private flush(limit: number): void {
+    let done = 0;
+    for (const k of this.dirty) {
+      if (done++ >= limit) break;
+      this.dirty.delete(k);
+      const old = this.chunks[k];
+      if (old) {
+        this.group.remove(old);
+        old.geometry.dispose();
+      }
+      const parts = this.chunkOf[k].map((s) => this.geoms[s]!);
+      if (parts.length === 0) continue;
+      const mesh = this.mesh(parts.length === 1 ? parts[0].clone() : mergeGeometries(parts));
+      this.chunks[k] = mesh;
+      this.group.add(mesh);
+    }
   }
 
   applySnapshot(s: Snapshot, seconds: number): void {
@@ -1212,6 +1259,7 @@ export class StructureView {
   /** Draw the readability layer. Call after the unit view has counted the occupants. */
   update(seconds: number, dt: number): void {
     const m = this.map;
+    if (this.dirty.size > 0) this.flush(2);
     const pips = this.pips;
     pips.n = 0;
     for (let s = 0; s < m.structCount; s++) {

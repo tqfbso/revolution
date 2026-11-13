@@ -28,7 +28,10 @@ export const P_TUFT = 7;
 export const P_SHED = 8;
 export const P_SHELTER = 9;
 export const P_STACK = 10;
-export const P_KINDS = 11;
+export const P_CAR = 11;
+export const P_VAN = 12;
+export const P_BIN = 13;
+export const P_KINDS = 14;
 
 /** One small thing standing on the land. */
 export interface Prop {
@@ -121,7 +124,8 @@ export class Land {
     this.marks = new THREE.DataTexture(new Uint8Array(4), 1, 1);
     this.reserve();
     this.occlusion();
-    this.towns();
+    if (map.streets.length > 0) this.city();
+    else this.towns();
   }
 
   /** A cell is free for a field or a prop: open, level, and nothing planned on it. */
@@ -190,6 +194,136 @@ export class Land {
       ctx.fillRect(map.sX[s] * CELL, map.sY[s] * CELL, map.sW[s] * CELL, map.sH[s] * CELL);
     }
     ctx.restore();
+  }
+
+  /**
+   * The city map: every street as pavements, kerbs and a carriageway, the squares and
+   * forecourts paved, and the things that stand along a street.
+   */
+  private city(): void {
+    const map = this.map;
+    const ctx = this.mc;
+    const px = this.markCanvas.width / MAP_SIZE;
+    const st = map.streets;
+    // Paved ground first: squares, forecourts, and the pavement under every street.
+    for (let j = 0; j < MAP_CELLS; j++) {
+      for (let i = 0; i < MAP_CELLS; i++) {
+        const r = map.road[j * MAP_CELLS + i];
+        if (r === 0) continue;
+        this.taken[j * MAP_CELLS + i] = 1;
+        const v = hash(i, j, 91);
+        ctx.fillStyle = rgba(v < 0.33 ? 0x8b897f : v < 0.66 ? 0x85837a : 0x908e85, 0.96);
+        ctx.fillRect(i * CELL - 0.05, j * CELL - 0.05, CELL + 0.1, CELL + 0.1);
+      }
+    }
+    // Round each building: a pavement apron in town, a yard with its fence outside it.
+    for (let s = 0; s < map.structCount; s++) {
+      if (map.sKind[s] !== S_BUILDING) continue;
+      const x0 = map.sX[s] * CELL;
+      const z0 = map.sY[s] * CELL;
+      const w = map.sW[s] * CELL;
+      const d = map.sH[s] * CELL;
+      if (map.sTown[s] >= 0) {
+        ctx.fillStyle = rgba(hash(s, 9, 3) < 0.5 ? 0x7d7b73 : 0x86847b, 0.9);
+        ctx.fillRect(x0 - 1.6, z0 - 1.6, w + 3.2, d + 3.2);
+      } else {
+        const m = 2.2 + 2.2 * hash(s, 7, 3);
+        ctx.save();
+        ctx.shadowColor = rgba(0x6b6253, 0.9);
+        ctx.shadowBlur = 2 * px;
+        ctx.fillStyle = rgba(hash(s, 9, 3) < 0.5 ? 0x6f6657 : 0x7b7567, 0.78);
+        ctx.fillRect(x0 - m, z0 - m, w + 2 * m, d + 2 * m);
+        ctx.restore();
+        this.yard(s, x0 - m, z0 - m, w + 2 * m, d + 2 * m, z0 + d + 20);
+      }
+    }
+    // Carriageways, all of them before any line, so that crossings come out clean.
+    const each = (
+      f: (x0: number, z0: number, x1: number, z1: number, main: boolean, k: number) => void,
+    ) => {
+      for (let k = 0; k + 4 < st.length; k += 5) {
+        const x0 = (Math.min(st[k], st[k + 2]) + 0.5) * CELL;
+        const z0 = (Math.min(st[k + 1], st[k + 3]) + 0.5) * CELL;
+        const x1 = (Math.max(st[k], st[k + 2]) + 0.5) * CELL;
+        const z1 = (Math.max(st[k + 1], st[k + 3]) + 0.5) * CELL;
+        f(x0, z0, x1, z1, st[k + 4] !== 0, k);
+      }
+    };
+    const half = (main: boolean) => (main ? 4.3 : 3.5);
+    each((x0, z0, x1, z1, main) => {
+      const h = half(main);
+      ctx.fillStyle = rgba(0x6a6861, 1);
+      ctx.fillRect(x0 - h - 0.3, z0 - h - 0.3, x1 - x0 + 2 * h + 0.6, z1 - z0 + 2 * h + 0.6);
+    });
+    each((x0, z0, x1, z1, main) => {
+      const h = half(main);
+      ctx.fillStyle = rgba(main ? 0x45454a : 0x4b4b4f, 1);
+      ctx.fillRect(x0 - h, z0 - h, x1 - x0 + 2 * h, z1 - z0 + 2 * h);
+    });
+    each((x0, z0, x1, z1, main, k) => {
+      const along = x1 - x0 >= z1 - z0;
+      const len = along ? x1 - x0 : z1 - z0;
+      const h = half(main);
+      // Patches and old repairs.
+      for (let q = 0; q < len / 30; q++) {
+        const t = hash(k, q, 21) * len;
+        const o = (hash(k, q, 22) - 0.5) * 2 * (h - 1.2);
+        const a = 1.5 + 4 * hash(k, q, 24);
+        const b = 0.8 + 1.6 * hash(k, q, 25);
+        ctx.fillStyle = rgba(hash(k, q, 23) < 0.5 ? 0x3a3a3e : 0x55555a, 0.8);
+        if (along) ctx.fillRect(x0 + t, z0 + o, a, b);
+        else ctx.fillRect(x0 + o, z0 + t, b, a);
+      }
+      if (main && len > 20) {
+        ctx.strokeStyle = rgba(0xbdb9a6, 0.75);
+        ctx.lineWidth = 0.28;
+        ctx.setLineDash([2.2, 3.4]);
+        ctx.beginPath();
+        ctx.moveTo(x0, z0);
+        ctx.lineTo(x1, z1);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // What stands along it: lamps on both pavements, cars at the kerb, bins, a shelter.
+      const put = (kind: number, t: number, o: number, rot: number) => {
+        const x = along ? x0 + t : x0 + o;
+        const z = along ? z0 + o : z0 + t;
+        // Not where another street comes in.
+        const c = Math.floor(z / CELL) * MAP_CELLS + Math.floor(x / CELL);
+        const far = along
+          ? map.road[Math.floor((z0 + Math.sign(o) * 10) / CELL) * MAP_CELLS + Math.floor(x / CELL)]
+          : map.road[
+              Math.floor(z / CELL) * MAP_CELLS + Math.floor((x0 + Math.sign(o) * 10) / CELL)
+            ];
+        if (map.road[c] === 0 || far === 1 || map.structAt[c] >= 0) return;
+        this.props.push({ kind, x, z, rot: along ? rot : rot + Math.PI / 2, scale: 1 });
+      };
+      for (let t = 9, n = 0; t < len - 6; t += 26, n++) {
+        const side = (n + k / 5) % 2 === 0 ? -1 : 1;
+        put(P_LAMP, t, side * (h + 1.0), side > 0 ? Math.PI : 0);
+      }
+      for (let t = 14, n = 0; t < len - 10; t += 7.5, n++) {
+        const r = hash(k, n, 41);
+        if (r > (main ? 0.1 : 0.2)) continue;
+        const side = hash(k, n, 42) < 0.5 ? -1 : 1;
+        put(
+          hash(k, n, 43) < 0.75 ? P_CAR : P_VAN,
+          t,
+          side * (h - 1.15),
+          side > 0 ? Math.PI / 2 : -Math.PI / 2,
+        );
+      }
+      for (let t = 20, n = 0; t < len - 10; t += 34, n++) {
+        const side = hash(k, n, 45) < 0.5 ? -1 : 1;
+        put(P_BIN, t + hash(k, n, 46) * 12, side * (h + 1.5), 0);
+      }
+      if (main) {
+        for (let t = 60, n = 0; t < len - 30; t += 170, n++) {
+          const side = n % 2 === 0 ? -1 : 1;
+          put(P_SHELTER, t, side * (h + 1.5), side > 0 ? Math.PI : 0);
+        }
+      }
+    });
   }
 
   /** The main street of each settlement, the yards of its houses and what stands in them. */
