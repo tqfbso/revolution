@@ -43,6 +43,9 @@ export class Minimap {
   private readonly ray = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private lastDraw = 0;
+  /** Alert pings: rings that close in on a point for a few seconds. */
+  private readonly pings: { x: number; y: number; at: number; rgb: number[] }[] = [];
+  private clock = 0;
   private baseVersion = -1;
 
   constructor(
@@ -90,6 +93,19 @@ export class Minimap {
     canvas.addEventListener('pointerup', () => (dragging = false));
   }
 
+  /** Draw attention to a world point: an alert happened there. */
+  ping(x: number, z: number, rgb: readonly number[]): void {
+    this.pings.push({
+      x: (x / MAP_SIZE) * N,
+      y: (z / MAP_SIZE) * N,
+      at: this.clock,
+      rgb: [...rgb],
+    });
+    if (this.pings.length > 16) this.pings.shift();
+    // Shown at once, not on the next slow redraw.
+    this.lastDraw = 0;
+  }
+
   /** Terrain colours. Redone when a building falls or a bridge is cut: the map changes. */
   private paintBase(): void {
     const map = this.map;
@@ -117,7 +133,9 @@ export class Minimap {
 
   /** Redraw at most ten times a second. */
   update(now: number): void {
-    if (now - this.lastDraw < 100) return;
+    this.clock = now;
+    // While a ping runs the map is redrawn more often, so the ring moves smoothly.
+    if (now - this.lastDraw < (this.pings.length > 0 ? 40 : 100)) return;
     this.lastDraw = now;
     if (this.baseVersion !== this.structures.version + this.works.version) this.paintBase();
     const px = this.image.data;
@@ -168,6 +186,30 @@ export class Minimap {
       ctx.beginPath();
       ctx.arc(this.map.townX[t] / 4096, this.map.townY[t] / 4096, 5, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Alerts: a ring closing in on the place, three times, then a dot that lingers.
+    for (let k = this.pings.length - 1; k >= 0; k--) {
+      const p = this.pings[k];
+      const age = (now - p.at) / 1000;
+      if (age > 9) {
+        this.pings.splice(k, 1);
+        continue;
+      }
+      const [r, g, b] = p.rgb;
+      if (age < 3.6) {
+        const t = (age % 1.2) / 1.2;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${0.95 - 0.5 * t})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4 + 22 * (1 - t), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = `rgba(${r},${g},${b},${Math.min(1, (9 - age) / 2)})`;
+      ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(p.x - 3, p.y - 3, 6, 6);
     }
 
     // Outline of the ground the camera sees: the four screen corners cast onto y = 0.

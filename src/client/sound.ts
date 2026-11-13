@@ -450,6 +450,36 @@ export class Sound {
     }
   }
 
+  /**
+   * An alert tone, heard wherever the camera is: 0 = under attack (two urgent falling
+   * notes), 1 = contact (a short rising radio blip).
+   */
+  alert(kind: number): void {
+    const ctx = this.ctx;
+    if (ctx === null || this.master === null || this.volume === 0) return;
+    if (ctx.state === 'suspended') void ctx.resume();
+    const t0 = ctx.currentTime + 0.02;
+    const notes = kind === 0 ? [880, 660, 880, 660] : [520, 780];
+    const step = kind === 0 ? 0.16 : 0.09;
+    notes.forEach((hz, k) => {
+      const osc = ctx.createOscillator();
+      osc.type = kind === 0 ? 'square' : 'sine';
+      osc.frequency.value = hz;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 2400;
+      const gain = ctx.createGain();
+      const at = t0 + k * step;
+      gain.gain.setValueAtTime(0, at);
+      gain.gain.linearRampToValueAtTime(kind === 0 ? 0.11 : 0.16, at + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, at + step * 0.95);
+      osc.connect(filter).connect(gain).connect(this.master!);
+      osc.start(at);
+      osc.stop(at + step);
+      osc.onended = () => gain.disconnect();
+    });
+  }
+
   /** Where the camera looks, how far out it is, and which way is right on screen. */
   listen(x: number, z: number, distance: number, rightX: number, rightZ: number): void {
     this.earX = x;

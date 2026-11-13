@@ -164,6 +164,23 @@ interface Tuning {
   carriers: boolean;
   /** It orders new units only on every so-many-th think: a slow hand on the production line. */
   slow: number;
+  /**
+   * Ticks an intrusion must have lasted before its reserve moves against it (half that
+   * for its own base): a slow commander notices late.
+   */
+  react: number;
+  /** Most recon teams and recon drones it keeps, and ticks a drone spends over one place. */
+  eyes: number;
+  drones: number;
+  patrol: number;
+  /**
+   * Concentrates its fire: strike drones pick the most valuable vehicle in reach and tanks
+   * join the guns against a strongpoint. Without it, drones fly at whatever is nearest
+   * and only the guns shell buildings.
+   */
+  focus: boolean;
+  /** Ticks it leaves an objective alone after being beaten there (0 = it comes back at once, stronger). */
+  sulk: number;
 }
 
 const MINUTE = 60 * TICK_RATE;
@@ -194,10 +211,19 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     reach: 0,
     carriers: false,
     slow: 5,
+    react: 40 * TICK_RATE,
+    eyes: 1,
+    drones: 0,
+    patrol: 120 * TICK_RATE,
+    focus: false,
+    sulk: 60 * MINUTE,
   },
   // Decision 070: Fabio found this level too hard. It now keeps a small army, holds only
   // its gate town and one more until it has attacked once, attacks late with what its
   // carriers can lift, and waits five minutes between attacks.
+  // Decision 073: still unbeaten, so it also plays worse, not just smaller: it notices an
+  // intrusion late, keeps one recon team and one slow drone, does not concentrate its
+  // fire, and leaves a place where it was beaten alone for twenty minutes.
   easy: {
     period: 60,
     trucks: 7,
@@ -221,6 +247,12 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     reach: 1,
     carriers: true,
     slow: 3,
+    react: 24 * TICK_RATE,
+    eyes: 1,
+    drones: 1,
+    patrol: 90 * TICK_RATE,
+    focus: false,
+    sulk: 20 * MINUTE,
   },
   normal: {
     period: 20,
@@ -245,6 +277,12 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     reach: 99,
     carriers: true,
     slow: 1,
+    react: 0,
+    eyes: 3,
+    drones: 2,
+    patrol: 30 * TICK_RATE,
+    focus: true,
+    sulk: 0,
   },
   hard: {
     period: 20,
@@ -269,6 +307,12 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     reach: 99,
     carriers: true,
     slow: 1,
+    react: 0,
+    eyes: 4,
+    drones: 3,
+    patrol: 30 * TICK_RATE,
+    focus: true,
+    sulk: 0,
   },
 };
 
@@ -409,6 +453,10 @@ export interface Ai {
   stageX: number;
   stageY: number;
   alarm: Alarm | null;
+  /** Tick on which the standing alarm was first raised (see Tuning.react). */
+  alarmSince: number;
+  /** Per town (and, last, the enemy base): no attack on it before this tick (see Tuning.sulk). */
+  shun: Int32Array;
   /** Towns it has held (so losing one calls for a counter-attack). */
   held: Uint8Array;
   /** Per site: the tick until which it keeps its trucks away. */
@@ -507,6 +555,8 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     stageX: 0,
     stageY: 0,
     alarm: null,
+    alarmSince: 0,
+    shun: new Int32Array(MAX_TOWNS + 1),
     held: new Uint8Array(MAX_TOWNS),
     siteBad: new Int32Array(MAX_SITES),
     siteCap: new Int32Array(MAX_SITES),
@@ -1332,8 +1382,8 @@ function production(ai: Ai, w: World, out: Command[]): void {
     if (want[k] > 0) total += have[k];
   }
   const tier = w.tier[team];
-  const scouts = 2 + (tier >= 2 ? 1 : 0) + (ai.level === 'hard' ? 1 : 0);
-  const drones = tier >= 1 && ai.level !== 'recruit' ? (ai.level === 'hard' ? 3 : 2) : 0;
+  const scouts = Math.min(ai.tune.eyes, 2 + (tier >= 2 ? 1 : 0) + (ai.level === 'hard' ? 1 : 0));
+  const drones = ai.tune.drones;
   // Under attack, everything goes into units: the plans can wait.
   const calm = ai.alarm === null;
   const sappers = calm && w.tick > 3 * MINUTE ? ai.tune.sappers : 0;
@@ -1399,7 +1449,9 @@ function military(ai: Ai, w: World, out: Command[]): void {
       ai.stageY = sy;
     }
   }
+  const was = ai.alarm;
   ai.alarm = findAlarm(ai, w);
+  if (ai.alarm !== null && was === null) ai.alarmSince = w.tick;
   enlist(ai, w);
   garrisons(ai, w, out);
   scouting(ai, w, out);
@@ -1734,7 +1786,8 @@ function quietFord(ai: Ai, w: World, x: number, y: number): number {
  */
 function scouting(ai: Ai, w: World, out: Command[]): void {
   const map = w.map;
-  const taken = [false, false, false, false];
+  // A commander with few eyes never sends a team to hide in sight of the enemy base.
+  const taken = [false, ai.tune.eyes < 2, false, false];
   let slot = 0;
   for (const i of ai.scouts)
     if (w.kind[i] === KIND_RECON && ai.post[i] >= 0) taken[ai.post[i]] = true;
@@ -1745,7 +1798,7 @@ function scouting(ai: Ai, w: World, out: Command[]): void {
   }
   const obj = ai.forces[0].obj;
   if (obj !== null && ai.forces[0].state !== F_IDLE) rounds.push(obj.x, obj.y, obj.x, obj.y);
-  const turn = Math.trunc(w.tick / (30 * TICK_RATE));
+  const turn = Math.trunc(w.tick / ai.tune.patrol);
   for (const i of ai.scouts) {
     if ((w.flags[i] & FLAG_MOVING) !== 0) continue;
     let tx = ai.stageX;
@@ -1854,7 +1907,10 @@ function findAlarm(ai: Ai, w: World): Alarm | null {
  * win there (it always fights for the base).
  */
 function runReserve(ai: Ai, w: World, out: Command[]): void {
-  const a = ai.alarm;
+  let a = ai.alarm;
+  // A slow commander: the intrusion has to last a while before anyone is sent.
+  if (a !== null && w.tick - ai.alarmSince < (a.base ? ai.tune.react >> 1 : ai.tune.react))
+    a = null;
   const units = ai.reserve.filter((i) => w.kind[i] !== KIND_STRIKE || a !== null);
   if (a !== null && (a.base || strength(w, ai.reserve) * 100 >= a.threat * 70)) {
     const go = units.filter(
@@ -1950,6 +2006,9 @@ function chooseObjective(ai: Ai, w: World, x: number, y: number, power: number):
     if (owner === ai.enemy) foeTowns++;
     if (owner === ai.team) continue;
     const mine = bankOf(ai, map.townX[t], map.townY[t]) === ai.side;
+    // Beaten there not long ago, and not a commander who tries again (its own side of the
+    // map it always fights for).
+    if (!mine && ai.shun[t] > w.tick) continue;
     // A town the enemy holds has a garrison whether or not it has shown itself: troops in
     // houses are seen only when they fire.
     const hidden = owner === ai.enemy ? Math.min(260, 50 + 8 * minute) : 0;
@@ -1982,7 +2041,9 @@ function chooseObjective(ai: Ai, w: World, x: number, y: number, power: number):
   if (foeTowns === 0) value += 150;
   if (w.pop[ai.team] * 10 >= Math.min(w.popCap[ai.team], ai.tune.size) * 9) value += 100;
   if (power > 700) value += 100;
-  consider({ kind: OBJ_BASE, id: -1, x: ai.foeX, y: ai.foeY }, value, need);
+  if (ai.shun[MAX_TOWNS] <= w.tick) {
+    consider({ kind: OBJ_BASE, id: -1, x: ai.foeX, y: ai.foeY }, value, need);
+  }
   if (best !== null) return best;
   // Nothing it is sure of. An army that has grown large and has sat for four minutes goes
   // anyway, for the best of what it at least matches: waiting only helps the defender.
@@ -2034,6 +2095,7 @@ function retreat(ai: Ai, f: Force, w: World, beaten: boolean): void {
   if (beaten && f.role === R_ARMY && obj !== null && obj.kind !== OBJ_POINT) {
     const k = obj.kind === OBJ_TOWN ? obj.id : MAX_TOWNS;
     if (f.launch > ai.grudge[k]) ai.grudge[k] = f.launch;
+    if (ai.tune.sulk > 0) ai.shun[k] = w.tick + ai.tune.sulk;
   }
   if (f.role === R_ARMY) ai.restUntil = w.tick + ai.tune.rest;
   f.state = F_RETREAT;
@@ -2306,7 +2368,7 @@ function follow(ai: Ai, w: World, out: Command[], units: number[], cx: number, c
     if (v === 0) continue;
     const de = dist(w.posX[e], w.posY[e], cx, cy);
     if (de > fx(120)) continue;
-    const key = v * fx(40) - de;
+    const key = (ai.tune.focus ? v * fx(40) : 0) - de;
     if (best < 0 || key > bestKey) {
       best = e;
       bestKey = key;
@@ -2475,7 +2537,8 @@ function assault(
     }
     if (
       point >= 0 &&
-      (kind === KIND_ARTILLERY || (kind === KIND_TANK && w.attack[i] === NO_TARGET))
+      (kind === KIND_ARTILLERY ||
+        (kind === KIND_TANK && ai.tune.focus && w.attack[i] === NO_TARGET))
     ) {
       const busy = (flags & (FLAG_SIEGE | FLAG_BOMBARD)) !== 0 && w.orderStruct[i] === point;
       if (!busy) shell.push(i);

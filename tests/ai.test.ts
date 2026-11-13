@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aiThink, createAi, findCrossings, type Ai, type AiLevel } from '../src/sim/ai';
+import { AI_TUNING, aiThink, createAi, findCrossings, type Ai, type AiLevel } from '../src/sim/ai';
 import { CMD_FIELDWORK, CMD_FOUND, CMD_LOAD, CMD_SPAWN, type Command } from '../src/sim/commands';
 import { B_BARRACKS, B_DEPOT, B_HQ } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
@@ -7,7 +7,7 @@ import { MAP_CELLS, T_WIRE, flatMap, generateMap } from '../src/sim/map';
 import { WORK_WALL } from '../src/sim/works';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
-import { KIND_INFANTRY, KIND_TANK, KIND_TRUCK } from '../src/sim/units';
+import { KIND_DRONE, KIND_INFANTRY, KIND_RECON, KIND_TANK, KIND_TRUCK } from '../src/sim/units';
 import { NO_TEAM, STATE_ALIVE, createWorld, hashWorld, type World } from '../src/sim/world';
 
 const MINUTE = 1200;
@@ -295,5 +295,30 @@ describe('base buildings as targets', () => {
     const before = w.sHp[s];
     for (let k = 0; k < 200; k++) step(w, []);
     expect(w.sHp[s]).toBe(before);
+  });
+});
+
+describe('the easy opponent plays worse, not only smaller', () => {
+  it('keeps fewer eyes than normal', () => {
+    const recon = (level: AiLevel) => {
+      const w = createWorld(2, generateMap(2, 'ridge'));
+      const ais = [null, createAi(1, level, 2)];
+      step(w, skirmishCommands(w.map));
+      play(w, ais, 12 * MINUTE);
+      return count(w, 1, KIND_RECON) + count(w, 1, KIND_DRONE);
+    };
+    // Both start with two recon teams; easy adds one drone and no more.
+    const easy = recon('easy');
+    expect(easy).toBeLessThanOrEqual(3);
+    expect(recon('normal')).toBeGreaterThan(easy);
+  }, 120000);
+
+  it('has the slow reactions and the long memory of a defeat in its tuning', () => {
+    expect(AI_TUNING.easy.react).toBeGreaterThan(AI_TUNING.normal.react);
+    expect(AI_TUNING.easy.focus).toBe(false);
+    expect(AI_TUNING.normal.focus).toBe(true);
+    expect(AI_TUNING.easy.sulk).toBeGreaterThan(0);
+    expect(AI_TUNING.normal.sulk).toBe(0);
+    expect(AI_TUNING.recruit.sulk).toBeGreaterThan(AI_TUNING.easy.sulk);
   });
 });
