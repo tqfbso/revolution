@@ -34,7 +34,18 @@ import {
   CLASS_COUNT,
   CLASS_FOOT,
   CLASS_VEHICLE,
+  DAMAGED_PCT,
+  FACE_EAST,
+  FACE_NORTH,
+  FACE_SOUTH,
+  FACE_WEST,
+  GUTTED_PCT,
+  STAGE_DAMAGED,
+  STAGE_GUTTED,
+  STAGE_INTACT,
+  STAGE_RUIN,
   FLOOR_HEIGHT,
+  type GameMap,
   MAP_CELLS,
   MAX_STRUCTS,
   MAX_TOWNS,
@@ -106,6 +117,8 @@ import {
 import {
   CHASE_FIELDS,
   EV_BREACH,
+  EV_GUTTED,
+  EV_WALL,
   EV_CAPTURE,
   EV_COLLAPSE,
   EV_DEATH,
@@ -229,6 +242,8 @@ const DETECT_RANGE_SQ = DETECT_RANGE * DETECT_RANGE;
 /** Jammers alive this tick. */
 const jammers = new Int32Array(MAX_UNITS);
 const structDamage = new Int32Array(MAX_STRUCTS);
+/** Damage of the tick to the walls of buildings, four faces each. */
+const wallDamage = new Int32Array(MAX_STRUCTS * 4);
 const townCount = new Int32Array(MAX_TOWNS * MAX_TEAMS);
 const repairCrew = new Int32Array(MAX_STRUCTS * MAX_TEAMS);
 /** Set when a structure fell or was rebuilt this tick: routes must be recomputed. */
@@ -639,7 +654,10 @@ function updateEyes(w: World): void {
 function eyeHeight(w: World, i: number): number {
   const map = w.map;
   const s = w.inside[i];
-  if (s >= 0) return map.sBase[s] + map.sFloors[s] * FLOOR_HEIGHT;
+  // A gutted building has no upper floors left to look out from.
+  if (s >= 0) {
+    return map.sBase[s] + (stageOf(w, s) >= STAGE_GUTTED ? 1 : map.sFloors[s]) * FLOOR_HEIGHT;
+  }
   const x = w.posX[i];
   const y = w.posY[i];
   if (IS_AIR[w.kind[i]]) return heightAt(map, x, y) + AIR_HEIGHT;
@@ -654,8 +672,48 @@ function rangeTo(w: World, i: number, t: number): number {
   if (IS_AIR[w.kind[i]] || IS_AIR[w.kind[t]]) return KINDS[w.kind[i]].range;
   let bonus = (eyeZ[i] - eyeZ[t]) >> HEIGHT_RANGE_SHIFT;
   bonus = clampInt(bonus, HEIGHT_RANGE_MIN, HEIGHT_RANGE_MAX);
-  if (w.inside[i] >= 0 && bonus < GARRISON_RANGE_BONUS) bonus = GARRISON_RANGE_BONUS;
+  if (w.inside[i] >= 0 && bonus < GARRISON_RANGE_BONUS && stageOf(w, w.inside[i]) < STAGE_GUTTED) {
+    bonus = GARRISON_RANGE_BONUS;
+  }
   return KINDS[w.kind[i]].range + bonus;
+}
+
+/** How far gone a structure is: intact, damaged, gutted or a ruin (see STAGE_* in the map). */
+export function stageOf(w: World, s: number): number {
+  const hp = w.sHp[s];
+  if (hp <= 0) return STAGE_RUIN;
+  const max = w.map.sMaxHp[s];
+  if (hp * 100 >= max * DAMAGED_PCT) return STAGE_INTACT;
+  return hp * 100 >= max * GUTTED_PCT ? STAGE_DAMAGED : STAGE_GUTTED;
+}
+
+/** The face of building `s` that a shot from (x, y) meets. */
+export function faceToward(map: GameMap, s: number, x: number, y: number): number {
+  const dx = x - (((2 * map.sX[s] + map.sW[s]) << CELL_SHIFT) >> 1);
+  const dy = y - (((2 * map.sY[s] + map.sH[s]) << CELL_SHIFT) >> 1);
+  // Measured against the building's own proportions, so a long wall is the likelier face.
+  if (Math.abs(dx) * map.sH[s] >= Math.abs(dy) * map.sW[s]) return dx > 0 ? FACE_EAST : FACE_WEST;
+  return dy > 0 ? FACE_SOUTH : FACE_NORTH;
+}
+
+/**
+ * Percent of a hit that reaches the men inside, by the state of the building (the last
+ * entry is a gutted building hit through a breached wall: no better than rubble).
+ */
+const THROUGH = [25, 35, 45, 50];
+
+/**
+ * Direct fire from (x, y) on structure `s`. Against a building it breaks the wall it hits
+ * and does a quarter of its damage to the structure: a gun opens a house, it does not
+ * bring it down. Bridges and base buildings take it whole.
+ */
+function shootStructure(w: World, s: number, x: number, y: number, siege: number): void {
+  if (w.map.sKind[s] !== S_BUILDING) {
+    structDamage[s] += siege;
+    return;
+  }
+  wallDamage[4 * s + faceToward(w.map, s, x, y)] += siege;
+  structDamage[s] += (siege + 3) >> 2;
 }
 
 function garrisonCapacity(w: World, s: number): number {
@@ -1534,7 +1592,7 @@ function resolveShells(w: World): void {
         const reach = KINDS[w.kind[j]].armour === null ? R : ARMOUR_BLAST(R);
         if (d2 >= reach * reach) continue;
         let dmg = Math.trunc((kind.damage[w.kind[j]] * (2 * reach - isqrt(d2))) / (2 * reach));
-        if (w.inside[j] >= 0) dmg >>= 2;
+        if (w.inside[j] >= 0) dmg = Math.trunc((dmg * THROUGH[stageOf(w, w.inside[j])]) / 100);
         else if (KIND_CLASS[w.kind[j]] === CLASS_FOOT) {
           // Rubble and sandbags stop half the splinters, a trench three quarters.
           const under = map.type[cellOfPos(w.posX[j], w.posY[j])];
@@ -1622,7 +1680,9 @@ function fire(w: World): void {
         structDist2(w, s, w.posX[i], w.posY[i]) <= siegeReach(kind) * siegeReach(kind) &&
         seesStructure(w, i, s)
       ) {
-        structDamage[s] += kind.siege;
+        // A demolition charge is laid against what holds the house up; a gun hits a wall.
+        if (kind.engineer) structDamage[s] += kind.siege;
+        else shootStructure(w, s, w.posX[i], w.posY[i], kind.siege);
         w.cooldown[i] = kind.reload;
         w.events.push(EV_SIEGE, i, s);
         continue;
@@ -1680,9 +1740,15 @@ function fire(w: World): void {
         Math.trunc((dmg * armour[cos >= FACING_COS ? 0 : cos <= -FACING_COS ? 2 : 1]) / 100) || 1;
     }
     if (cover >= 0) {
-      // Walls stop most of it. What a tank gun does not do to the men it does to the house.
-      dmg = dmg >> 2 || 1;
-      if (!kind.engineer) structDamage[cover] += kind.siege;
+      // Walls stop most of it, less as the house comes apart, and a breached wall is one
+      // step worse for fire from its side. What a gun does not do to the men it does to
+      // the house.
+      let step = stageOf(w, cover);
+      if (w.sWall[4 * cover + faceToward(w.map, cover, w.posX[i], w.posY[i])] <= 0) step++;
+      dmg = Math.trunc((dmg * THROUGH[step]) / 100) || 1;
+      if (!kind.engineer && kind.siege > 0) {
+        shootStructure(w, cover, w.posX[i], w.posY[i], kind.siege);
+      }
     } else if (KIND_CLASS[w.kind[t]] === CLASS_FOOT) {
       // Rubble halves what reaches the men in it; a trench or sandbags stop two thirds.
       const under = w.map.type[cellOfPos(w.posX[t], w.posY[t])];
@@ -1760,10 +1826,31 @@ function resolveStructures(w: World): void {
     const d = structDamage[s];
     if (d === 0) continue;
     structDamage[s] = 0;
+    if (map.sKind[s] === S_BUILDING) {
+      for (let f = 0; f < 4; f++) {
+        const hit = wallDamage[4 * s + f];
+        if (hit === 0) continue;
+        wallDamage[4 * s + f] = 0;
+        const left = w.sWall[4 * s + f];
+        if (left <= 0 || w.sHp[s] <= 0) continue;
+        w.sWall[4 * s + f] = left > hit ? left - hit : 0;
+        if (left <= hit) w.events.push(EV_WALL, s, f);
+      }
+    }
     if (w.sHp[s] <= 0) continue;
+    const before = stageOf(w, s);
     w.sHp[s] -= d;
+    if (w.sHp[s] < 0) w.sHp[s] = 0;
+    const after = stageOf(w, s);
+    if (before < STAGE_GUTTED && after >= STAGE_GUTTED && map.sKind[s] === S_BUILDING) {
+      // The roof and the floors come down: a quarter of each squad inside is lost, and
+      // the rest fights on from the shell.
+      for (let i = 0; i < w.count; i++) {
+        if (w.state[i] === STATE_ALIVE && w.inside[i] === s) w.hp[i] -= w.hp[i] >> 2;
+      }
+      if (after === STAGE_GUTTED) w.events.push(EV_GUTTED, s, 0);
+    }
     if (w.sHp[s] > 0) continue;
-    w.sHp[s] = 0;
     w.sRepair[s] = 0;
     const bridge = map.sKind[s] === S_BRIDGE;
     // Twice for a bridge: squads thrown out of a sinking carrier are in the river too.
@@ -1777,9 +1864,10 @@ function resolveStructures(w: World): void {
             kill(w, i, i);
           }
         } else if (w.inside[i] === s) {
-          // The house falls on its garrison: half of what is left of each squad walks out.
+          // The walls fall on the garrison: another quarter is lost, and the rest is left
+          // standing in the rubble, which is still cover.
           w.inside[i] = -1;
-          w.hp[i] -= w.hp[i] >> 1;
+          w.hp[i] -= w.hp[i] >> 2;
         }
       }
     }

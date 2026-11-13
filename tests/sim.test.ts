@@ -200,7 +200,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 667530429;
+const GOLDEN = 3890551401;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -531,10 +531,12 @@ describe('cities', () => {
     step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [2, 3, 4, 5], structure: 0 }]);
     w.events.length = 0;
     let fell = -1;
-    for (let t = 0; t < 1500 && fell < 0; t++) {
+    // Four tank guns need a minute and a half for a small house (decision 074).
+    for (let t = 0; t < 2600 && fell < 0; t++) {
       step(w, []);
       if (hasEvent(w, EV_COLLAPSE)) fell = t;
     }
+    expect(fell).toBeGreaterThan(1200);
     expect(fell).toBeGreaterThan(0);
     expect(hasEvent(w, EV_SIEGE)).toBe(true);
     expect(w.sHp[0]).toBe(0);
@@ -545,7 +547,7 @@ describe('cities', () => {
     for (const i of [0, 1]) {
       expect(w.inside[i]).toBe(-1);
       if (w.state[i] === STATE_ALIVE)
-        expect(w.hp[i]).toBeLessThanOrEqual(Math.ceil(KINDS[KIND_INFANTRY].hp / 2));
+        expect(w.hp[i]).toBeLessThanOrEqual(Math.ceil(KINDS[KIND_INFANTRY].hp * 0.6));
     }
     // Nobody can go back in, and the ruin never clears.
     step(w, [{ type: CMD_GARRISON, units: [0, 1], structure: 0 }]);

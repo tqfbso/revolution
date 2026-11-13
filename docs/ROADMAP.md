@@ -222,16 +222,17 @@ an attack elsewhere. Decision 073.
   found by a recon drone: banner, tone, spoken line, minimap ping, edge arrow; Backspace
   jumps to the latest
 
-## Urban warfare (planned, not built; order awaits Fabio)
+## Urban warfare (U1 built, awaiting Fabio's test; U2 to U6 planned)
 
 Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,
 something like building buildings, fighting through a city as it is destroyed, and a
 dense city map with streets, bus stops and lots of detail. The full plan, with the
 research behind it, the performance budget and the open questions, is in `URBAN.md`.
 
-- U1 Buildings that die slowly (medium, Sonnet 5.5): four states (intact, damaged, gutted,
-  ruin), each still a position; building classes two to six times tougher; tank guns break
-  walls, artillery brings structures down; a ruin cannot be destroyed further
+- U1 Buildings that die slowly (BUILT 2026-11-13, decision 074): four states (intact,
+  damaged, gutted, ruin), each still a position; building classes two to six times
+  tougher; tank guns break walls, artillery brings structures down; a ruin cannot be
+  destroyed further; the garrison's losses come in two steps
 - U2 Hold and take a block (heavy, Fable 5.2 with Sonnet 5.5 for the interface): fortify,
   repair, barricades, linked buildings with mouseholes, storming an enemy-held building
 - U3 Streets (heavy, Fable 5.2): street terrain, columns in corridors, local map updates,
@@ -242,9 +243,9 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   blocks; marksman team; top attack on tanks in streets; drone rules
 - U6 Tuning after play (light, Sonnet 5.5)
 
-Recommended order: U1 next, the rest before the factions, so that each faction's roster
-can be designed around the urban rules instead of being redesigned for them. Not decided;
-the milestone numbers below stay as they are until it is.
+Order agreed with Fabio on 2026-11-13: U1, then the soldiers and the cameras, then co-op
+(if approved), then U2 to U5, then the factions, so that each faction's roster is designed
+around the urban rules instead of being redesigned for them.
 
 ## M10 Factions
 

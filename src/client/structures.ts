@@ -8,9 +8,16 @@ import {
   MAP_CELLS,
   MAX_SITES,
   MAX_STRUCTS,
+  BUILD_HOUSE,
+  FACE_EAST,
+  FACE_NORTH,
+  FACE_SOUTH,
+  STAGE_DAMAGED,
+  STAGE_GUTTED,
   SITE_SUPPLIES,
   S_BASE,
   S_BRIDGE,
+  S_BUILDING,
   addStructure,
   type GameMap,
 } from '../sim/map';
@@ -147,15 +154,129 @@ function buildingParts(
   d: number,
   base: number,
   floors: number,
-  damaged: boolean,
+  stage: number,
+  breached: number,
+  cls: number,
 ): Part[] {
+  const damaged = stage >= STAGE_DAMAGED;
   const parts: Part[] = [];
   const cx = x0 + w / 2;
   const cz = z0 + d / 2;
   const h = floors * FLOOR;
-  const wall = WALLS[Math.floor(rand(id, 1) * WALLS.length)];
+  // Concrete for the blocks and halls, plaster and brick for houses.
+  const wall =
+    cls === BUILD_HOUSE
+      ? WALLS[Math.floor(rand(id, 1) * WALLS.length)]
+      : [0x8a8a84, 0x7c7d78, 0x93908a][Math.floor(rand(id, 1) * 3)];
   const wear = damaged ? 0.62 : 0.92 + rand(id, 2) * 0.12;
   parts.push({ size: [w + 0.3, 2.4, d + 0.3], at: [cx, base - 1.15, cz], color: 0x55524c });
+  // A breached wall: a ragged hole from the ground up, and what came out of it in a heap.
+  for (let f = 0; f < 4; f++) {
+    if ((breached & (1 << f)) === 0) continue;
+    const alongX = f === FACE_NORTH || f === FACE_SOUTH;
+    const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+    const len = alongX ? w : d;
+    const off = (side * (alongX ? d : w)) / 2;
+    const gap = Math.min(len * 0.5, 3.4);
+    const gh = Math.min(h * 0.75, FLOOR * 1.7);
+    const t = (rand(id, 880 + f) - 0.5) * (len - gap) * 0.5;
+    for (let k = 0; k < 3; k++) {
+      const gw = gap * (1 - k * 0.28);
+      const gy = gh * (0.45 + k * 0.3);
+      parts.push({
+        size: alongX ? [gw, gy, 0.24] : [0.24, gy, gw],
+        at: alongX ? [cx + t, base + gy / 2, cz + off] : [cx + off, base + gy / 2, cz + t],
+        color: SOOT,
+      });
+    }
+    for (let k = 0; k < 7; k++) {
+      const s = 0.3 + rand(id, 890 + f * 9 + k) * 0.6;
+      const out = 0.3 + rand(id, 930 + f * 9 + k) * 1.1;
+      const along = t + (rand(id, 960 + f * 9 + k) - 0.5) * gap * 1.3;
+      parts.push({
+        size: [s, s * 0.5, s * 0.8],
+        at: alongX
+          ? [cx + along, base + s * 0.2, cz + off + side * out]
+          : [cx + off + side * out, base + s * 0.2, cz + along],
+        rot: [rand(id, 990 + k) - 0.5, rand(id, 995 + k) * 3, rand(id, 999 + k) - 0.5],
+        color: wall,
+        shade: 0.5,
+      });
+    }
+  }
+  if (stage === STAGE_GUTTED) {
+    // A shell: the roof and the floors are in a heap inside, the walls stand at ragged
+    // heights with the sky showing through, and a breached face is down to its footing.
+    parts.push({ size: [w - 0.5, 0.3, d - 0.5], at: [cx, base + 0.15, cz], color: 0x2b2926 });
+    // What is left of the roof timbers and floor beams, charred, hanging across the gap.
+    for (let i = 0; i < 4; i++) {
+      const alongX = w < d;
+      const t = ((i + 0.5) / 4 - 0.5) * (alongX ? d : w) * 0.8;
+      const drop = rand(id, 1500 + i) * 0.5;
+      parts.push({
+        size: alongX
+          ? [w * (0.55 + rand(id, 1510 + i) * 0.4), 0.1, 0.12]
+          : [0.12, 0.1, d * (0.55 + rand(id, 1510 + i) * 0.4)],
+        at: alongX
+          ? [cx, base + h * (0.85 - drop), cz + t]
+          : [cx + t, base + h * (0.85 - drop), cz],
+        rot: alongX
+          ? [0, 0, (rand(id, 1520 + i) - 0.5) * 0.5]
+          : [(rand(id, 1520 + i) - 0.5) * 0.5, 0, 0],
+        color: SOOT,
+      });
+    }
+    for (let i = 0; i < 10 + w * d * 0.25; i++) {
+      const s = 0.7 + rand(id, 400 + i) * 1.8;
+      parts.push({
+        size: [s, 0.16 + rand(id, 460 + i) * 0.4, s * (0.5 + rand(id, 490 + i) * 0.6)],
+        at: [
+          cx + (rand(id, 520 + i) - 0.5) * (w - 1.2),
+          base + 0.3 + rand(id, 550 + i) * 0.35,
+          cz + (rand(id, 580 + i) - 0.5) * (d - 1.2),
+        ],
+        rot: [
+          (rand(id, 610 + i) - 0.5) * 0.9,
+          rand(id, 640 + i) * 3.1,
+          (rand(id, 670 + i) - 0.5) * 0.9,
+        ],
+        color: i % 3 === 0 ? 0x4c4a46 : wall,
+        shade: 0.38 + rand(id, 700 + i) * 0.25,
+      });
+    }
+    for (let f = 0; f < 4; f++) {
+      const alongX = f === FACE_NORTH || f === FACE_SOUTH;
+      const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+      const len = alongX ? w : d;
+      const off = (side * ((alongX ? d : w) - 0.3)) / 2;
+      const n = Math.max(3, Math.round(len / 1.5));
+      const open = (breached & (1 << f)) !== 0;
+      for (let i = 0; i < n; i++) {
+        const corner = i === 0 || i === n - 1;
+        const r = rand(id, 1100 + f * 40 + i);
+        let hh = h * (corner ? 0.85 + r * 0.15 : 0.5 + r * 0.5);
+        if (open && !corner && Math.abs(i - (n - 1) / 2) < n * 0.3) hh = FLOOR * 0.25;
+        const t = ((i + 0.5) / n - 0.5) * len;
+        parts.push({
+          size: alongX ? [len / n + 0.02, hh, 0.3] : [0.3, hh, len / n + 0.02],
+          at: alongX ? [cx + t, base + hh / 2, cz + off] : [cx + off, base + hh / 2, cz + t],
+          color: wall,
+          shade: 0.4 + rand(id, 1300 + f * 40 + i) * 0.22,
+        });
+        // Empty window openings, as far up as this stretch of wall still goes.
+        for (let fl = 0; fl < floors; fl++) {
+          const wy = base + fl * FLOOR + FLOOR * 0.56;
+          if (wy + 0.3 > base + hh) break;
+          parts.push({
+            size: alongX ? [0.5, 0.44, 0.34] : [0.34, 0.44, 0.5],
+            at: alongX ? [cx + t, wy, cz + off] : [cx + off, wy, cz + t],
+            color: SOOT,
+          });
+        }
+      }
+    }
+    return parts;
+  }
   parts.push({ size: [w, h, d], at: [cx, base + h / 2, cz], color: wall, shade: wear });
   const top = base + h;
   // Small houses have pitched roofs; blocks of flats and anything large a flat one.
@@ -767,8 +888,14 @@ export class StructureView {
 
   private readonly material: THREE.MeshStandardNodeMaterial;
   private readonly meshes: (THREE.Mesh | null)[] = [];
-  /** 0 standing, 1 damaged, 2 destroyed. */
-  private readonly shown = new Int8Array(MAX_STRUCTS).fill(-1);
+  /** Latest state per structure (STAGE_*) and its breached faces, one bit each (FACE_*). */
+  readonly stage = new Uint8Array(MAX_STRUCTS);
+  readonly breached = new Uint8Array(MAX_STRUCTS);
+  /**
+   * What is drawn: 0 standing, 1 damaged, 2 destroyed, 3 going up, 4 gutted, plus the
+   * breached faces times eight.
+   */
+  private readonly shown = new Int16Array(MAX_STRUCTS).fill(-1);
   private readonly fellAt = new Float32Array(MAX_STRUCTS).fill(-1e9);
   private readonly pips: Batch;
   private readonly flags: Batch;
@@ -870,7 +997,8 @@ export class StructureView {
   }
 
   private show(s: number, state: number): void {
-    if (this.shown[s] === state) return;
+    const holes = state === 2 || state === 3 ? 0 : this.breached[s];
+    if (this.shown[s] === state + 8 * holes) return;
     const sm = this.map;
     if (sm.sKind[s] === S_BASE) {
       // A base building takes the place of whatever hedge or fence stood there.
@@ -899,11 +1027,22 @@ export class StructureView {
         ? baseParts(s, this.baseType[s], this.baseTeam[s], x0, z0, w, d, base, state)
         : state === 2
           ? rubbleParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s])
-          : buildingParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s], state === 1);
+          : buildingParts(
+              s,
+              x0 + 0.5,
+              z0 + 0.5,
+              w - 1,
+              d - 1,
+              base,
+              m.sFloors[s],
+              state === 4 ? STAGE_GUTTED : state === 1 ? STAGE_DAMAGED : 0,
+              holes,
+              m.sClass[s],
+            );
     const mesh = this.mesh(build(parts));
     this.meshes[s] = mesh;
     this.group.add(mesh);
-    this.shown[s] = state;
+    this.shown[s] = state + 8 * holes;
     // Units drive on a standing deck; a standing house blocks the view.
     if (bridge) this.terrain.bridgeUp[s] = state === 2 ? 0 : 1;
     else {
@@ -946,6 +1085,9 @@ export class StructureView {
       const hp = s.structHp[k];
       if (hp === 0 && this.hp[k] !== 0) this.fellAt[k] = seconds;
       this.hp[k] = hp;
+      const bits = s.structStage[k] ?? 0;
+      this.stage[k] = bits & 3;
+      this.breached[k] = bits >> 2;
       if (this.hidden(k) && !this.spot(k)) continue;
       const rising = this.baseTeam[k] >= 0 && this.basePct[k] < 100;
       this.show(
@@ -954,11 +1096,17 @@ export class StructureView {
           ? 2
           : rising
             ? 3
-            : hp < DAMAGED_BELOW && this.baseTeam[k] < 0
-              ? 1
-              : hp < 110
+            : map.sKind[k] === S_BUILDING
+              ? this.stage[k] === STAGE_GUTTED
+                ? 4
+                : this.stage[k] === STAGE_DAMAGED
+                  ? 1
+                  : 0
+              : hp < DAMAGED_BELOW && this.baseTeam[k] < 0
                 ? 1
-                : 0,
+                : hp < 110
+                  ? 1
+                  : 0,
       );
     }
     for (let k = 0; k < s.siteStock.length; k++) {
@@ -1002,6 +1150,37 @@ export class StructureView {
         ? this.terrain.heightAt(x, z)
         : this.topOf(s) * 0.5 + fromFx(m.sBase[s]) * 0.5;
     return { x, y, z };
+  }
+
+  /** The roof and floors of a building come down inside its walls. */
+  gut(s: number): void {
+    const { x, z } = this.centreOf(s);
+    const y = this.topOf(s);
+    for (let i = 0; i < 5; i++) {
+      const p = this.hit(s);
+      this.effects.squadHit(p.x, y * 0.6 + fromFx(this.map.sBase[s]) * 0.4, p.z);
+      this.effects.wreckSmoke(p.x, y, p.z, 0.5);
+    }
+    this.effects.explosion(x, y * 0.5 + fromFx(this.map.sBase[s]) * 0.5, z);
+  }
+
+  /** A wall is breached: dust and masonry out of face `f`. */
+  breach(s: number, f: number): { x: number; z: number } {
+    const m = this.map;
+    const alongX = f === FACE_NORTH || f === FACE_SOUTH;
+    const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+    const c = this.centreOf(s);
+    const x = c.x + (alongX ? 0 : (side * m.sW[s] * CELL) / 2);
+    const z = c.z + (alongX ? (side * m.sH[s] * CELL) / 2 : 0);
+    const y = fromFx(m.sBase[s]) + 0.6;
+    for (let i = 0; i < 4; i++) {
+      this.effects.squadHit(
+        x + (Math.random() - 0.5) * 2,
+        y + Math.random(),
+        z + (Math.random() - 0.5) * 2,
+      );
+    }
+    return { x, z };
   }
 
   collapse(s: number): void {

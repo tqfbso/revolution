@@ -3,7 +3,7 @@
 import { aiThink, createAi, type Ai } from '../sim/ai';
 import type { Command } from '../sim/commands';
 import { fromFx } from '../sim/fixed';
-import { generateMap } from '../sim/map';
+import { S_BUILDING, generateMap } from '../sim/map';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, UNIT_PRICE } from '../sim/economy';
 import {
   assaultCommands,
@@ -13,7 +13,7 @@ import {
 } from '../sim/scenarios';
 import { KINDS } from '../sim/units';
 import { WORKS } from '../sim/works';
-import { step } from '../sim/sim';
+import { stageOf, step } from '../sim/sim';
 import {
   FLAG_MOVING,
   MAX_TEAMS,
@@ -154,8 +154,14 @@ function postSnapshot(w: World, simMs: number): void {
   }
   const map = w.map;
   const structHp = new Uint8Array(map.structCount);
+  const structStage = new Uint8Array(map.structCount);
   for (let s = 0; s < map.structCount; s++) {
     structHp[s] = w.sHp[s] <= 0 ? 0 : Math.ceil((w.sHp[s] * 255) / map.sMaxHp[s]);
+    let bits = stageOf(w, s);
+    if (map.sKind[s] === S_BUILDING) {
+      for (let f = 0; f < 4; f++) if (w.sWall[4 * s + f] <= 0) bits |= 4 << f;
+    }
+    structStage[s] = bits;
   }
   const townProgress = new Uint8Array(map.townCount);
   for (let t = 0; t < map.townCount; t++) {
@@ -202,6 +208,7 @@ function postSnapshot(w: World, simMs: number): void {
     events,
     alive,
     structHp,
+    structStage,
     townOwner: w.townOwner.slice(0, map.townCount),
     townCapturer: w.townCapturer.slice(0, map.townCount),
     townProgress,

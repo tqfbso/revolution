@@ -47,6 +47,44 @@ export const S_BRIDGE = 1;
 /** A base building put up by an army during the game (see src/sim/economy.ts). */
 export const S_BASE = 2;
 export const MAX_STRUCTS = 512;
+/**
+ * What a building is made of (decision 074): a house of brick or timber, an apartment or
+ * office block of concrete, or a hall (public or industrial: thick walls, wide spans).
+ */
+export const BUILD_HOUSE = 0;
+export const BUILD_BLOCK = 1;
+export const BUILD_HALL = 2;
+/** Structure per cell of ground plan, and wall strength per cell of face, by class. */
+export const BUILD_HP: readonly number[] = [450, 900, 1300];
+export const WALL_HP: readonly number[] = [200, 400, 600];
+/** The faces of a building, in the order its wall strengths are stored: -y, +x, +y, -x. */
+export const FACE_NORTH = 0;
+export const FACE_EAST = 1;
+export const FACE_SOUTH = 2;
+export const FACE_WEST = 3;
+/**
+ * The states a building goes through as its structure goes (see stageOf in the sim).
+ * Each is still a position; a ruin is rubble on the ground and cannot be damaged further.
+ */
+export const STAGE_INTACT = 0;
+export const STAGE_DAMAGED = 1;
+export const STAGE_GUTTED = 2;
+export const STAGE_RUIN = 3;
+/** Percent of its structure below which a building is damaged, and gutted. */
+export const DAMAGED_PCT = 70;
+export const GUTTED_PCT = 35;
+
+/** The class of a building, from its ground plan and height. */
+export function buildClass(w: number, h: number, floors: number): number {
+  if (floors >= 4) return BUILD_BLOCK;
+  if (w * h >= 9 && floors <= 2) return BUILD_HALL;
+  return BUILD_HOUSE;
+}
+
+/** How much the wall on face `f` of building `s` takes before it is breached. */
+export function wallMax(map: GameMap, s: number, f: number): number {
+  return ((f & 1) === 0 ? map.sW[s] : map.sH[s]) * WALL_HP[map.sClass[s]];
+}
 /** Resource sites: stockpiles of supplies (finite) and oil wells (slow but endless). */
 export const SITE_SUPPLIES = 0;
 export const SITE_FUEL = 1;
@@ -102,6 +140,8 @@ export interface GameMap {
   /** Town the structure belongs to, or -1. */
   sTown: Int8Array;
   sFloors: Uint8Array;
+  /** Buildings: BUILD_HOUSE, BUILD_BLOCK or BUILD_HALL. */
+  sClass: Uint8Array;
   sMaxHp: Int32Array;
   /** Height of the ground floor (building) or of the west end of the deck (bridge). */
   sBase: Int32Array;
@@ -801,6 +841,7 @@ function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     sH: new Int32Array(MAX_STRUCTS),
     sTown: new Int8Array(MAX_STRUCTS).fill(-1),
     sFloors: new Uint8Array(MAX_STRUCTS),
+    sClass: new Uint8Array(MAX_STRUCTS),
     sMaxHp: new Int32Array(MAX_STRUCTS),
     sBase: new Int32Array(MAX_STRUCTS),
     sEast: new Int32Array(MAX_STRUCTS),
@@ -957,7 +998,10 @@ export function addStructure(
   map.sH[s] = h;
   map.sTown[s] = town;
   map.sFloors[s] = floors;
-  map.sMaxHp[s] = kind === S_BRIDGE ? 2400 : 220 * w * h;
+  map.sClass[s] = kind === S_BUILDING ? buildClass(w, h, floors) : BUILD_HOUSE;
+  // A base building's strength is set by whoever puts it up (see foundBuilding).
+  map.sMaxHp[s] =
+    kind === S_BRIDGE ? 2400 : kind === S_BUILDING ? BUILD_HP[map.sClass[s]] * w * h : 220 * w * h;
   // Buildings stand on the lowest corner of their plot; a deck spans at the higher bank.
   let lo = map.heights[y * MAP_VERTS + x];
   let hi = lo;
