@@ -60,6 +60,31 @@ export class Hud {
   private simSum = 0;
   private simMax = 0;
   private simTicks = 0;
+  /** The full readout, or one line. Click the panel or press F3 to switch. */
+  private full = false;
+
+  constructor() {
+    try {
+      this.full = localStorage.getItem('revolution.perf') === '1';
+    } catch {
+      // storage may be blocked; the short line is fine
+    }
+    const toggle = () => {
+      this.full = !this.full;
+      try {
+        localStorage.setItem('revolution.perf', this.full ? '1' : '0');
+      } catch {
+        // not remembered
+      }
+      this.draw();
+    };
+    this.el.addEventListener('click', toggle);
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'F3') return;
+      e.preventDefault();
+      toggle();
+    });
+  }
 
   frame(dtMs: number): void {
     this.frames++;
@@ -81,6 +106,15 @@ export class Hud {
     this.simMax = 0;
     this.simTicks = 0;
     this.windowStart = now;
+    this.draw();
+  }
+
+  private draw(): void {
+    const s = this.stats;
+    if (!this.full) {
+      this.el.textContent = `FPS ${s.fps.toFixed(0)} · ${s.alive.reduce((a, b) => a + b, 0)} units · build ${__BUILD__}`;
+      return;
+    }
     this.el.textContent =
       `FPS        ${s.fps.toFixed(0)}\n` +
       `Frame      ${s.frameMs.toFixed(1)} ms (worst ${s.frameMsMax.toFixed(1)})\n` +

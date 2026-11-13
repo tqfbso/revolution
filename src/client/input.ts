@@ -87,6 +87,9 @@ export class Input {
           this.drawing = true;
           dom.setPointerCapture(e.pointerId);
         } else card.cancelTool();
+      } else if (e.button === 0 && card.armed === 'smoke') {
+        card.arm('');
+        this.smokeAt(e.clientX, e.clientY);
       } else if (e.button === 0 && this.attackMoveArmed) {
         // C, then left click: attack-move to the spot.
         this.armAttackMove(false);
@@ -96,7 +99,7 @@ export class Input {
         dom.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
         const attackMove = e.altKey || this.attackMoveArmed;
-        this.armAttackMove(false);
+        card.arm('');
         this.orderMove(e.clientX, e.clientY, attackMove, e.ctrlKey || e.metaKey);
       }
     });
@@ -137,7 +140,7 @@ export class Input {
         e.preventDefault();
         this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
       } else if (e.code === 'Escape') {
-        this.armAttackMove(false);
+        card.arm('');
         this.drawing = false;
         if (card.placing >= 0) card.cancelPlacing();
         else if (card.tool !== 0) card.cancelTool();
@@ -162,31 +165,32 @@ export class Input {
         send({ type: CMD_HOLD, units: units.selectedIds() });
       } else if (e.code === 'KeyF' && units.selectedCount > 0) {
         // Smoke: each selected gun puts one smoke shell where the pointer is.
-        const guns = units.selectedIds().filter((id) => KINDS[units.kindOf(id)].indirect);
-        const { ground } = this.structureAt(this.pointerX, this.pointerY);
-        if (guns.length > 0 && ground) {
-          send({ type: CMD_BOMBARD, units: guns, x: fx(ground.x), y: fx(ground.z), smoke: true });
-          this.mark(ground.x, ground.y + 0.15, ground.z);
-        }
+        this.smokeAt(this.pointerX, this.pointerY);
       } else if (e.code === 'KeyU' && units.selectedCount > 0) {
         send({ type: CMD_UNLOAD, units: units.selectedIds().filter((id) => units.load[id] > 0) });
       } else if (e.code === 'KeyL' && units.selectedCount > 0) {
-        // Mount up: every selected squad boards the nearest selected carrier with a seat.
-        const ids = units.selectedIds();
-        const carriers = ids.filter((id) => KINDS[units.kindOf(id)].carry > 0);
-        const squads = ids.filter((id) => KINDS[units.kindOf(id)].garrison);
-        if (carriers.length > 0 && squads.length > 0) {
-          send({ type: CMD_LOAD, units: squads, carriers });
-        }
+        card.mount();
       }
     });
   }
 
   /** After pressing C: the next left or right click is an attack-move. */
-  private attackMoveArmed = false;
+  private get attackMoveArmed(): boolean {
+    return this.card.armed === 'attack';
+  }
   private armAttackMove(on: boolean): void {
-    this.attackMoveArmed = on;
-    this.dom.style.cursor = on ? 'crosshair' : '';
+    if (on || this.card.armed === 'attack') this.card.arm(on ? 'attack' : '');
+  }
+
+  /** Each selected gun puts one smoke shell on the ground under a screen point. */
+  private smokeAt(clientX: number, clientY: number): void {
+    const units = this.units;
+    const guns = units.selectedIds().filter((id) => KINDS[units.kindOf(id)].indirect);
+    const { ground } = this.structureAt(clientX, clientY);
+    if (guns.length > 0 && ground) {
+      this.send({ type: CMD_BOMBARD, units: guns, x: fx(ground.x), y: fx(ground.z), smoke: true });
+      this.mark(ground.x, ground.y + 0.15, ground.z);
+    }
   }
 
   private pointerX = 0;
