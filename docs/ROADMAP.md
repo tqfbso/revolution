@@ -286,10 +286,12 @@ with the computer in the second seat, so co-op gets cheaper, not later for nothi
 1. Screen layout (built, decision 077): zones that never overlap, a production queue of
    fixed slots, and a button with its key for every order that was a key you had to know
    (attack-move, smoke, mount, dismount, the engineers' camera)
-2. War production centre: one screen for every factory, bulk orders spread across them,
-   "keep N of these", and new units sent straight to a town or a commander
-3. Logistics economy: faster income, paid for by supply range (units far from a depot,
-   a held town or a supply truck fight worse), upkeep for a standing army, forward depots
+2. War production centre (built, decision 078): one screen for every factory, bulk
+   orders spread across them, "keep N of these", and new units sent straight to a town
+3. Logistics economy (built, decision 079): income doubled, paid for by supply range
+   (units far from a depot, a held town or a linked truck fire at half rate), rations
+   for two minutes, mending in supply, upkeep for a standing army. Control groups are
+   visible as chips (decision 080)
 4. Sub-commanders: a group, a mission (hold, defend, attack, patrol), and a board that
    shows every commander and every unit nobody commands. Built on the skirmish AI, inside
    the deterministic rules, so a second player can take a commander's seat later

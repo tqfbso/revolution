@@ -13,6 +13,8 @@ export const TASK_JOB_MASK = 7;
 export const TASK_HOLD_FIRE = 8;
 /** Under way on a move order. */
 export const TASK_MOVING = 16;
+/** Out of rations: beyond supply for too long (see the logistics). */
+export const TASK_HUNGRY = 32;
 
 /**
  * Bits of Snapshot.info: life state (2 bits), team (2 bits), inside a building, (for a
@@ -97,6 +99,8 @@ export interface Snapshot {
   tier: number[];
   pop: number[];
   popCap: number[];
+  /** Per team: supplies a minute the army costs to keep. */
+  upkeep: number[];
   /**
    * The war production centre, per team and kind (index team * KIND_SLOTS + kind): units
    * on bulk order, the number to keep in the field, where new ones go (DEST_*).

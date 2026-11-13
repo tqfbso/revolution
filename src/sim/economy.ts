@@ -222,11 +222,11 @@ export const MAX_TIER = 3;
 export const TIER_ITEM = 255;
 
 /** What a truck carries per trip and how long it takes to load. */
-export const TRUCK_LOAD = 20;
+export const TRUCK_LOAD = 40;
 export const LOAD_TICKS = 100;
 /** A well pumps this much a second into a tank this big; trucks take what is in it. */
-export const WELL_RATE = 3;
-export const WELL_TANK = 300;
+export const WELL_RATE = 6;
+export const WELL_TANK = 600;
 /** No army fields more than this many army points (see POINTS), however many depots it builds. */
 export const POP_MAX = 800;
 /** Trucks that can usefully work on one building at once. */

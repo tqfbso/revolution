@@ -1,4 +1,11 @@
 import {
+  HUNGRY_RELOAD,
+  HUNGRY_SPEED,
+  NEEDS_SUPPLY,
+  RATION_MAX,
+  updateLogistics,
+} from './logistics';
+import {
   CMD_ATTACK,
   CMD_ATTACK_MOVE,
   CMD_BOMBARD,
@@ -313,6 +320,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateStructureOrders(w);
   updateTransport(w);
   updateEconomy(w);
+  updateLogistics(w);
   updateWorks(w);
   updateEyes(w);
   updateJamming(w);
@@ -999,6 +1007,7 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.cargoKind[id] = 0;
   w.jobTimer[id] = 0;
   w.stance[id] = 0;
+  w.ration[id] = RATION_MAX;
 }
 
 /**
@@ -1607,7 +1616,7 @@ function launch(w: World, i: number, tx: number, ty: number, dist: number, smoke
   const scatter = SCATTER_MIN + (dist >> SCATTER_SHIFT);
   const x = clampInt(tx - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
   const y = clampInt(ty - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
-  w.cooldown[i] = KINDS[w.kind[i]].reload;
+  w.cooldown[i] = reloadOf(w, i, KINDS[w.kind[i]]);
   w.spotted[i] = w.tick + COUNTER_BATTERY_TICKS;
   if (w.shellCount >= MAX_SHELLS) return;
   const k = w.shellCount++;
@@ -1760,6 +1769,11 @@ function baseInRange(w: World, i: number, range: number): number {
  * per target from start-of-tick state and applied in resolveDamage(), so two units can
  * kill each other on the same tick and iteration order never matters.
  */
+/** Ticks until `i` can fire again: twice as long for a unit that is out of rations. */
+function reloadOf(w: World, i: number, kind: UnitKind): number {
+  return w.ration[i] === 0 && NEEDS_SUPPLY[w.kind[i]] ? kind.reload * HUNGRY_RELOAD : kind.reload;
+}
+
 function fire(w: World): void {
   const n = w.count;
   for (let i = 0; i < n; i++) {
@@ -1801,7 +1815,7 @@ function fire(w: World): void {
         // A demolition charge is laid against what holds the house up; a gun hits a wall.
         if (kind.engineer) structDamage[s] += kind.siege;
         else shootStructure(w, s, w.posX[i], w.posY[i], kind.siege);
-        w.cooldown[i] = kind.reload;
+        w.cooldown[i] = reloadOf(w, i, kind);
         w.events.push(EV_SIEGE, i, s);
         continue;
       }
@@ -1819,7 +1833,7 @@ function fire(w: World): void {
       const cell = cellOfPos(w.aimX[i], w.aimY[i]);
       if (!engaged && workStands(w, cell) && reachesWork(w, i, cell)) {
         hitWork(w, cell, kind.siege, kind.engineer ? HIT_CHARGE : HIT_DIRECT);
-        w.cooldown[i] = kind.reload;
+        w.cooldown[i] = reloadOf(w, i, kind);
         w.events.push(EV_BREACH, i, cell);
         continue;
       }
@@ -1830,7 +1844,7 @@ function fire(w: World): void {
         const s = baseInRange(w, i, siegeReach(kind));
         if (s >= 0) {
           structDamage[s] += kind.siege;
-          w.cooldown[i] = kind.reload;
+          w.cooldown[i] = reloadOf(w, i, kind);
           w.events.push(EV_SIEGE, i, s);
         }
       }
@@ -1875,7 +1889,7 @@ function fire(w: World): void {
     }
     damage[t] += dmg;
     killer[t] = i;
-    w.cooldown[i] = kind.reload;
+    w.cooldown[i] = reloadOf(w, i, kind);
     if (w.inside[i] >= 0) w.reveal[i] = w.tick + REVEAL_TICKS;
     w.events.push(EV_SHOT, i, t);
     if (kind.kamikaze) {
@@ -2099,7 +2113,11 @@ function steer(w: World): void {
     const x = w.posX[i];
     const y = w.posY[i];
     const cell = cellOfPos(x, y);
-    const s = w.speed[i];
+    // Out of rations a vehicle is out of fuel too: it crawls.
+    const s =
+      w.ration[i] === 0 && KINDS[w.kind[i]].armour !== null && NEEDS_SUPPLY[w.kind[i]]
+        ? (w.speed[i] * HUNGRY_SPEED) >> 8
+        : w.speed[i];
     let vx = 0;
     let vy = 0;
     let busy = false;

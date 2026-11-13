@@ -135,8 +135,8 @@ export class Input {
       this.select(s.x, s.y, e.clientX, e.clientY, e.shiftKey, e.ctrlKey || e.metaKey);
     });
     window.addEventListener('keydown', (e) => {
-      const digit = /^Digit[1-9]$/.test(e.code) ? Number(e.code[5]) : 0;
-      if (digit) {
+      const digit = /^Digit[0-9]$/.test(e.code) ? Number(e.code[5]) : -1;
+      if (digit >= 0) {
         e.preventDefault();
         this.controlGroup(digit, e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);
       } else if (e.code === 'Escape') {
@@ -214,10 +214,25 @@ export class Input {
     return this.controlAll ? this.units.isAlive(id) : this.units.isMine(id);
   }
 
+  /** The living members of control group `n`. */
+  groupIds(n: number): number[] {
+    const u = this.units;
+    return (this.groups[n] ?? [])
+      .filter((m) => u.isAlive(m.id) && u.gen[m.id] === m.gen)
+      .map((m) => m.id);
+  }
+
+  /** Select control group `n` (as the number key does); twice quickly looks at it. */
+  recallGroup(n: number, additive: boolean): void {
+    this.controlGroup(n, false, additive);
+  }
+
   private controlGroup(n: number, assign: boolean, additive: boolean): void {
     const u = this.units;
     if (assign) {
-      this.groups[n] = u.selectedIds().map((id) => ({ id, gen: u.gen[id] }));
+      // Ctrl + number saves the selection as the group; with Shift it joins the group.
+      const keep = additive ? this.groupIds(n).filter((id) => !u.selected[id]) : [];
+      this.groups[n] = [...keep, ...u.selectedIds()].map((id) => ({ id, gen: u.gen[id] }));
       return;
     }
     // Drop members that died (a reused slot has a different generation).

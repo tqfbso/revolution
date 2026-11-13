@@ -546,6 +546,12 @@ function placeSettlement(
   return town;
 }
 
+/**
+ * Trucks carry twice what they did (decision 079), so the stockpiles of the maps hold
+ * twice what their tables say and last as long as before.
+ */
+const STOCK_SCALE = 2;
+
 /** Put a resource site as near to world point (wx, wy) as open ground allows. */
 function addSite(map: GameMap, kind: number, stock: number, wx: number, wy: number): void {
   if (map.siteCount >= MAX_SITES) return;
@@ -580,7 +586,7 @@ function addSite(map: GameMap, kind: number, stock: number, wx: number, wy: numb
   map.siteX[k] = ((c % MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
   map.siteY[k] = (Math.trunc(c / MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
   map.siteKind[k] = kind;
-  map.siteStock[k] = stock;
+  map.siteStock[k] = kind === SITE_SUPPLIES ? stock * STOCK_SCALE : stock;
 }
 
 /** What there is to haul on the ridge map, in metres for the west army; mirrored for the east. */
@@ -782,7 +788,7 @@ function placeSites(map: GameMap): void {
     map.siteX[k] = ((c % MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
     map.siteY[k] = (Math.trunc(c / MAP_CELLS) << CELL_SHIFT) + (CELL_FX >> 1);
     map.siteKind[k] = kind;
-    map.siteStock[k] = stock;
+    map.siteStock[k] = kind === SITE_SUPPLIES ? stock * STOCK_SCALE : stock;
   };
   for (let side = 0; side < 2; side++) {
     const dir = side === 0 ? -1 : 1;

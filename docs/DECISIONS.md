@@ -1070,3 +1070,56 @@ The per-building queue, Repeat and rally point stay, and the AI still uses them.
 state is in the world (`orders`, `keep`, `dest`, `orderTurn`, `orderWait`) and in the
 hash, so it is lockstep-safe. Golden hash 3142039993 (the new arrays are hashed; the
 battle in the golden scenario plays out as before).
+
+## 079. The brake moves from the factory to the battlefield (2026-11-13)
+
+Fabio: resources come slowly, which "is good in a way to avoid unit explosion, but if we
+make battles harder to win or even to be fought (for example, by having to traverse long
+distances) we could be more careful at the same time we build more units".
+
+Slow income was the only limit on army size. It is replaced by three that act on the map.
+
+- Income doubled: a truck carries 40 (was 20), wells pump 6 a second into a tank of 600,
+  towns pay 5 credits a second (was 3). Stockpiles hold twice their table value so they
+  last as long as before.
+- Supply range (`src/sim/logistics.ts`). Sources: a finished depot or headquarters
+  (150 units), a held town (its radius plus 70), and a truck (52) while it stands within
+  260 of one of the first two. A truck is the last link, never a line by itself: lose
+  the depot behind it and it carries nothing. Each ground unit has 120 seconds of
+  rations, refilled at four a second in supply, run down at one a second outside it. At
+  nothing: reload doubled, vehicles at 60% speed. In supply, with full rations and
+  nothing to shoot at, a unit mends over about 150 seconds.
+- Upkeep: every army point above 60 costs 4 supplies a minute, charged every 3 seconds.
+  An army that cannot pay is at zero and stays there; there is no second punishment. The
+  natural result is that army size is bounded by income, with no hidden penalty spiral.
+- An army with no depot and no town at all (the set-piece scenarios, the stress test) is
+  off the system: it neither starves nor mends.
+
+Why these numbers. On the ridge map a gate town is 170 from its base and Ridgetop 229
+from a gate town. Infantry walks that in 72 seconds, so it arrives with a minute of
+rations: enough to take the town, which then feeds it. A strike that goes past the
+towns starves; an advance town by town with a truck behind it does not. That is the
+"be more careful" Fabio asked for, without making the map bigger.
+
+Aircraft and trucks are exempt (a drone is its own logistics; a truck is the logistics).
+The supply map is 64 by 64 squares per team, rebuilt once a second from hashed state, so
+it is not hashed itself; rations are.
+
+The AI: `Tuning.wagons` (0, 1, 2, 3 by level) trucks leave their hauling and follow the
+field army while it is out, and go back when it is home. Easy has too few trucks to
+spare any, so its attacks arrive hungry: that makes easy easier, on purpose.
+
+Measured headless after the change (ridge map): easy alone still sits at 110 points and
+first attacks at minute 24; hard beats easy in 10 minutes; a normal mirror game now runs
+about 44 minutes (seed 1), because both sides rebuild faster than they kill until the
+stockpiles run dry around minute 30. Upkeep was raised from 2 to 4 after the first round
+because at 2 it was under a tenth of a developed economy's income. Golden hash 3901124625.
+
+On screen: the supply area on the minimap, upkeep and an "Out of supply N" button in the
+top bar, an alert when the first units run out, the count in the selection line.
+
+## 080. Control groups you can see (2026-11-13)
+
+Fabio asked whether groups exist. They did (Ctrl + 1..9, recall, double tap), unseen.
+Added: group 0, Ctrl + Shift + number adds the selection to a group, and a chip per
+existing group above the command card showing its number and size; a click recalls it.

@@ -113,6 +113,9 @@ export class CommandCard {
   private tier = 1;
   private pop = 0;
   private popCap = 0;
+  private upkeep = 0;
+  /** The player's units that are out of supply (set by whoever knows: the supply view). */
+  hungry: () => number[] = () => [];
   private html = '';
   private resHtml = '';
   private readonly hadHq = [false, false];
@@ -160,7 +163,10 @@ export class CommandCard {
       this.act(button.dataset.act ?? '', Number(button.dataset.k ?? 0));
     });
     resEl.addEventListener('pointerdown', (e) => {
-      if ((e.target as HTMLElement).closest('button')) this.selectIdle();
+      const button = (e.target as HTMLElement).closest('button');
+      if (!button) return;
+      if (button.dataset.act === 'hungry') this.selectHungry();
+      else this.selectIdle();
     });
     setInterval(() => this.render(), 200);
   }
@@ -172,6 +178,7 @@ export class CommandCard {
     this.tier = s.tier[ME] ?? 1;
     this.pop = s.pop[ME] ?? 0;
     this.popCap = s.popCap[ME] ?? 0;
+    this.upkeep = s.upkeep[ME] ?? 0;
     // The game is decided when a headquarters that stood is gone.
     const standing = [false, false];
     for (let o = 0; o < s.bases.length; o += BASE_STRIDE) {
@@ -227,6 +234,16 @@ export class CommandCard {
   /** Select the idle trucks and look at them. */
   selectIdle(): void {
     const ids = this.idle();
+    if (ids.length === 0) return;
+    this.select(-1);
+    this.units.setSelected(ids, false);
+    const c = this.units.centreOf(ids);
+    if (c) this.lookAt(c.x, c.z);
+  }
+
+  /** Select the units that are out of supply and look at them. */
+  selectHungry(): void {
+    const ids = this.hungry();
     if (ids.length === 0) return;
     this.select(-1);
     this.units.setSelected(ids, false);
@@ -528,9 +545,14 @@ export class CommandCard {
     let res =
       `<i class="sup">Supplies ${this.supplies}</i><i class="fuel">Fuel ${this.fuel}</i>` +
       `<i class="cred">Credits ${this.credits}</i><i>Army ${this.pop}/${this.popCap}</i>` +
-      `<i>Tier ${this.tier}</i>`;
+      `<i>Tier ${this.tier}</i>` +
+      `<i class="${this.upkeep > 0 ? 'sup' : ''}" title="What your army costs to keep, in supplies a minute. The first 60 army points are free.">Upkeep ${this.upkeep > 0 ? '−' : ''}${this.upkeep}/min</i>`;
     const idle = this.idle().length;
-    if (idle > 0) res += `<button>Idle trucks ${idle} (.)</button>`;
+    if (idle > 0)
+      res += `<button title="Trucks with nothing to do. Click (or press .) to select them">Idle trucks ${idle} (.)</button>`;
+    const hungry = this.hungry().length;
+    if (hungry > 0)
+      res += `<button data-act="hungry" class="warn" title="These units have been beyond your supply for two minutes: they fire at half rate and their vehicles crawl. Bring a truck, build a depot nearby, or take the town. Click to select them">Out of supply ${hungry}</button>`;
     if (res !== this.resHtml) this.resEl.innerHTML = this.resHtml = res;
 
     let html = '';
@@ -590,7 +612,7 @@ export class CommandCard {
         html +=
           this.placing >= 0
             ? `<div class="hint">Click to place the ${BUILDINGS[this.placing].name.toLowerCase()} (Shift: place several) · right click or Esc: cancel</div>`
-            : `<div class="hint">Right click a stockpile or a well: haul from it · right click one of your buildings: build or repair it</div>`;
+            : `<div class="hint">Right click a stockpile or a well: haul from it · right click one of your buildings: build or repair it<br />Supply: a depot feeds troops within 150 m, a held town a little past its edge, and a truck the 50 m around it while it is within 260 m of a depot or town of yours. The lighter ground on the minimap is your supply.</div>`;
       }
       if (mine && this.builders().length > 0) {
         html += '<div class="row works">';
