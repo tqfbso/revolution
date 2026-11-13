@@ -5,14 +5,16 @@ import { Soldiers } from '../src/client/soldiers';
 /** Stand-in batches that keep the frames they are given. */
 function rig() {
   const frames: number[][] = [];
-  const make = () =>
-    ({
+  const make = () => {
+    const b = {
       n: 0,
       frame(f: Float32Array) {
         frames.push(Array.from(f));
-        this.n++;
+        b.n++;
       },
-    }) as unknown as Batch;
+    };
+    return b as unknown as Batch;
+  };
   return { soldiers: new Soldiers(make), frames };
 }
 
