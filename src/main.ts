@@ -527,6 +527,7 @@ async function start(): Promise<void> {
     map,
     send,
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),
+    camera: rts.camera,
   };
   document.getElementById('loading')?.remove();
 }

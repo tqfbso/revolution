@@ -270,6 +270,11 @@ export class Effects {
     this.emit(SMOKE, x1, y1, z1, rnd(1), 1.5, rnd(1), 1.4, 0.9, 3.2, 0.3, 0.29, 0.27, 0.4);
   }
 
+  /** One rifle firing: a short flash at its muzzle, pushed along the barrel. */
+  muzzle(x: number, y: number, z: number, dx: number, dz: number): void {
+    this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.05, 0.3, 0.16, 1, 0.78, 0.4, 0.95);
+  }
+
   /** Squad fire: a few rifle tracers with spread and small flashes. */
   rifleBurst(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): void {
     const d = Math.hypot(x1 - x0, z1 - z0) || 1;
