@@ -16,6 +16,7 @@ import { KINDS } from '../sim/units';
 import { NEEDS_SUPPLY, upkeepPerMinute } from '../sim/logistics';
 import { WORKS } from '../sim/works';
 import { stageOf, step } from '../sim/sim';
+import { fortified } from '../sim/urban';
 import {
   FLAG_MOVING,
   MAX_TEAMS,
@@ -51,6 +52,7 @@ import {
   COMMANDER_STRIDE,
   type Snapshot,
   type ToWorker,
+  STRUCT_FORTIFIED,
 } from './protocol';
 
 const MAX_CATCH_UP_TICKS = 4;
@@ -181,6 +183,7 @@ function postSnapshot(w: World, simMs: number): void {
     if (map.sKind[s] === S_BUILDING) {
       for (let f = 0; f < 4; f++) if (w.sWall[4 * s + f] <= 0) bits |= 4 << f;
     }
+    if (fortified(w, s)) bits |= STRUCT_FORTIFIED;
     structStage[s] = bits;
   }
   const cams: number[] = [];

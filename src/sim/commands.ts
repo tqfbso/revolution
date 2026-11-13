@@ -277,6 +277,17 @@ export interface CameraCommand {
   units: number[];
 }
 
+/**
+ * Builders go to a building to mend it (trucks and engineers, paid in supplies) and then
+ * to fortify it (engineers only). A ruin cannot be mended, only fortified.
+ */
+export const CMD_ENTRENCH = 34;
+export interface EntrenchCommand {
+  type: typeof CMD_ENTRENCH;
+  units: number[];
+  structure: number;
+}
+
 export const CMD_ORDER = 28;
 export const CMD_KEEP = 29;
 export const CMD_DEST = 30;
@@ -348,6 +359,7 @@ export interface ReinforceCommand {
 }
 
 export type Command =
+  | EntrenchCommand
   | AssignCommand
   | MissionCommand
   | ReinforceCommand

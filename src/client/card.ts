@@ -5,6 +5,7 @@ import {
   CMD_CANCEL,
   CMD_REPEAT,
   CMD_DEMOLISH,
+  CMD_ENTRENCH,
   CMD_FORTIFY,
   CMD_GATHER,
   CMD_HOLD,
@@ -28,9 +29,9 @@ import {
   type Price,
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
-import { MAP_CELLS, canPlace, type GameMap } from '../sim/map';
+import { MAP_CELLS, S_BUILDING, canPlace, type GameMap } from '../sim/map';
 import { CAMERA_COST, KINDS, KIND_TRUCK, POINTS } from '../sim/units';
-import { MAX_ORDER, WORKS, WORK_COUNT, canFortify } from '../sim/works';
+import { MAX_ORDER, WORKS, WORK_BUILDABLE, WORK_COUNT, canFortify } from '../sim/works';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
 import {
   BASE_STRIDE,
@@ -276,6 +277,7 @@ export class CommandCard {
     else if (act === 'hold') this.send({ type: CMD_HOLD, units: ids });
     else if (act === 'fire') this.toggleFire();
     else if (act === 'camera') this.placeCamera();
+    else if (act === 'entrench') this.armEntrench();
     else if (act === 'amove') this.arm(this.armed === 'attack' ? '' : 'attack');
     else if (act === 'smoke') this.arm(this.armed === 'smoke' ? '' : 'smoke');
     else if (act === 'unload') {
@@ -292,6 +294,17 @@ export class CommandCard {
     if (carriers.length > 0 && squads.length > 0) {
       this.send({ type: CMD_LOAD, units: squads, carriers });
     }
+  }
+
+  /**
+   * "Repair / fortify" is in hand: the next right click on a building sends the selected
+   * engineers and trucks to work on it instead of sending the infantry inside.
+   */
+  entrench = false;
+
+  armEntrench(): void {
+    this.entrench = !this.entrench && this.builders().length > 0;
+    this.html = '';
   }
 
   /** Each selected engineer squad of yours leaves a surveillance camera where it stands. */
@@ -467,6 +480,17 @@ export class CommandCard {
       this.send({ type: CMD_FORTIFY, units: sappers, work: work.kind, cells: [work.cell] });
       return true;
     }
+    // Repair / fortify: with the order in hand, or with nothing selected that could go in.
+    if (structure >= 0 && sappers.length > 0 && this.map.sKind[structure] === S_BUILDING) {
+      const u = this.units;
+      const onlyTrucks = u.selectedIds().every((id) => !KINDS[u.kindOf(id)].garrison);
+      if (this.entrench || onlyTrucks) {
+        this.send({ type: CMD_ENTRENCH, units: sappers, structure });
+        this.entrench = false;
+        this.html = '';
+        return true;
+      }
+    }
     const crew = this.trucks();
     if (crew.length === 0) return false;
     if (structure >= 0 && this.structures.baseTeam[structure] === this.units.teamOf(crew[0])) {
@@ -616,7 +640,7 @@ export class CommandCard {
       }
       if (mine && this.builders().length > 0) {
         html += '<div class="row works">';
-        for (let k = 1; k < WORK_COUNT; k++) {
+        for (let k = 1; k < WORK_BUILDABLE; k++) {
           const w = WORKS[k];
           const p = { supplies: w.supplies, fuel: 0, credits: 0, ticks: w.ticks, tier: 1 };
           html += this.button('work', k, w.name, p, '', this.tool === k);
@@ -693,6 +717,18 @@ export class CommandCard {
           'V',
         );
       }
+      if (this.builders().length > 0) {
+        special += this.button(
+          'entrench',
+          0,
+          'Repair / fortify',
+          null,
+          this.entrench ? 'right click a building' : 'then right click',
+          this.entrench,
+          'Right click a building: trucks and engineers mend its walls and structure (costs supplies), then engineers fortify it with sandbags and loopholes. A fortified building holds half as many men again, shelters them better and takes longer to bring down. Engineers also clear street rubble: right click it.',
+          'B',
+        );
+      } else this.entrench = false;
       if (has((k) => KINDS[k].indirect)) {
         special += this.button(
           'smoke',

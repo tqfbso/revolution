@@ -23,6 +23,7 @@ import {
 } from './commands';
 import { applyEconomyCommand, updateEconomy } from './economy';
 import { applyCommanderCommand } from './commanders';
+import { applyUrbanCommand, fortified, spillRubble, updateEntrench } from './urban';
 import {
   HIT_CHARGE,
   HIT_DIRECT,
@@ -335,6 +336,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateEconomy(w);
   updateLogistics(w);
   updateWorks(w);
+  updateEntrench(w);
   updateEyes(w);
   updateJamming(w);
   updateSpotters(w);
@@ -386,6 +388,7 @@ function applyCommand(w: World, cmd: Command): void {
     return;
   }
   if (applyEconomyCommand(w, cmd) || applyWorkCommand(w, cmd)) return;
+  if (applyUrbanCommand(w, cmd)) return;
   if (applyCommanderCommand(w, cmd)) return;
   // Any other order takes a truck off its job.
   if ('units' in cmd) {
@@ -776,7 +779,8 @@ function shootStructure(w: World, s: number, x: number, y: number, siege: number
 }
 
 function garrisonCapacity(w: World, s: number): number {
-  const cells = w.map.sW[s] * w.map.sH[s];
+  // A fortified building holds half as many again.
+  const cells = (w.map.sW[s] * w.map.sH[s] * (fortified(w, s) ? 3 : 2)) >> 1;
   return cells < GARRISON_MAX ? cells : GARRISON_MAX;
 }
 
@@ -2047,15 +2051,19 @@ function fire(w: World): void {
       // the house.
       let step = stageOf(w, cover);
       if (w.sWall[4 * cover + faceToward(w.map, cover, w.posX[i], w.posY[i])] <= 0) step++;
-      dmg = Math.trunc((dmg * THROUGH[step]) / 100) || 1;
+      // Sandbagged windows and loopholes take another quarter off.
+      dmg = Math.trunc((dmg * THROUGH[step] * (fortified(w, cover) ? 3 : 4)) / 400) || 1;
       if (!kind.engineer && kind.siege > 0) {
         shootStructure(w, cover, w.posX[i], w.posY[i], kind.siege);
       }
     } else if (KIND_CLASS[w.kind[t]] === CLASS_FOOT) {
       // Rubble halves what reaches the men in it; a trench or sandbags stop two thirds.
       const under = w.map.type[cellOfPos(w.posX[t], w.posY[t])];
-      if (under === T_RUBBLE) dmg = (dmg + 1) >> 1;
-      else if (isCover(under)) dmg = Math.trunc((dmg + 2) / 3);
+      if (under === T_RUBBLE) {
+        // A ruin halves what reaches the men in it; a ruin dug in is a strongpoint.
+        const ruin = w.map.structAt[cellOfPos(w.posX[t], w.posY[t])];
+        dmg = ruin >= 0 && fortified(w, ruin) ? Math.trunc((dmg * 35 + 99) / 100) : (dmg + 1) >> 1;
+      } else if (isCover(under)) dmg = Math.trunc((dmg + 2) / 3);
     }
     damage[t] += dmg;
     killer[t] = i;
@@ -2142,7 +2150,8 @@ function resolveStructures(w: World): void {
     }
     if (w.sHp[s] <= 0) continue;
     const before = stageOf(w, s);
-    w.sHp[s] -= d;
+    // A fortified building is braced and shored: a quarter of the damage is lost on it.
+    w.sHp[s] -= map.sKind[s] === S_BUILDING && fortified(w, s) ? d - (d >> 2) : d;
     if (w.sHp[s] < 0) w.sHp[s] = 0;
     const after = stageOf(w, s);
     if (before < STAGE_GUTTED && after >= STAGE_GUTTED && map.sKind[s] === S_BUILDING) {
@@ -2175,7 +2184,10 @@ function resolveStructures(w: World): void {
       }
     }
     w.sOcc[s] = 0;
+    // What was built into the house goes down with it; the ruin can be dug in afresh.
+    w.sFort[s] = 0;
     razeStructure(map, s);
+    spillRubble(w, s);
     topologyChanged = true;
     w.events.push(EV_COLLAPSE, s, 0);
   }

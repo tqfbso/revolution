@@ -1,5 +1,6 @@
 // What the whole renderer shares: the quality level and the textures made at start-up.
 import * as THREE from 'three/webgpu';
+import { makeSurfaces } from './surfaces';
 import { makeTextures, type Textures } from './textures';
 
 /**
@@ -15,6 +16,8 @@ export interface Look {
   rich: boolean;
   shadows: boolean;
   tex: Textures;
+  /** The city's materials, one a layer (surfaces.ts). */
+  surf: THREE.DataArrayTexture;
 }
 
 export function readQuality(params: URLSearchParams): Quality {
@@ -30,12 +33,8 @@ export function readQuality(params: URLSearchParams): Quality {
 }
 
 export function makeLook(quality: Quality, shadows: boolean): Look {
-  return {
-    quality,
-    rich: quality !== 'low',
-    shadows,
-    tex: makeTextures(quality === 'low' ? 256 : 512),
-  };
+  const tex = makeTextures(quality === 'low' ? 256 : 512);
+  return { quality, rich: quality !== 'low', shadows, tex, surf: makeSurfaces(tex.wall) };
 }
 
 /** A tiny sky (gradient, haze at the horizon, a soft sun) for the reflections to read. */

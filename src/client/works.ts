@@ -6,6 +6,7 @@ import {
   WORKS,
   WORK_COUNT,
   WORK_GATE,
+  WORK_RUBBLE,
   WORK_SANDBAG,
   WORK_TRAP,
   WORK_TRENCH,
@@ -19,6 +20,7 @@ import type { Effects } from './effects';
 import type { Fog } from './fog';
 import type { Look } from './look';
 import { masonry } from './surface';
+import { SURF_RUBBLE } from './surfaces';
 import { build, type Part } from './structures';
 import type { Terrain } from './terrain';
 
@@ -135,6 +137,62 @@ GEOMETRY[WORK_SANDBAG] = () => {
     parts.push({ size: [3.4, 0.45, 0.6], at: [0, 0.72, s * 1.55], color: SACK });
     parts.push({ size: [0.7, 0.5, 2.3], at: [s * 1.55, 0.25, 0], color: SACK, shade: 0.95 });
     parts.push({ size: [0.6, 0.45, 2.0], at: [s * 1.55, 0.72, 0], color: SACK, shade: 1.06 });
+  }
+  return withMask(parts);
+};
+
+// What a falling block throws into the street: slabs, a length of facade, bent steel.
+GEOMETRY[WORK_RUBBLE] = () => {
+  const parts: Part[] = [
+    { size: [3.9, 0.5, 3.9], at: [0, 0.2, 0], color: 0x55504a, surf: SURF_RUBBLE },
+  ];
+  const r = (k: number) => {
+    const x = Math.sin(k * 127.1 + 3.7) * 43758.5453;
+    return x - Math.floor(x);
+  };
+  for (let i = 0; i < 16; i++) {
+    const s = 0.7 + r(i) * 1.5;
+    const mid = 1 - Math.hypot(r(i + 20) - 0.5, r(i + 40) - 0.5) * 1.6;
+    parts.push({
+      size: [s, 0.2 + r(i + 60) * 0.45, s * (0.5 + r(i + 80) * 0.6)],
+      at: [
+        (r(i + 20) - 0.5) * 3.3,
+        0.45 + Math.max(0, mid) * 1.0 * r(i + 100),
+        (r(i + 40) - 0.5) * 3.3,
+      ],
+      rot: [(r(i + 120) - 0.5) * 1.1, r(i + 140) * 3.1, (r(i + 160) - 0.5) * 1.1],
+      color: i % 4 === 0 ? 0x4c4a46 : i % 4 === 1 ? 0x7d6a58 : 0x86837a,
+      shade: 0.55 + r(i + 180) * 0.35,
+      surf: SURF_RUBBLE,
+    });
+  }
+  // A length of wall that came down in one piece, its window openings still in it.
+  parts.push({
+    size: [2.6, 0.22, 1.5],
+    at: [0.3, 1.0, -0.2],
+    rot: [0.5, 0.6, 0.12],
+    color: 0x8a8478,
+    shade: 0.7,
+  });
+  parts.push({
+    size: [0.5, 0.24, 0.45],
+    at: [0.0, 1.05, -0.25],
+    rot: [0.5, 0.6, 0.12],
+    color: 0x0d0c0b,
+  });
+  parts.push({
+    size: [0.5, 0.24, 0.45],
+    at: [0.85, 1.1, -0.55],
+    rot: [0.5, 0.6, 0.12],
+    color: 0x0d0c0b,
+  });
+  for (let i = 0; i < 4; i++) {
+    parts.push({
+      size: [0.05, 1.3 + r(i + 200), 0.05],
+      at: [(r(i + 210) - 0.5) * 2.6, 0.9, (r(i + 220) - 0.5) * 2.6],
+      rot: [(r(i + 230) - 0.5) * 1.6, 0, (r(i + 240) - 0.5) * 1.6],
+      color: RUST,
+    });
   }
   return withMask(parts);
 };
@@ -405,8 +463,21 @@ export class WorksView {
         }
       } else {
         // Obstacles and sandbags: turned a little from cell to cell, so a line is not a stamp.
-        const turn = kind === WORK_TRAP ? ((c * 2654435761) >>> 28) * 0.39 : 0;
-        batch.put(x, y, z, Math.sin(turn), Math.cos(turn), 1, paint[0], paint[1], paint[2], worn);
+        const turn =
+          kind === WORK_TRAP || kind === WORK_RUBBLE ? ((c * 2654435761) >>> 28) * 0.39 : 0;
+        const size = kind === WORK_RUBBLE ? 0.85 + (((c * 40503) >>> 4) & 7) * 0.04 : 1;
+        batch.put(
+          x,
+          y,
+          z,
+          Math.sin(turn),
+          Math.cos(turn),
+          size,
+          paint[0],
+          paint[1],
+          paint[2],
+          worn,
+        );
       }
     }
     for (const b of this.batches) if (b) b.flush();

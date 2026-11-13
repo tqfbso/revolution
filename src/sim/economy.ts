@@ -67,6 +67,7 @@ import {
   JOB_NONE,
   JOB_RETURN,
   JOB_WORK,
+  JOB_ENTRENCH,
   MAP_SIZE_FX,
   MAX_TEAMS,
   NO_TEAM,
@@ -488,7 +489,7 @@ function updateTrucks(w: World): void {
   for (let i = 0; i < n; i++) {
     const job = w.job[i];
     // (Field works are another module's job: see updateWorks.)
-    if (job === JOB_NONE || job === JOB_WORK) continue;
+    if (job === JOB_NONE || job === JOB_WORK || job === JOB_ENTRENCH) continue;
     if (w.state[i] !== STATE_ALIVE) {
       w.job[i] = JOB_NONE;
       continue;
