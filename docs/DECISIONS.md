@@ -1200,3 +1200,28 @@ at once if it comes under fire. The board says "Gathering for the attack". Befor
 went in when half had arrived, so a mixed body attacked with its vehicles and the
 infantry walked into the aftermath. The staff is not hashed state: the golden hash is
 unchanged.
+
+## 085. What to take from Saltline, and what not (2026-11-13)
+
+Fabio linked a first-person shooter that lives in one artifact as a mark for our
+graphics. Its source was read rather than judged from the screen. It is Three.js r180 on
+the WebGL renderer with no downloaded assets, as we have none. It looks as it does
+because it spends everything on very little: one yard of 80 by 60 m merged into a few
+meshes, at most 18 enemies (ten drones, eight four-legged machines), a camera a metre
+from every surface, and no human figure anywhere. So it has no answer for our soldiers,
+and nothing of its rigs or level building scales to 4,000 units.
+
+What it does well and we do not yet: a long chain of screen passes (occlusion and light
+shafts at half resolution, six-level bloom, automatic exposure, a grade, grain,
+sharpening); about thirty surfaces written as shaders and baked at start-up into colour,
+height, roughness and normals; wear computed from the curvature of each model when it is
+built; signage drawn as canvas text; and a governor that trades resolution, shadow
+updates and finally the graphics level for frame time.
+
+The rule for choosing: take what costs per pixel or once per model, leave what costs per
+object or per extra view. That gives R1 to R6 in the roadmap, each attached to work
+already planned instead of a graphics milestone of its own, because a sprint of looks
+with no content under it changed little last time (graphics sprint 2: content on the
+ground did the work, not light values). Left out: planar reflections, motion blur, its
+rigs, its sound engine. Nothing here is copied; its code is GLSL injected into stock
+materials, ours is TSL nodes, so each technique is written again.

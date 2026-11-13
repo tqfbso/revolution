@@ -299,7 +299,58 @@ with the computer in the second seat, so co-op gets cheaper, not later for nothi
    state, and the idle units nobody commands; losses can be replaced by themselves
 
 Then, as before: U2 storming and the city map (generated around the flags, where troops
-gather), the soldiers' second pass, co-op roles, U4 to U6, the factions.
+gather), the soldiers' second pass (with R1 and R2 below), co-op roles, U4 to U6 (with R5
+and R6), the factions. R3 and R4 are placed in "Rendering upgrades" below.
+
+## Rendering upgrades from the Saltline study (planned, slotted into existing work)
+
+Fabio, 2026-11-13: linked a first-person shooter built inside a single artifact
+("Saltline") as a mark for how far graphics can be pushed, and agreed to adopt everything
+that transfers. Its source was read; the findings are in decision 085. It draws at most 18
+robots in one small yard, so its character and level techniques do not carry to thousands
+of units. What carries is whatever costs per pixel or is paid once when a model is built.
+It is GLSL on WebGL; here each item is rewritten for TSL on WebGPU, with the WebGL2
+fallback kept working. Nothing below touches the sim or the golden hash.
+
+Each item rides with the work it belongs to, in this order:
+
+- R1 Ambient occlusion and a grade pass (small, Sonnet 5.5). With the soldiers' second
+  pass. Half-resolution occlusion from depth with a depth-aware blur, then one grade pass:
+  automatic exposure, a film curve, a little vignette, grain and sharpening. On `normal`
+  and `high`; `low` stays as it is. The point is contact: soldiers, vehicles and houses
+  that sit on the ground instead of floating over it
+- R2 Edge wear and cavity dirt from the shape of the model (small, Sonnet 5.5). With the
+  soldiers' second pass, then vehicles, then buildings in U4. When a model is built, how
+  convex or concave each corner is goes into a vertex attribute; the material chips paint
+  on outer edges and darkens inner corners. Paid once, free per frame, works instanced
+- R3 Frame-time governor (small, Sonnet 5.5). Standalone, any time; best before the city
+  map raises the load. Measure first whether the drop to the low 40s at 4,000 units is
+  the graphics card or the CPU posing units (the stats overlay already splits CPU time).
+  Then: a pixel budget per graphics level, the shadow map redrawn every second frame
+  below `high`, and a step down in graphics level when render scale alone is not enough
+- R4 Light and weather presets (medium, Sonnet 5.5). After U3, so the city is lit on
+  purpose. Low sun, overcast and rain as chosen looks, with fog that takes its colour
+  from the sun. Analytic fog on every level; light shafts marched through the shadow map
+  on `high` only. Render-only: weather that changes sight or movement would be a sim
+  feature and is not part of this
+- R5 Material sets baked on the graphics card (medium, Fable 5.2 for the baker, Sonnet
+  5.5 for the surfaces). With U4, the city's look. Replaces the canvas bake in
+  `textures.ts`: each surface (asphalt, concrete, brick, plaster, corrugated steel,
+  painted metal, rust) is a small shader baked at start-up into colour, height and
+  roughness, with normals derived from the height, large-scale variation to hide the
+  repeat, and a wetness term the weather presets can drive. Still nothing to download
+  (decision 060 stands)
+- R6 Drawn signage and road markings (small to medium, Sonnet 5.5). With U4. Street
+  signs, shop fronts, house numbers, lane lines and crossings drawn as canvas text and
+  shapes into one atlas, then scratched and faded; placed as props that dress and never
+  play
+
+Looked at and left out: planar reflections on wet ground (a second render of the scene,
+which doubles the draw cost at our unit counts); motion blur (costs readability from an
+RTS camera); its enemy rigs and first-person hands (built for 18 actors); its sound
+engine (sound is not a focus; music that follows the intensity of the battle is noted
+for M11). One idea from its gameplay is noted for U6 and the next AI pass: attack
+tokens, where only a few enemies may fire at once, as a way to pace `easy`.
 
 ## M10 Factions
 
