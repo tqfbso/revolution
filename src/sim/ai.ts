@@ -11,6 +11,7 @@
 //   production what to build next, from the army it wants and the enemy it has seen
 //   military   town garrisons, scouts, a reserve that answers alarms, and a field army
 //              that picks an objective, picks the crossing to reach it by, and assaults
+import { hungryPoints } from './logistics';
 import {
   CMD_ASSIST,
   CMD_ATTACK_MOVE,
@@ -27,6 +28,7 @@ import {
   CMD_RALLY,
   CMD_RESEARCH,
   CMD_TRAIN,
+  CMD_STOP,
   CMD_UNLOAD,
   type Command,
 } from './commands';
@@ -181,6 +183,8 @@ interface Tuning {
   focus: boolean;
   /** Ticks it leaves an objective alone after being beaten there (0 = it comes back at once, stronger). */
   sulk: number;
+  /** Trucks it sends along behind an attack, so the army is still in supply when it arrives. */
+  wagons: number;
 }
 
 const MINUTE = 60 * TICK_RATE;
@@ -217,6 +221,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     patrol: 120 * TICK_RATE,
     focus: false,
     sulk: 60 * MINUTE,
+    wagons: 0,
   },
   // Decision 070: Fabio found this level too hard. It now keeps a small army, holds only
   // its gate town and one more until it has attacked once, attacks late with what its
@@ -253,6 +258,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     patrol: 90 * TICK_RATE,
     focus: false,
     sulk: 20 * MINUTE,
+    wagons: 1,
   },
   normal: {
     period: 20,
@@ -283,6 +289,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     patrol: 30 * TICK_RATE,
     focus: true,
     sulk: 0,
+    wagons: 2,
   },
   hard: {
     period: 20,
@@ -313,6 +320,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     patrol: 30 * TICK_RATE,
     focus: true,
     sulk: 0,
+    wagons: 3,
   },
 };
 
@@ -338,6 +346,8 @@ const R_SCOUT = 3;
 const R_JOIN = 4;
 /** Engineers kept back to put up field works. */
 const R_SAPPER = 5;
+/** A truck that follows the army instead of hauling: its supply line. */
+const R_SUPPLY = 6;
 /** Garrison of town t: R_TOWN + t. */
 const R_TOWN = 8;
 
@@ -447,6 +457,8 @@ export interface Ai {
   joining: number[];
   scouts: number[];
   sappers: number[];
+  /** Trucks following the army (see Tuning.wagons). */
+  wagons: number[];
   garr: number[][];
   forces: [Force, Force];
   members: [number[], number[]];
@@ -549,6 +561,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai 
     joining: [],
     scouts: [],
     sappers: [],
+    wagons: [],
     garr: [],
     forces: [force(R_ARMY), force(R_RAID)],
     members: [[], []],
@@ -819,6 +832,7 @@ function perceive(ai: Ai, w: World): void {
   eyes.fill(0);
   ai.have.fill(0);
   ai.trucks.length = 0;
+  ai.wagons.length = 0;
   ai.fresh.length = 0;
   ai.reserve.length = 0;
   ai.joining.length = 0;
@@ -840,7 +854,8 @@ function perceive(ai: Ai, w: World): void {
     ai.have[kind]++;
     eyes[square(w.posX[i], w.posY[i])] = 1;
     if (kind === KIND_TRUCK) {
-      ai.trucks.push(i);
+      if (ai.role[i] === R_SUPPLY) ai.wagons.push(i);
+      else ai.trucks.push(i);
       continue;
     }
     if (ai.roleKind[i] !== kind) {
@@ -1458,7 +1473,44 @@ function military(ai: Ai, w: World, out: Command[]): void {
   runReserve(ai, w, out);
   runForce(ai, w, out, 0);
   runForce(ai, w, out, 1);
+  supplyLine(ai, w, out);
   dismount(ai, w, out);
+}
+
+/**
+ * The army's supply line. While it is out on an attack a few trucks leave their hauling
+ * and keep a little behind it: a truck within reach of a depot or a held town feeds the
+ * troops around it (see the logistics). When the army is home they go back to work.
+ */
+function supplyLine(ai: Ai, w: World, out: Command[]): void {
+  const f = ai.forces[0];
+  const units = ai.members[0];
+  const outing = (f.state === F_MARCH || f.state === F_ASSAULT) && units.length > 0;
+  if (!outing) {
+    // Without a role and without a job, the economy puts them back on a site.
+    for (const i of ai.wagons) ai.role[i] = R_NONE;
+    if (ai.wagons.length > 0) out.push({ type: CMD_STOP, units: ai.wagons.slice() });
+    ai.wagons.length = 0;
+    return;
+  }
+  while (ai.wagons.length < ai.tune.wagons && ai.trucks.length > 8) {
+    let pick = -1;
+    for (let k = ai.trucks.length - 1; k >= 0 && pick < 0; k--) {
+      if (w.job[ai.trucks[k]] !== JOB_BUILD) pick = k;
+    }
+    if (pick < 0) break;
+    const i = ai.trucks[pick];
+    ai.trucks.splice(pick, 1);
+    ai.role[i] = R_SUPPLY;
+    ai.wagons.push(i);
+  }
+  if (ai.wagons.length === 0) return;
+  const [cx, cy] = centre(w, units);
+  const d = dist(cx, cy, ai.stageX, ai.stageY);
+  const bx = d < fx(40) ? cx : cx + Math.trunc(((ai.stageX - cx) * fx(30)) / d);
+  const by = d < fx(40) ? cy : cy + Math.trunc(((ai.stageY - cy) * fx(30)) / d);
+  const far = ai.wagons.filter((i) => dist(w.posX[i], w.posY[i], bx, by) > fx(20));
+  order(out, CMD_MOVE, far, bx, by);
 }
 
 /**
@@ -2570,6 +2622,7 @@ export function aiReport(ai: Ai, w: World): string {
     `S ${w.supplies[t]} F ${w.fuel[t]} C ${w.credits[t]} trucks ${ai.trucks.length} towns ${towns} ` +
     `garrison ${garrison} reserve ${ai.reserve.length} army ${ai.members[0].length} ${states[f.state]} ` +
     `raid ${ai.members[1].length} scouts ${ai.scouts.length} seen ${ai.seen.length} ` +
+    `wagons ${ai.wagons.length} hungry ${hungryPoints(w, t)} ` +
     `works ${ai.laid} foe works ${ai.foeWorks} units ${Array.from(ai.have).join(',')} | ${ai.plan}`
   );
 }

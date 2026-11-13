@@ -5,7 +5,7 @@ import { CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS } from './sim/world';
-import { Alerts } from './client/alerts';
+import { ALERT_TOWN, Alerts } from './client/alerts';
 import { Cameras } from './client/cameras';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
@@ -21,9 +21,10 @@ import { ProductionCentre } from './client/production';
 import { Scars } from './client/scars';
 import { Sound } from './client/sound';
 import { StructureView } from './client/structures';
+import { SupplyView } from './client/supply';
 import { WorksView } from './client/works';
 import { UnitView } from './client/units';
-import type { Scenario, Snapshot, ToWorker } from './worker/protocol';
+import { TASK_HUNGRY, type Scenario, type Snapshot, type ToWorker } from './worker/protocol';
 import {
   KINDS,
   TOWN_INCOME,
@@ -141,6 +142,7 @@ async function start(): Promise<void> {
     () => alerts,
     () => units.playerTeam,
   );
+  const supply = new SupplyView(map, units);
   const sound = new Sound();
   units.sound = sound;
   units.lodNear *= lodScale;
@@ -185,6 +187,7 @@ async function start(): Promise<void> {
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
     production.applySnapshot(e.data);
+    supply.applySnapshot(e.data);
     alerts?.applySnapshot(e.data, performance.now() / 1000);
     hud.simTick(e.data.simMs);
     hud.stats.alive = e.data.alive;
@@ -219,6 +222,7 @@ async function start(): Promise<void> {
     if (e.code === 'KeyP' && !e.ctrlKey && !e.metaKey) production.toggle();
     else if (e.code === 'Escape' && production.open) production.toggle(false);
   });
+  card.hungry = () => supply.hungry;
   const input = new Input(
     canvas,
     rts.camera,
@@ -304,6 +308,7 @@ async function start(): Promise<void> {
     structures,
     map,
     works,
+    supply,
   );
   // Where a ground point is on screen, for the alerts' edge arrows.
   const probe = new THREE.Vector3();
@@ -361,7 +366,32 @@ async function start(): Promise<void> {
     townsEl.innerHTML = html;
   }, 500);
   // What is selected, by type: with ten kinds of unit a box of rings is not enough.
+  // Control groups that exist, as chips: number and size. Click = the number key.
+  const groupsEl = document.getElementById('groups');
+  let groupsHtml = '';
+  groupsEl?.addEventListener('pointerdown', (e) => {
+    const chip = (e.target as HTMLElement).closest('button');
+    if (!chip) return;
+    e.preventDefault();
+    if (chip.dataset.n === 'new') input.saveNewGroup();
+    else input.recallGroup(Number(chip.dataset.n), e.shiftKey);
+  });
+  setInterval(() => {
+    if (!groupsEl) return;
+    let html = '';
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]) {
+      const ids = input.groupIds(n);
+      if (ids.length === 0) continue;
+      const on = ids.length === units.selectedCount && ids.every((id) => units.selected[id]);
+      html += `<button data-n="${n}" class="${on ? 'on' : ''}" title="Group ${n}: press ${n} to select, twice to jump to it. Ctrl or Option/Alt + ${n} saves the selection as this group; with Shift it is added to it"><b>${n}</b>${ids.length}</button>`;
+    }
+    if (units.selectedCount > 0 && !html.includes('class="on"')) {
+      html += `<button data-n="new" title="Save the selected units as the next free group. Keys: Ctrl + number, or Option/Alt + number (on a Mac, Ctrl + number belongs to the system)">+ Group</button>`;
+    }
+    if (html !== groupsHtml) groupsEl.innerHTML = groupsHtml = html;
+  }, 300);
   const selectionEl = document.getElementById('selection');
+  let wasFed = true;
   setInterval(() => {
     if (!selectionEl) return;
     const n = new Array<number>(KINDS.length).fill(0);
@@ -374,6 +404,17 @@ async function start(): Promise<void> {
       (p) => p !== '',
     );
     if (aboard > 0) parts.push(`${aboard} squads aboard`);
+    const starving = units
+      .selectedIds()
+      .filter((id) => (units.task[id] & TASK_HUNGRY) !== 0).length;
+    if (starving > 0) parts.push(`${starving} out of supply: half fire rate`);
+    // The first units to run out of rations get an alert; the count stays in the top bar.
+    const out = supply.hungry;
+    if (out.length > 0 && wasFed) {
+      const c = units.centreOf(out);
+      if (c) alerts?.report(ALERT_TOWN, c.x, c.z, 'Units out of supply', performance.now() / 1000);
+    }
+    wasFed = out.length === 0;
     selectionEl.style.display = parts.length > 0 ? 'block' : 'none';
     selectionEl.textContent = parts.join(' · ');
   }, 250);

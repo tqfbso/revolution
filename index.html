@@ -103,6 +103,10 @@
         margin-left: 8px;
         border-color: #dcc48c;
       }
+      #resources button.warn {
+        border-color: #ff7b6b;
+        color: #ff9d90;
+      }
       #resources i,
       #card i {
         font-style: normal;
@@ -359,6 +363,24 @@
       #towns {
         min-width: 190px;
       }
+      /* Control groups that exist: a chip each, with its number and size. */
+      #groups {
+        display: flex;
+        justify-content: center;
+        gap: 4px;
+        pointer-events: auto;
+      }
+      #groups button {
+        padding: 2px 8px;
+        font-size: 11px;
+      }
+      #groups button b {
+        color: #d8c27a;
+        margin-right: 5px;
+      }
+      #groups button.on {
+        outline: 1px solid #d8c27a;
+      }
       #selection {
         display: none;
         align-self: center;
@@ -570,6 +592,7 @@ starting…</pre>
       <div id="towns" class="panel"></div>
     </div>
     <div id="bottom">
+      <div id="groups"></div>
       <div id="selection" class="panel"></div>
       <div id="card" class="panel"></div>
     </div>
@@ -582,6 +605,13 @@ starting…</pre>
       Economy: select trucks, right click a stockpile (tan marker) or an oil well (amber) to haul;
       the buttons at the bottom build. Click one of your buildings to produce units.<br />
       Supplies run out, wells pump slowly (hold more wells), towns pay credits for technology.<br />
+      Supply: income is generous, keeping an army fed is the limit. Troops are in supply within 150
+      m of a depot or headquarters, a little past the edge of a town you hold, and within 50 m of a
+      truck that is itself within 260 m of one of those (the lighter ground with the green edge on
+      the minimap). Beyond it they have rations for two minutes; after that they fire at half rate
+      and vehicles crawl, until they are back in supply. In supply and out of the fight, troops
+      mend. A long push needs a truck with it, a forward depot, or the next town. Upkeep (top bar):
+      every army point above 60 costs supplies each minute<br />
       Production (P, or the button at the top): every factory on one screen. Order 20 squads and all
       your barracks share the work; each unit is paid for as it starts, so you can order ahead of
       your money. Keep: that many are kept in the field, losses replaced by themselves. Send to: new
@@ -611,8 +641,10 @@ starting…</pre>
       it. An enemy jammer blinds it (its ring turns red) and gives it away; then any enemy ground
       unit that walks up pulls it down. Your jammer does the same to theirs: found cameras get a red
       mark<br />
-      Ctrl or Alt + 1..9: save group · 1..9: recall · twice: jump to it · Minimap: click to look,
-      right click to order<br />
+      Ctrl or Alt/Option + 0..9: save group (on a Mac use Option: Ctrl + number belongs to the
+      system), or click + Group · with Shift as well: add the selection to that group · 0..9: recall
+      (Shift: add to the selection) · twice: jump to it. Groups show as numbered chips above the
+      command card; click one to select it · Minimap: click to look, right click to order<br />
       Space: pause. Orders given while paused all start when you resume, so you can plan a line of
       works or an attack in peace. Speed 0.75x slows the whole game a little<br />
       Alerts: when you are attacked off screen, or a recon drone finds enemy troops, a banner, a

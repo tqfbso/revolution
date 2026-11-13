@@ -1,4 +1,5 @@
 import {
+  MAP_CELLS,
   CELL_COUNT,
   CLASS_COUNT,
   S_BUILDING,
@@ -267,6 +268,14 @@ export interface World {
   /** Per team: whose turn it is among the kinds on order, and how long it has waited for money. */
   orderTurn: Uint8Array;
   orderWait: Uint8Array;
+  /**
+   * Logistics (see src/sim/logistics.ts). Per unit: seconds of rations left. Per team and
+   * 16-unit square: 1 where the army is in supply; worked out from the rest of the world
+   * once a second (`supplyTick` is when, -1 = never), so not part of the hash.
+   */
+  ration: Uint8Array;
+  supplyMap: Uint8Array;
+  supplyTick: number;
   /** Trucks: the job, the site and the building it refers to, the load and a timer. */
   job: Uint8Array;
   jobSite: Int16Array;
@@ -393,6 +402,9 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     dest: new Uint8Array(MAX_TEAMS * KIND_SLOTS),
     orderTurn: new Uint8Array(MAX_TEAMS),
     orderWait: new Uint8Array(MAX_TEAMS),
+    ration: new Uint8Array(MAX_UNITS),
+    supplyMap: new Uint8Array(MAX_TEAMS * (MAP_CELLS >> 2) * (MAP_CELLS >> 2)),
+    supplyTick: -1,
     job: new Uint8Array(MAX_UNITS),
     jobSite: new Int16Array(MAX_UNITS),
     jobStruct: new Int16Array(MAX_UNITS),
@@ -500,7 +512,7 @@ export function hashWorld(w: World): number {
   }
   const n = w.count;
   for (let i = 0; i < n; i++) {
-    mix(w.jobCell[i]);
+    mix(w.jobCell[i] ^ (w.ration[i] << 24));
     mix(w.inside[i] ^ (w.orderStruct[i] << 12) ^ (w.los[i] << 28));
     mix(w.reveal[i]);
     mix(w.posX[i]);

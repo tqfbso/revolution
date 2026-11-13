@@ -1,3 +1,5 @@
+import { SUPPLY_DIM } from '../sim/logistics';
+import type { SupplyView } from './supply';
 import * as THREE from 'three/webgpu';
 import {
   MAP_CELLS,
@@ -59,6 +61,7 @@ export class Minimap {
     private readonly structures: StructureView,
     private readonly map: GameMap,
     private readonly works: WorksView,
+    private readonly supply: SupplyView,
   ) {
     canvas.width = canvas.height = N;
     this.ctx = canvas.getContext('2d')!;
@@ -141,11 +144,28 @@ export class Minimap {
     const px = this.image.data;
     const base = this.base;
     const { visible, explored } = this.fog;
+    // Ground inside your supply is tinted, with a brighter edge: where an army can be
+    // kept fed. A square of the supply map is four by four cells of this one.
+    const area = this.supply.area;
     for (let c = 0; c < N * N; c++) {
       const shade = visible[c] ? 256 : explored[c] ? 150 : 80;
-      px[4 * c] = (base[3 * c] * shade) >> 8;
-      px[4 * c + 1] = (base[3 * c + 1] * shade) >> 8;
-      px[4 * c + 2] = (base[3 * c + 2] * shade) >> 8;
+      const sx = (c % N) >> 2;
+      const sy = ((c / N) | 0) >> 2;
+      const s = sy * SUPPLY_DIM + sx;
+      let lift = 0;
+      if (area[s] !== 0) {
+        const cx = (c % N) & 3;
+        const cy = ((c / N) | 0) & 3;
+        const edge =
+          (cx === 0 && (sx === 0 || area[s - 1] === 0)) ||
+          (cx === 3 && (sx === SUPPLY_DIM - 1 || area[s + 1] === 0)) ||
+          (cy === 0 && (sy === 0 || area[s - SUPPLY_DIM] === 0)) ||
+          (cy === 3 && (sy === SUPPLY_DIM - 1 || area[s + SUPPLY_DIM] === 0));
+        lift = edge ? 90 : 16;
+      }
+      px[4 * c] = ((base[3 * c] * shade) >> 8) + (lift >> 1);
+      px[4 * c + 1] = Math.min(255, ((base[3 * c + 1] * shade) >> 8) + lift);
+      px[4 * c + 2] = ((base[3 * c + 2] * shade) >> 8) + (lift >> 2);
       px[4 * c + 3] = 255;
     }
     const u = this.units;
