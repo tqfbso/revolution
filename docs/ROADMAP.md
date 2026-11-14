@@ -382,6 +382,25 @@ engine (sound is not a focus; music that follows the intensity of the battle is 
 for M11). One idea from its gameplay is noted for U6 and the next AI pass: attack
 tokens, where only a few enemies may fire at once, as a way to pace `easy`.
 
+## Build order agreed with Fabio (2026-11-14)
+
+In this order, ahead of M10. Items 6 to 11 are planned only.
+
+1. More resources, and income from held flags. BUILT (decision 098)
+2. Co-op rejoin: a dropped player comes back into the running game
+3. Raiding AI: small squads that probe, harass and pull back; big attacks rarer
+4. Civilians: about 400 a map, fleeing to the edges; each death costs the army that
+   caused it resources. No gore
+5. Victory screen: kills, losses, buildings and civilians lost, an MVP per player
+6. Helicopters (capped by helipads, about 3 a pad) and paratroopers (built into a
+   reserve, dropped by a transport plane that air defence can shoot down)
+7. European city map: dense blocks, parks, an elevated highway, a river with bridges
+   balanced by tunnels and underpasses, a central station
+8. The computer fighting in cities (U5): garrisoning, storming, using ruins
+9. Night battles: flares, muzzle flashes, fog of war that matters more
+10. PvP for up to four players, free-for-all or 2v2, on the co-op netcode
+11. Factions (M10), then weather (R4)
+
 ## M10 Factions
 
 - Three asymmetric factions with distinct units and tech

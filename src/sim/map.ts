@@ -89,7 +89,7 @@ export function wallMax(map: GameMap, s: number, f: number): number {
 /** Resource sites: stockpiles of supplies (finite) and oil wells (slow but endless). */
 export const SITE_SUPPLIES = 0;
 export const SITE_FUEL = 1;
-export const MAX_SITES = 32;
+export const MAX_SITES = 48;
 export const MAX_TOWNS = 16;
 /** Height of one storey, for sight from upper floors and for drawing. */
 export const FLOOR_HEIGHT = fx(0.85);
@@ -568,10 +568,11 @@ function placeSettlement(
 }
 
 /**
- * Trucks carry twice what they did (decision 079), so the stockpiles of the maps hold
- * twice what their tables say and last as long as before.
+ * Trucks carry twice what they did (decision 079), so the stockpiles of the maps held
+ * twice what their tables say. Since decision 098 they hold three times: Fabio found the
+ * maps ran dry too soon.
  */
-const STOCK_SCALE = 2;
+const STOCK_SCALE = 3;
 
 /** Put a resource site as near to world point (wx, wy) as open ground allows. */
 export function addSite(map: GameMap, kind: number, stock: number, wx: number, wy: number): void {
@@ -624,6 +625,9 @@ const RIDGE_SITES: readonly (readonly [kind: number, stock: number, x: number, y
   [SITE_FUEL, 200, 178, 484],
   [SITE_SUPPLIES, 12000, 618, 892],
   [SITE_FUEL, 200, 672, 898],
+  // Two more, off the roads between the base and the flanks (decision 098).
+  [SITE_SUPPLIES, 10000, 250, 600],
+  [SITE_SUPPLIES, 10000, 450, 860],
 ];
 /** On the diagonal, as far from one army as from the other: whoever holds the flank has them. */
 const RIDGE_SHARED: readonly (readonly [kind: number, stock: number, a: number])[] = [

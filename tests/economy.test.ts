@@ -37,7 +37,14 @@ import {
 } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
-import { KIND_INFANTRY, KIND_TANK, KIND_TRUCK, POINTS } from '../src/sim/units';
+import {
+  KIND_INFANTRY,
+  KIND_TANK,
+  KIND_TRUCK,
+  POINTS,
+  TOWN_FUEL,
+  TOWN_SUPPLIES,
+} from '../src/sim/units';
 import {
   EV_SHOT,
   JOB_NONE,
@@ -378,5 +385,25 @@ describe('determinism', () => {
       return hashes;
     };
     expect(play()).toEqual(play());
+  });
+});
+
+describe('flag income (decision 098)', () => {
+  it('pays the army that holds a town supplies and fuel every second, and nobody else', () => {
+    const w = createWorld(1, flatMap());
+    w.map.townCount = 1;
+    w.map.townX[0] = fx(400);
+    w.map.townY[0] = fx(400);
+    w.map.townR[0] = fx(30);
+    const before = [w.supplies[0], w.fuel[0], w.supplies[1], w.fuel[1]];
+    for (let i = 0; i < 100; i++) step(w, []);
+    expect(w.supplies[0]).toBe(before[0]);
+    w.townOwner[0] = 0;
+    const ticks = 200;
+    for (let i = 0; i < ticks; i++) step(w, []);
+    expect(w.supplies[0] - before[0]).toBe(10 * TOWN_SUPPLIES);
+    expect(w.fuel[0] - before[1]).toBe(10 * TOWN_FUEL);
+    expect(w.supplies[1]).toBe(before[2]);
+    expect(w.fuel[1]).toBe(before[3]);
   });
 });

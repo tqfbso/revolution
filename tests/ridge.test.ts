@@ -85,7 +85,7 @@ describe('the ridge map', () => {
       fuel[map.siteX[k] < map.siteY[k] ? 0 : 1]++;
     }
     expect(fuel[0]).toBe(fuel[1]);
-    expect(map.siteCount).toBe(22);
+    expect(map.siteCount).toBe(26);
   });
 
   it('offers vehicles four separate ways across, and men the whole forest', () => {

@@ -106,6 +106,9 @@ const sites = (): readonly (readonly [number, number, number, number])[] => [
   [SITE_FUEL, 200, 28, 100],
   [SITE_SUPPLIES, 12000, 161, 238],
   [SITE_FUEL, 200, 123, 234],
+  // Two more, between the base and each flank town (decision 098).
+  [SITE_SUPPLIES, 10000, 30, 172],
+  [SITE_SUPPLIES, 10000, 92, 236],
 ];
 /** On the diagonal, as far from one army as from the other: kind, stock, cell (x = y). */
 const shared = (): readonly (readonly [number, number, number])[] => [

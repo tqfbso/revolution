@@ -1664,3 +1664,19 @@ back to. Whoever is already nearer the objective than that stays where he is unt
 body goes in. An attack waits up to 45 seconds (not 20) at its closing-up place while
 such troops are still within 300 m of it. Golden hash unchanged: the computer player does
 not use the staff.
+
+## 098. Richer maps, and flags that pay supplies and fuel (2026-11-14)
+
+Fabio: resources run out quickly. Every number could simply have been raised; instead
+most of the new income comes from ground held, so territory is worth fighting for.
+
+- Every stockpile holds half as much again (`STOCK_SCALE` 3, was 2).
+- Two more stockpiles a side on the city and ridge maps, between the base and each flank
+  (`MAX_SITES` 48, was 32).
+- A held flag pays 2 supplies and 1 fuel a second on top of its 5 credits
+  (`TOWN_SUPPLIES`, `TOWN_FUEL`): about what two trucks bring in, it never runs dry, and it
+  goes to whoever takes the flag. The resource bar shows "Flags N +S/min".
+
+**Checked:** the computer on normal still stands at 320 army points from minute 13 and
+attacks at minute 17 (city, seed 1): it was never short of supplies, the players were.
+Golden hash 1160432643 (the stockpiles of the test's map are larger).

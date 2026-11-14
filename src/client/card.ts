@@ -30,7 +30,15 @@ import {
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
 import { MAP_CELLS, S_BUILDING, canPlace, type GameMap } from '../sim/map';
-import { CAMERA_COST, KINDS, KIND_TRUCK, POINTS } from '../sim/units';
+import {
+  CAMERA_COST,
+  KINDS,
+  KIND_TRUCK,
+  POINTS,
+  TOWN_FUEL,
+  TOWN_INCOME,
+  TOWN_SUPPLIES,
+} from '../sim/units';
 import { MAX_ORDER, WORKS, WORK_BUILDABLE, WORK_COUNT, canFortify } from '../sim/works';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
 import {
@@ -115,6 +123,8 @@ export class CommandCard {
   private pop = 0;
   private popCap = 0;
   private upkeep = 0;
+  /** Flags the player holds: each pays supplies, fuel and credits every second. */
+  private flags = 0;
   /** The player's units that are out of supply (set by whoever knows: the supply view). */
   hungry: () => number[] = () => [];
   private html = '';
@@ -180,6 +190,9 @@ export class CommandCard {
     this.pop = s.pop[ME] ?? 0;
     this.popCap = s.popCap[ME] ?? 0;
     this.upkeep = s.upkeep[ME] ?? 0;
+    let flags = 0;
+    for (let t = 0; t < s.townOwner.length; t++) if (s.townOwner[t] === ME) flags++;
+    this.flags = flags;
     // The game is decided when a headquarters that stood is gone.
     const standing = [false, false];
     for (let o = 0; o < s.bases.length; o += BASE_STRIDE) {
@@ -570,7 +583,8 @@ export class CommandCard {
       `<i class="sup">Supplies ${this.supplies}</i><i class="fuel">Fuel ${this.fuel}</i>` +
       `<i class="cred">Credits ${this.credits}</i><i>Army ${this.pop}/${this.popCap}</i>` +
       `<i>Tier ${this.tier}</i>` +
-      `<i class="${this.upkeep > 0 ? 'sup' : ''}" title="What your army costs to keep, in supplies a minute. The first 60 army points are free.">Upkeep ${this.upkeep > 0 ? '−' : ''}${this.upkeep}/min</i>`;
+      `<i class="${this.upkeep > 0 ? 'sup' : ''}" title="What your army costs to keep, in supplies a minute. The first 60 army points are free.">Upkeep ${this.upkeep > 0 ? '−' : ''}${this.upkeep}/min</i>` +
+      `<i class="${this.flags > 0 ? 'cred' : ''}" title="What the flags you hold pay, in supplies a minute. Each flag also pays ${TOWN_FUEL * 60} fuel and ${TOWN_INCOME * 60} credits a minute. Lose the flag and you lose the income.">Flags ${this.flags} +${this.flags * TOWN_SUPPLIES * 60}/min</i>`;
     const idle = this.idle().length;
     if (idle > 0)
       res += `<button title="Trucks with nothing to do. Click (or press .) to select them">Idle trucks ${idle} (.)</button>`;

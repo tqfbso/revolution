@@ -135,7 +135,9 @@ import {
   STRIKE_RING,
   STRIKE_WINDOW_TICKS,
   SPOT_TICKS,
+  TOWN_FUEL,
   TOWN_INCOME,
+  TOWN_SUPPLIES,
 } from './units';
 import {
   CHASE_FIELDS,
@@ -2378,7 +2380,12 @@ function updateTowns(w: World): void {
         }
       }
     }
-    if (w.townOwner[t] !== NO_TEAM) w.credits[w.townOwner[t]] += TOWN_INCOME;
+    const owner = w.townOwner[t];
+    if (owner !== NO_TEAM) {
+      w.credits[owner] += TOWN_INCOME;
+      w.supplies[owner] += TOWN_SUPPLIES;
+      w.fuel[owner] += TOWN_FUEL;
+    }
   }
   for (let s = 0; cut > 0 && s < map.structCount; s++) {
     if (map.sKind[s] !== S_BRIDGE || w.sHp[s] > 0) continue;
