@@ -1,5 +1,6 @@
-// The civilians of the map (decision 102), as the player sees them: small figures in
-// everyday colours running out of the houses when the shooting starts. They are drawn
+// The civilians of the map (decision 102), as the player sees them: people in everyday
+// clothes, the size of the soldiers (decision 111), running out of the houses when the
+// shooting starts. They are drawn
 // only where the player has eyes. One that is hit falls and sinks into the ground over a
 // few seconds: no blood, nothing to look at, only the count going up and the bill.
 import * as THREE from 'three/webgpu';
@@ -10,7 +11,7 @@ import type { Snapshot } from '../worker/protocol';
 import { ALERT_NOTE, type Alerts } from './alerts';
 import { Batch } from './batch';
 import type { Fog } from './fog';
-import { box, merge } from './models';
+import { CIVILIAN_KINDS, CIVILIAN_STRIDES, buildCivilian } from './civilianmodel';
 import type { Terrain } from './terrain';
 
 /** Coats, shirts and jackets: muted, and none of them an army's colour. */
@@ -27,17 +28,8 @@ const CLOTHES: [number, number, number][] = [
 /** Seconds a fallen figure lies before it is gone. */
 const FADE = 9;
 
-/** A person about 1.7 m tall: legs, a body in the instance's colour, a head. */
-function buildFigure(): THREE.BufferGeometry {
-  return merge([
-    box(0.13, 0.8, 0.16, { at: [-0.09, 0.4, 0], color: 0x2c2d33, cloth: true }),
-    box(0.13, 0.8, 0.16, { at: [0.09, 0.4, 0], color: 0x2c2d33, cloth: true }),
-    box(0.4, 0.62, 0.22, { at: [0, 1.11, 0], team: 1, cloth: true }),
-    box(0.1, 0.56, 0.12, { at: [-0.26, 1.1, 0.03], rot: [0.3, 0, 0], team: 1, cloth: true }),
-    box(0.1, 0.56, 0.12, { at: [0.26, 1.1, -0.03], rot: [-0.3, 0, 0], team: 1, cloth: true }),
-    box(0.19, 0.22, 0.2, { at: [0, 1.55, 0], color: 0xb89a82 }),
-  ]);
-}
+/** Strides a second of a running figure. */
+const PACE = 5.5;
 
 interface Runner {
   x: number;
@@ -66,7 +58,8 @@ export class Civilians {
   /** Out of their houses and running for the edge of the map. */
   fleeing = 0;
   killed: number[] = [];
-  private readonly figures: Batch;
+  /** One batch per kind of figure and stride (see civilianmodel.ts). */
+  private readonly figures: Batch[] = [];
   private readonly runners = new Map<number, Runner>();
   private readonly fallen: Fallen[] = [];
   private readonly frame = new Float32Array(12);
@@ -85,9 +78,16 @@ export class Civilians {
       tint.xyz,
       attribute('teamMask', 'float'),
     ).mul(fog.cloud());
-    this.figures = new Batch(buildFigure(), material, MAX_CIVILIANS + 64);
-    this.figures.mesh.castShadow = true;
-    this.group.add(this.figures.mesh);
+    for (let k = 0; k < CIVILIAN_KINDS * CIVILIAN_STRIDES; k++) {
+      const b = new Batch(
+        buildCivilian(Math.trunc(k / CIVILIAN_STRIDES), k % CIVILIAN_STRIDES),
+        material,
+        MAX_CIVILIANS + 64,
+      );
+      b.mesh.castShadow = true;
+      this.figures.push(b);
+      this.group.add(b.mesh);
+    }
   }
 
   applySnapshot(s: Snapshot, now: number): void {
@@ -126,8 +126,7 @@ export class Civilians {
   }
 
   update(now: number, dt: number): void {
-    const b = this.figures;
-    b.n = 0;
+    for (const b of this.figures) b.n = 0;
     const ease = Math.min(1, dt * 12);
     for (const [id, r] of this.runners) {
       const dx = r.tx - r.x;
@@ -146,9 +145,14 @@ export class Civilians {
       }
       if (!this.fog.sees(r.x, r.z)) continue;
       const c = CLOTHES[id % CLOTHES.length];
-      // A little bounce and a lean into the run.
-      const y = this.terrain.heightAt(r.x, r.z) + Math.abs(Math.sin(now * 11 + id)) * 0.07;
-      b.put(r.x, y, r.z, r.sin, r.cos, 0.92 + (id % 5) * 0.035, c[0], c[1], c[2], 0);
+      // Two strides, swapped as it runs, with a little bounce at each footfall. One in
+      // seven is a head shorter: not everybody in a town is grown.
+      const phase = now * PACE + id * 0.37;
+      const stride = Math.floor(phase) & 1;
+      const y = this.terrain.heightAt(r.x, r.z) + Math.abs(Math.sin(phase * Math.PI)) * 0.022;
+      const size = id % 7 === 3 ? 0.76 : 0.94 + (id % 5) * 0.03;
+      const b = this.figures[(id % CIVILIAN_KINDS) * CIVILIAN_STRIDES + stride];
+      b.put(r.x, y, r.z, r.sin, r.cos, size, c[0], c[1], c[2], 0);
     }
     const f = this.frame;
     for (let k = this.fallen.length - 1; k >= 0; k--) {
@@ -174,12 +178,13 @@ export class Civilians {
       f[7] = -Math.sin(tilt);
       f[8] = Math.cos(tilt) * cos;
       f[9] = d.x;
-      f[10] = this.terrain.heightAt(d.x, d.z) + 0.12 * down - Math.max(0, age - 5) * 0.09;
+      f[10] = this.terrain.heightAt(d.x, d.z) + 0.04 * down - Math.max(0, age - 5) * 0.03;
       f[11] = d.z;
       const c = CLOTHES[d.tint % CLOTHES.length];
       const dim = 1 - 0.4 * Math.min(1, age / FADE);
+      const b = this.figures[(d.tint % CIVILIAN_KINDS) * CIVILIAN_STRIDES];
       b.frame(f, c[0] * dim, c[1] * dim, c[2] * dim, 0);
     }
-    b.flush();
+    for (const b of this.figures) b.flush();
   }
 }

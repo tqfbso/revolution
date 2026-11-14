@@ -2124,3 +2124,22 @@ Not built, and why:
 
 Three computer games ran to a finish (European city, the city, the ridge). Golden hash
 unchanged: the sim's rules did not change, only who gives which orders.
+
+## 111. Civilians are people the size of the soldiers (2026-11-14)
+
+Fabio: the civilians were too big beside the soldiers and too boxy. They were: six boxes
+1.7 map units tall, where a soldier stands 0.62, so a civilian was 2.7 times a rifleman.
+
+- **Same scale as the soldiers** (0.62 units for 1.8 m). Adults vary a little in height and
+  one in seven is a head shorter.
+- **Built like the soldiers**: skins over rings, so they have shoulders, a waist, calves and
+  a head with hair. No helmet, no kit, no weapon.
+- **Three kinds**: a jacket, a long coat with a bag, a hooded top with a rucksack. Skin, hair
+  and trousers go with the kind; the clothes above the waist take one of eight muted
+  colours as before.
+- **They run**: each kind has two strides, swapped five and a half times a second, with a
+  small bounce at each footfall.
+- **Cost**: under 700 points a figure, six instanced batches in place of one. At 400
+  civilians that is at most 280,000 points, and only those in sight are drawn.
+
+Client only: nothing in the sim changed.
