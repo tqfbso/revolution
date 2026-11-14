@@ -1871,3 +1871,29 @@ player keeps watching. "New game" starts again.
 **Not in the hash.** The score and the names on units decide nothing in the game, so
 they are left out of the world hash and the golden hash is unchanged (a test pins that a
 name on an order changes nothing).
+
+## 100. Buildings come apart in a battle: a second, larger cut (2026-11-14)
+
+Fabio, after playing 095: buildings must be destroyed more easily still; it takes too long
+for a battle to do any meaningful damage. So the same levers again, further.
+
+- Structure per cell 90, 180, 280 (was 200, 400, 600); walls 60, 110, 160 (was 120, 220,
+  320). A lone tank marks an ordinary city house with its third shell, guts it in about 50
+  seconds and levels it in 80 (two and three minutes after 095). Four tanks level a small
+  house in ten seconds.
+- A building looks damaged at 90% (was 80%) and is gutted at 40% (was 35%), so the first
+  hits show.
+- Bullets and light cannon now gut a building; they stop at 10% of its structure
+  (`LIGHT_FLOOR_PCT`), so only shells, charges and warheads level it. Fighting vehicle
+  stray 4 (was 3).
+- Stray rounds carry eight cells past the target (was five). A shell cracks buildings out
+  to one and a half times its killing radius. A vehicle that blows up does 100 within nine
+  metres (was 60 within six).
+- Storming costs the building 8 a second (was 16), which against the new strength is about
+  what it was.
+
+Ruins and gutted shells are still positions, and fortifying still takes a quarter off.
+
+**Measured.** Hard against hard on the city: after 45 minutes on seed 1, 85 of 444
+buildings are marked or worse and 21 levelled (19 and 5 after 095); on seed 2, 117 of 552
+after 30 minutes. Golden hash 476858902.

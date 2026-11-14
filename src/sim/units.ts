@@ -48,7 +48,7 @@ export interface UnitKind {
   /**
    * What a shot at a target in the open does to a building just behind or beside it
    * (decision 095): the structure takes this much. Below BLAST_STRAY it is bullets and
-   * light cannon, which shoot a building up but cannot gut it, and do half as much to the
+   * light cannon, which shoot a building up and gut it but cannot level it, and do half as much to the
    * wall. From BLAST_STRAY up it is a shell, a missile or a warhead: no such limit, and it
    * also catches a building the target is standing against.
    */
@@ -170,7 +170,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 8,
     damage: [3, 11, 11, 7, 9, 11, 2, 2, 9, 9, 9, 11],
     siege: 4,
-    stray: 3,
+    stray: 4,
     garrison: false,
     wreckTicks: 1800,
     armour: [100, 120, 150],

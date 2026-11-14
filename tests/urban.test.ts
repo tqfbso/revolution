@@ -62,11 +62,11 @@ describe('buildings that die slowly (U1)', () => {
     expect(buildClass(2, 2, 3)).toBe(BUILD_HOUSE);
     expect(buildClass(2, 3, 5)).toBe(BUILD_BLOCK);
     expect(buildClass(3, 3, 2)).toBe(BUILD_HALL);
-    // Decision 095 brought these down from 450, 900 and 1300: the houses of the city map
-    // cover nine cells, not the four those were set for.
-    expect(withHouse(2, 2, 3).sMaxHp[0]).toBe(200 * 4);
-    expect(withHouse(2, 2, 4).sMaxHp[0]).toBe(400 * 4);
-    expect(withHouse(3, 3, 2).sMaxHp[0]).toBe(600 * 9);
+    // Decisions 095 and 100 brought these down from 450, 900 and 1300, twice at Fabio's
+    // asking: the city is meant to come apart in a battle.
+    expect(withHouse(2, 2, 3).sMaxHp[0]).toBe(90 * 4);
+    expect(withHouse(2, 2, 4).sMaxHp[0]).toBe(180 * 4);
+    expect(withHouse(3, 3, 2).sMaxHp[0]).toBe(280 * 9);
   });
 
   it('a shot meets the face it comes from', () => {
@@ -76,7 +76,7 @@ describe('buildings that die slowly (U1)', () => {
     expect(faceToward(m, 0, fx(509), fx(470))).toBe(FACE_NORTH);
   });
 
-  it('a lone tank breaches the wall in seconds and guts a small house in about a minute', () => {
+  it('a lone tank breaches the wall in seconds and guts a small house in under half a minute', () => {
     const w = createWorld(1, withHouse());
     step(w, [spawnAt(1, KIND_TANK, 1, 535, 500)]);
     step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [0], structure: 0 }]);
@@ -96,9 +96,9 @@ describe('buildings that die slowly (U1)', () => {
     expect(breached).toBeLessThan(600);
     expect(w.sWall[FACE_EAST]).toBe(0);
     expect(w.sWall[FACE_WEST]).toBe(wallMax(w.map, 0, FACE_WEST));
-    // About a minute to gut it (four before decision 095), and it is not a ruin.
-    expect(gutted).toBeGreaterThan(700);
-    expect(gutted).toBeLessThan(1500);
+    // Under half a minute to gut it (four minutes before decision 095), and it is not a ruin.
+    expect(gutted).toBeGreaterThan(200);
+    expect(gutted).toBeLessThan(700);
     expect(stageOf(w, 0)).toBe(STAGE_GUTTED);
     expect(events(w, EV_COLLAPSE).length).toBe(0);
   });
@@ -113,7 +113,7 @@ describe('buildings that die slowly (U1)', () => {
     // Grenades and rockets: it tells after a minute, and a tank does thirty times as much.
     const done = w.map.sMaxHp[0] - w.sHp[0];
     expect(done).toBeGreaterThan(0);
-    expect(done).toBeLessThan(w.map.sMaxHp[0] / 10);
+    expect(done).toBeLessThan(w.map.sMaxHp[0] / 5);
   });
 
   it('an engineer charge goes into the structure, not into a wall', () => {
@@ -220,7 +220,7 @@ describe('collateral damage (decision 095)', () => {
     expect(w.sHp[0]).toBeGreaterThan(0);
   });
 
-  it('rifle fire shoots up the house behind its target but cannot gut it', () => {
+  it('rifle fire shoots up the house behind its target and guts it, but cannot level it', () => {
     const w = createWorld(1, withHouse());
     bystander(w);
     step(w, [spawnAt(1, KIND_INFANTRY, 6, 526, 500)]);
@@ -232,13 +232,13 @@ describe('collateral damage (decision 095)', () => {
       step(w, []);
       if (shotUp < 0 && stageOf(w, 0) === STAGE_DAMAGED) shotUp = t;
     }
-    // Six squads need most of a minute to leave their mark on a small house.
-    expect(shotUp).toBeGreaterThan(200);
-    expect(shotUp).toBeLessThan(1200);
-    expect(w.sWall[FACE_EAST]).toBeLessThan(wallMax(w.map, 0, FACE_EAST));
-    // Four minutes of it and the house still stands, with its floors.
-    expect(stageOf(w, 0)).toBe(STAGE_DAMAGED);
-    expect(w.sHp[0] * 100).toBeGreaterThanOrEqual(w.map.sMaxHp[0] * 35);
+    // Six squads leave their mark on a small house within seconds.
+    expect(shotUp).toBeGreaterThan(0);
+    expect(shotUp).toBeLessThan(300);
+    expect(w.sWall[FACE_EAST]).toBe(0);
+    // Four minutes of it and the house is a shell, but it stands: bullets do not level it.
+    expect(stageOf(w, 0)).toBe(STAGE_GUTTED);
+    expect(w.sHp[0] * 100).toBeGreaterThanOrEqual(w.map.sMaxHp[0] * 10);
   });
 
   it('a fight in the open, away from any house, harms none', () => {
