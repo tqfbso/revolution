@@ -41,6 +41,8 @@ export interface BombardCommand {
   y: number;
   /** One smoke shell per gun instead of high explosive until stopped. */
   smoke?: boolean;
+  /** One illuminating shell per gun: it lights the ground round the point at night. */
+  flare?: boolean;
 }
 
 export const CMD_ATTACK = 20;
@@ -375,6 +377,13 @@ export interface StyleCommand {
   style: number;
 }
 
+/** The battle is fought at night (or, off, by day). Given once, when the game is set up. */
+export const CMD_NIGHT = 37;
+export interface NightCommand {
+  type: typeof CMD_NIGHT;
+  on: boolean;
+}
+
 /** Commander `slot` of `team` has its losses replaced by itself (or, off, not). */
 export interface ReinforceCommand {
   type: typeof CMD_REINFORCE;
@@ -394,6 +403,7 @@ export type Command = (
   | MissionCommand
   | ReinforceCommand
   | StyleCommand
+  | NightCommand
   | OrderCommand
   | KeepCommand
   | DestCommand

@@ -610,3 +610,15 @@ export const TOWN_INCOME = 5;
  */
 export const TOWN_SUPPLIES = 2;
 export const TOWN_FUEL = 1;
+
+// Night (decision 113).
+/** Out of 100: how far ground troops see in the dark. Recon teams and drones see as by day. */
+export const NIGHT_SIGHT_PCT = 60;
+/** A flare lights this far round where it bursts, for this long. */
+export const FLARE_RADIUS = fx(42);
+export const FLARE_TICKS = 30 * 20;
+/** A weapon that has fired within this many ticks gives its owner away. */
+export const FLASH_TICKS = 50;
+/** A vehicle burns for this long after it is knocked out, and lights this far round it. */
+export const BURN_TICKS = 45 * 20;
+export const BURN_RADIUS = fx(14);

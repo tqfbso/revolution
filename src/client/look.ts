@@ -38,12 +38,14 @@ export function makeLook(quality: Quality, shadows: boolean): Look {
 }
 
 /** A tiny sky (gradient, haze at the horizon, a soft sun) for the reflections to read. */
-export function skyScene(sunDir: THREE.Vector3): THREE.Scene {
+export function skyScene(sunDir: THREE.Vector3, night = false): THREE.Scene {
   const size = 256;
   const px = new Uint8Array(size * size * 4);
-  const zenith = [0.32, 0.47, 0.68];
-  const horizon = [0.78, 0.8, 0.78];
-  const ground = [0.2, 0.19, 0.15];
+  // By night: a dark blue vault, a paler horizon and the moon where the sun would be.
+  const zenith = night ? [0.035, 0.055, 0.11] : [0.32, 0.47, 0.68];
+  const horizon = night ? [0.1, 0.13, 0.19] : [0.78, 0.8, 0.78];
+  const ground = night ? [0.03, 0.035, 0.045] : [0.2, 0.19, 0.15];
+  const shine = night ? 0.45 : 1;
   // Equirectangular: x is the compass direction, y runs from straight up to straight down.
   const sunU = Math.atan2(sunDir.z, sunDir.x) / (2 * Math.PI) + 0.5;
   const sunV = Math.acos(sunDir.y) / Math.PI;
@@ -63,7 +65,7 @@ export function skyScene(sunDir: THREE.Vector3): THREE.Scene {
       let du = Math.abs(u - sunU);
       if (du > 0.5) du = 1 - du;
       const d = Math.hypot(du * 2 * Math.sin(v * Math.PI), v - sunV);
-      const glow = Math.exp(-d * d * 160) * 1.0 + Math.exp(-d * d * 14) * 0.22;
+      const glow = (Math.exp(-d * d * 160) * 1.0 + Math.exp(-d * d * 14) * 0.22) * shine;
       const k = (y * size + x) * 4;
       px[k] = Math.min(255, (c[0] + glow) * 255);
       px[k + 1] = Math.min(255, (c[1] + glow * 0.92) * 255);

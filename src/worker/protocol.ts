@@ -71,6 +71,8 @@ export type ToWorker =
       net?: NetMode;
       /** Co-op: players sharing the army. The computer is strengthened for three or four. */
       humans?: number;
+      /** A night battle (CMD_NIGHT on the first tick): short sight, flares, fires that show. */
+      night?: boolean;
     }
   | { type: 'command'; command: Command }
   /** Guest: ticks the host has run, in order. The sim runs these and no others. */

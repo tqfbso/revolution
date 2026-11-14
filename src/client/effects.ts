@@ -272,7 +272,26 @@ export class Effects {
 
   /** One rifle firing: a short flash at its muzzle, pushed along the barrel. */
   muzzle(x: number, y: number, z: number, dx: number, dz: number): void {
-    this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.05, 0.3, 0.16, 1, 0.78, 0.4, 0.95);
+    // In the dark a muzzle flash is what you see of a squad: bigger, and a beat longer.
+    if (this.night) {
+      this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.08, 0.62, 0.3, 1, 0.8, 0.45, 1);
+    } else this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.05, 0.3, 0.16, 1, 0.78, 0.4, 0.95);
+  }
+
+  /** Night battle: fire reads as light. */
+  night = false;
+
+  /** One frame of a flare burning in the sky: a hard white core, a halo, the odd spark. */
+  flare(x: number, y: number, z: number): void {
+    const f = 0.85 + Math.random() * 0.3;
+    this.emit(ADDITIVE, x, y, z, 0, 0, 0, 0.09, 2.6 * f, 2.2, 1, 0.96, 0.82, 1);
+    this.emit(ADDITIVE, x, y, z, 0, 0, 0, 0.11, 13 * f, 12, 1, 0.86, 0.6, 0.2);
+    if (Math.random() < 0.3) {
+      this.emit(ADDITIVE, x, y, z, rnd(1.5), -1, rnd(1.5), 0.9, 0.25, 0.1, 1, 0.8, 0.5, 0.9);
+    }
+    if (Math.random() < 0.12) {
+      this.emit(SMOKE, x, y + 0.8, z, rnd(0.4), 1.2, rnd(0.4), 5, 1.2, 5, 0.5, 0.5, 0.5, 0.16);
+    }
   }
 
   /** Squad fire: a few rifle tracers with spread and small flashes. */
@@ -709,6 +728,10 @@ export class Effects {
       g * 1.05,
       0.34 + heat * 0.3,
     );
+    // By night the fire throws a glow over the ground round it.
+    if (this.night && heat > 0.05) {
+      this.emit(ADDITIVE, x, y + 1.2, z, 0, 0.2, 0, 0.6, 11, 13, 1, 0.5, 0.16, 0.05 + heat * 0.1);
+    }
     if (Math.random() < heat * 0.9) {
       for (let k = 0; k < 2; k++) {
         this.emit(

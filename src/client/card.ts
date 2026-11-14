@@ -85,7 +85,7 @@ const HINT = [
   'Infantry squad. Cheap and fast to raise. Holds buildings, trenches and forest; rockets hurt vehicles within 8 m.',
   'Missile team. Kills vehicles from beyond gun range. Helpless against infantry: keep riflemen with it.',
   'Infantry fighting vehicle. Carries two squads fast (L to mount, U to dismount) and mows down infantry.',
-  'Self-propelled gun. Shells what others have spotted from far behind. Ctrl + right click: shell a spot. F: smoke.',
+  'Self-propelled gun. Shells what others have spotted from far behind. Ctrl + right click: shell a spot. F: smoke. I: a flare, at night.',
   'Recon team. Sees far, hard to see, unarmed. Everything else is half blind without it.',
   'Recon drone. Eyes in the sky over hills and houses. Dies to air defence and jammers.',
   'Strike drone. Flies into a vehicle, once. They circle, then hit one at a time: four for a tank. Dies to air defence and jammers.',
@@ -154,7 +154,7 @@ export class CommandCard {
    * An order waiting for a click on the ground: attack-move or a smoke screen. The input
    * handler reads it and carries it out; `arm` is how both sides change it.
    */
-  armed: '' | 'attack' | 'smoke' = '';
+  armed: '' | 'attack' | 'smoke' | 'flare' = '';
   private over = false;
   /** The game is decided (true: won). Without it, a banner says so. */
   onOver: ((won: boolean) => void) | null = null;
@@ -243,7 +243,7 @@ export class CommandCard {
     if (this.building >= 0 && this.structures.hp[this.building] === 0) this.select(-1);
   }
 
-  arm(mode: '' | 'attack' | 'smoke'): void {
+  arm(mode: '' | 'attack' | 'smoke' | 'flare'): void {
     this.armed = mode;
     const game = document.getElementById('game');
     if (game) game.style.cursor = mode === '' ? '' : 'cell';
@@ -323,6 +323,7 @@ export class CommandCard {
     else if (act === 'entrench') this.armEntrench();
     else if (act === 'amove') this.arm(this.armed === 'attack' ? '' : 'attack');
     else if (act === 'smoke') this.arm(this.armed === 'smoke' ? '' : 'smoke');
+    else if (act === 'flare') this.arm(this.armed === 'flare' ? '' : 'flare');
     else if (act === 'unload') {
       this.send({ type: CMD_UNLOAD, units: ids.filter((id) => this.units.load[id] > 0) });
     } else if (act === 'load') this.mount();
@@ -791,6 +792,18 @@ export class CommandCard {
           'Each selected gun fires one smoke shell at the point you click. Smoke blinds both sides for 30 seconds. F fires at the pointer at once.',
           'F',
         );
+        if (this.units.night) {
+          special += this.button(
+            'flare',
+            0,
+            'Flare',
+            null,
+            this.armed === 'flare' ? 'click the ground' : 'then click',
+            this.armed === 'flare',
+            'The nearest selected gun puts a flare over the point you click. For 30 seconds everything under it is seen as far as by day, yours as well as theirs. I fires at the pointer at once.',
+            'I',
+          );
+        }
       }
       const riders = has((k) => KINDS[k].garrison);
       const carriers = has((k) => KINDS[k].carry > 0);

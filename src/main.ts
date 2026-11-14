@@ -33,7 +33,7 @@ import { Sound } from './client/sound';
 import { StructureView } from './client/structures';
 import { SupplyView } from './client/supply';
 import { WorksView } from './client/works';
-import { UnitView } from './client/units';
+import { UnitView, flareHeight } from './client/units';
 import { TASK_HUNGRY, type Scenario, type Snapshot, type ToWorker } from './worker/protocol';
 import {
   KINDS,
@@ -52,6 +52,7 @@ import {
 
 /** The haze at the horizon: what distance fades into. */
 const SKY = 0xa9b6bd;
+const NIGHT_SKY = 0x0d131d;
 
 /**
  * WebGPU where available, WebGL2 otherwise (Three.js picks). If WebGPU is advertised but
@@ -101,14 +102,27 @@ async function start(): Promise<void> {
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = shadows;
 
+  // `?time=night`: a night battle (decision 113). A moonlit night, not a black one: the
+  // ground and the troops stay readable, and fire is what stands out.
+  const night = params.get('time') === 'night';
+  if (night) renderer.toneMappingExposure = 1.15;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(SKY);
-  scene.fog = new THREE.Fog(SKY, 500, 2200);
+  scene.background = new THREE.Color(night ? NIGHT_SKY : SKY);
+  scene.fog = new THREE.Fog(night ? NIGHT_SKY : SKY, night ? 380 : 500, night ? 1700 : 2200);
   // Overcast-bright sky light plus a low, warm sun: long readable shadows, muted colours.
   // With reflections on, most of the sky's light comes from the environment map instead.
-  scene.add(new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.78));
-  const sun = new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 4.3);
-  const sunDir = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
+  scene.add(
+    night
+      ? new THREE.HemisphereLight(0x7f97c6, 0x2a3142, quality === 'low' ? 1.5 : 1.05)
+      : new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.78),
+  );
+  // By night the same light is the moon: high, cold and a quarter as strong.
+  const sun = night
+    ? new THREE.DirectionalLight(0xa9c2ee, quality === 'low' ? 1.7 : 2.0)
+    : new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 4.3);
+  const sunDir = (
+    night ? new THREE.Vector3(0.38, 0.8, -0.46) : new THREE.Vector3(-0.55, 0.62, 0.42)
+  ).normalize();
   sun.castShadow = shadows;
   const shadowSize = quality === 'high' ? 4096 : quality === 'low' ? 1024 : 2048;
   sun.shadow.mapSize.set(shadowSize, shadowSize);
@@ -133,8 +147,8 @@ async function start(): Promise<void> {
     fog.clouds = look.tex.noise;
     // What shiny things reflect, and the light that comes from the whole sky.
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(skyScene(sunDir), 0.02).texture;
-    scene.environmentIntensity = 0.45;
+    scene.environment = pmrem.fromScene(skyScene(sunDir, night), 0.02).texture;
+    scene.environmentIntensity = night ? 0.5 : 0.45;
     pmrem.dispose();
   }
   // The skirmish is fought in the city unless `?map=euro`, `?map=ridge` or `?map=river` asks
@@ -160,6 +174,16 @@ async function start(): Promise<void> {
   structures.clutter = clutter;
   works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
+  units.night = effects.night = night;
+  // Night: the two flares nearest the camera light the ground under them for real.
+  const flareLights: THREE.PointLight[] = [];
+  if (night && quality !== 'low') {
+    for (let k = 0; k < 2; k++) {
+      const l = new THREE.PointLight(0xffe2b0, 0, 120, 1.4);
+      flareLights.push(l);
+      scene.add(l);
+    }
+  }
   const cameras = new Cameras(
     terrain,
     fog,
@@ -368,6 +392,7 @@ async function start(): Promise<void> {
     speed,
     net: coop ? coop.role : 'solo',
     humans: coop ? coop.humans : 1,
+    night,
   });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
   const setSpeed = (v: number) => {
@@ -431,6 +456,15 @@ async function start(): Promise<void> {
     pickAi.value = ai;
     pickAi.addEventListener('change', () => {
       params.set('ai', pickAi.value);
+      location.search = params.toString();
+    });
+  }
+  const pickTime = document.getElementById('time-pick') as HTMLSelectElement | null;
+  if (pickTime) {
+    pickTime.value = night ? 'night' : 'day';
+    pickTime.addEventListener('change', () => {
+      if (pickTime.value === 'night') params.set('time', 'night');
+      else params.delete('time');
       location.search = params.toString();
     });
   }
@@ -686,7 +720,7 @@ async function start(): Promise<void> {
   document.getElementById('coop-host')?.addEventListener('click', () => {
     // A fresh game as the host: the lobby gives the link to send.
     const next = new URLSearchParams();
-    for (const k of ['map', 'ai', 'seed', 'quality', 'renderer', 'net']) {
+    for (const k of ['map', 'ai', 'time', 'seed', 'quality', 'renderer', 'net']) {
       const v = params.get(k);
       if (v !== null) next.set(k, v);
     }
@@ -808,6 +842,23 @@ async function start(): Promise<void> {
       sc.near = 1;
       sc.far = 900;
       sc.updateProjectionMatrix();
+    }
+    if (flareLights.length > 0) {
+      const seconds = now / 1000;
+      const byDist = units.flares
+        .map((f) => ({ f, d: Math.hypot(f.x - focus.x, f.z - focus.z) }))
+        .sort((a, b) => a.d - b.d);
+      flareLights.forEach((l, k) => {
+        const f = byDist[k]?.f;
+        if (!f) {
+          l.intensity = 0;
+          return;
+        }
+        // It gutters as it burns out, and flickers all the while.
+        const left = Math.min(1, (f.until - seconds) / 3);
+        l.position.set(f.x, flareHeight(f, seconds), f.z);
+        l.intensity = 330 * left * (0.92 + 0.08 * Math.sin(seconds * 31 + k));
+      });
     }
     if (held.shadowEvery > 0 && frameNo % held.shadowEvery === 0) {
       sun.target.position.copy(focus);

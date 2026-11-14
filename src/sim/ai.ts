@@ -88,6 +88,7 @@ import {
 import { concealed, stageOf, structDist2 } from './sim';
 import { fortified } from './urban';
 import {
+  FLARE_TICKS,
   GARRISON_MAX,
   KINDS,
   KIND_AD,
@@ -113,6 +114,7 @@ import {
 import {
   FLAG_BOARD,
   FLAG_BOMBARD,
+  FLAG_FLARE,
   FLAG_BREACH,
   FLAG_GARRISON,
   FLAG_MOVING,
@@ -462,6 +464,8 @@ export interface Force {
   /** Thinks in a row without an enemy in sight at the objective. */
   quiet: number;
   smoked: boolean;
+  /** Night: the tick before which it does not call for another flare. */
+  flareAt: number;
   /** It has already changed its route once on this march. */
   turned: boolean;
   /** Objectives taken on this outing. */
@@ -610,6 +614,7 @@ export function newForce(role: number): Force {
     obj: null,
     quiet: 0,
     smoked: false,
+    flareAt: 0,
     turned: false,
     done: 0,
     boardUntil: 0,
@@ -3000,6 +3005,17 @@ export function press(
 ): void {
   const map = w.map;
   const obj = f.obj!;
+  // At night, a flare over the place for as long as the assault lasts: one gun, one shell,
+  // again when the last has nearly burnt out. It lights the attackers too once they are in.
+  if (w.night !== 0 && w.tick >= f.flareAt) {
+    for (let n = units.length - 1; n >= 0; n--) {
+      const i = units[n];
+      if (w.kind[i] !== KIND_ARTILLERY) continue;
+      out.push({ type: CMD_BOMBARD, units: [i], x: obj.x, y: obj.y, flare: true });
+      f.flareAt = w.tick + FLARE_TICKS - 5 * TICK_RATE;
+      break;
+    }
+  }
   // Smoke in front of a defended town, once, before the line closes with it.
   if (ai.tune.smoke && !f.smoked && obj.kind === OBJ_TOWN && points.length > 0) {
     const guns = units.filter((i) => w.kind[i] === KIND_ARTILLERY);
@@ -3038,6 +3054,8 @@ export function press(
   for (const i of units) {
     const kind = w.kind[i];
     const flags = w.flags[i];
+    // A gun that has a flare to fire fires it before anything else.
+    if ((flags & FLAG_FLARE) !== 0) continue;
     if (
       gapCell >= 0 &&
       (KINDS[kind].engineer || kind === KIND_ARTILLERY) &&
