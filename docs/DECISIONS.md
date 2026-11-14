@@ -1647,3 +1647,20 @@ Two things were wrong. Normal was the computer at full stretch: seven times easy
 **Checked:** new normal against easy, six games of 45 minutes (three seeds, both sides): normal wins five in 27 to 44 minutes and is far ahead in the sixth (303 points and 6 towns against 56 and 3). New normal against hard, three seeds: hard wins two in 23 minutes and is far ahead in the third (660 points and 7 towns against 86 and 2).
 
 **Not known:** whether a human team finds the new normal right; this is set from Fabio's one report and the computer playing itself. The step from normal to hard is now large (320 to 800 points); a level between them is the obvious next thing if normal becomes too easy.
+
+## 097. Troops given to a commander from all over the map go to the objective (2026-11-14)
+
+Fabio: troops in different parts of the map put under one commander walked back to one
+spot and then moved oddly. Two causes in the staff. A new mission for scattered troops
+began with a way point at the middle of where they all stood, so troops already at the
+objective walked back from it (83 m in the test) and the guns and drones made for an
+empty field. And troops added to a commander in the field were sent to where its body
+was, not to where it was going (149 m back in the test).
+
+Now the largest lot standing together is the body and the plan is made for it (`core`);
+everyone else is joining and goes straight to where the body is going (`rally`): the
+place it holds, the place an attack closes up outside its objective, the place it fell
+back to. Whoever is already nearer the objective than that stays where he is until the
+body goes in. An attack waits up to 45 seconds (not 20) at its closing-up place while
+such troops are still within 300 m of it. Golden hash unchanged: the computer player does
+not use the staff.

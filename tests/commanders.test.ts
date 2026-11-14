@@ -197,7 +197,7 @@ describe('sub-commanders: the staff', () => {
     const { w, st } = field();
     const t = town(w, 'Westgate');
     // Most of the body is fast and close; a third of it is on foot, a long walk behind.
-    const ids = add(w, [spawn(0, KIND_IFV, 13, 300, 740), spawn(0, KIND_INFANTRY, 7, 215, 815)]);
+    const ids = add(w, [spawn(0, KIND_IFV, 13, 240, 790), spawn(0, KIND_INFANTRY, 7, 180, 840)]);
     step(w, [
       { type: CMD_ASSIGN, units: ids, slot: 0 },
       mission(0, M_ATTACK, w.map.townX[t], w.map.townY[t]),
@@ -220,7 +220,7 @@ describe('sub-commanders: the staff', () => {
   it('attack: closes up outside the town, out of sight of what is in it', () => {
     const { w, st } = field();
     const t = town(w, 'Westgate');
-    const ids = add(w, [spawn(0, KIND_IFV, 13, 300, 740), spawn(0, KIND_INFANTRY, 7, 215, 815)]);
+    const ids = add(w, [spawn(0, KIND_IFV, 13, 240, 790), spawn(0, KIND_INFANTRY, 7, 180, 840)]);
     step(w, [
       { type: CMD_ASSIGN, units: ids, slot: 0 },
       mission(0, M_ATTACK, w.map.townX[t], w.map.townY[t]),
@@ -240,8 +240,9 @@ describe('sub-commanders: the staff', () => {
     expect(waited).toBeGreaterThan(0);
     // Nobody stands waiting within a tank's sight (44) of the edge of the town.
     expect(nearest / fx(1)).toBeGreaterThan(44);
-    // And the wait is short: 20 seconds once half are up, not a minute.
-    expect(waited / TICK_RATE).toBeLessThan(45);
+    // And the wait is short: 20 seconds once half are up (45 with troops still on their
+    // way to it from elsewhere, as here), not a minute and more.
+    expect(waited / TICK_RATE).toBeLessThan(50);
   }, 60000);
 
   it('move: goes to the place without stopping to fight, and stands there', () => {
@@ -406,6 +407,66 @@ describe('sub-commanders: the staff', () => {
         expect(flown / fx(1)).toBeLessThan(300);
       }
     }
+  }, 60000);
+
+  it('troops assigned from all over the map go to the objective, not back to each other', () => {
+    for (const m of [M_ATTACK, M_HOLD]) {
+      const { w, st } = field();
+      const t = town(w, 'Westgate');
+      const ox = w.map.townX[t];
+      const oy = w.map.townY[t];
+      // Three lots: far behind, off to one side, and already at the place.
+      const ids = add(w, [
+        spawn(0, KIND_INFANTRY, 8, 215, 815),
+        spawn(0, KIND_INFANTRY, 5, 420, 760),
+        spawn(0, KIND_INFANTRY, 5, 352, 688),
+      ]);
+      const from = ids.map((i) => Math.hypot(w.posX[i] - ox, w.posY[i] - oy));
+      step(w, [{ type: CMD_ASSIGN, units: ids, slot: 0 }, mission(0, m, ox, oy)]);
+      let worst = 0;
+      play(w, st, 150, () => {
+        // Those already at the place (the last five) are the ones that used to walk back.
+        for (let n = 13; n < ids.length; n++) {
+          const i = ids[n];
+          if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0) continue;
+          const d = Math.hypot(w.posX[i] - ox, w.posY[i] - oy);
+          worst = Math.max(worst, (d - from[n]) / fx(1));
+        }
+      });
+      // They do not walk away from it to form up somewhere in the middle.
+      expect(worst).toBeLessThan(30);
+      expect(st.posts[0].units.length).toBe(alive(w, ids));
+      const near = ids.filter(
+        (i) => w.inside[i] >= 0 || Math.hypot(w.posX[i] - ox, w.posY[i] - oy) < fx(110),
+      );
+      expect(near.length).toBeGreaterThanOrEqual(16);
+    }
+  }, 120000);
+
+  it('troops added to a commander on the march go where it is going, not back to it', () => {
+    const { w, st } = field();
+    const t = town(w, 'Westgate');
+    const ox = w.map.townX[t];
+    const oy = w.map.townY[t];
+    const body = add(w, [spawn(0, KIND_INFANTRY, 10, 215, 815)]);
+    step(w, [{ type: CMD_ASSIGN, units: body, slot: 0 }, mission(0, M_HOLD, ox, oy)]);
+    play(w, st, 5);
+    // New troops much nearer the place than the body is.
+    const late = add(w, [spawn(0, KIND_INFANTRY, 4, 340, 700)]);
+    const from = late.map((i) => Math.hypot(w.posX[i] - ox, w.posY[i] - oy));
+    step(w, [{ type: CMD_ASSIGN, units: late, slot: 0 }]);
+    let worst = 0;
+    play(w, st, 150, () => {
+      for (let n = 0; n < late.length; n++) {
+        const i = late[n];
+        if (w.inside[i] >= 0) continue;
+        const d = Math.hypot(w.posX[i] - ox, w.posY[i] - oy);
+        worst = Math.max(worst, (d - from[n]) / fx(1));
+      }
+    });
+    expect(worst).toBeLessThan(30);
+    expect(late.every((i) => st.body[i] === 0)).toBe(true);
+    expect(st.posts[0].status).toBe(ST_HOLD);
   }, 60000);
 
   it('is deterministic: the same game twice gives the same world', () => {
