@@ -89,6 +89,8 @@ export class Fog {
   posts: number[] = [];
   /** The player's working surveillance cameras, in the same form. */
   cameras: number[] = [];
+  /** Night: what is lit and so seen whoever is near (flares, muzzle flashes, fires). */
+  lights: number[] = [];
 
   setMap(map: GameMap): void {
     let sum = 0;
@@ -179,6 +181,9 @@ export class Fog {
     }
     for (let k = 0; k < this.cameras.length; k += 3) {
       this.lookDown(this.cameras[k], this.cameras[k + 1], this.cameras[k + 2]);
+    }
+    for (let k = 0; k < this.lights.length; k += 3) {
+      this.lookDown(this.lights[k], this.lights[k + 1], this.lights[k + 2]);
     }
     const H = N >> 1;
     for (let by = 0; by < H; by++) {

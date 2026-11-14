@@ -42,6 +42,8 @@ interface Config {
   seed: number;
   map: string;
   ai: string;
+  /** 'night' for a night battle. */
+  time?: string;
   /** Players in the game: the computer is given more to fight three or four with. */
   humans: number;
 }
@@ -815,6 +817,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           seed: Number(params.get('seed') ?? 1) | 0,
           map: params.get('map') ?? 'city',
           ai: params.get('ai') ?? '',
+          time: params.get('time') ?? '',
           humans: guests.length + 1,
         };
         const duties = [duty, ...guests.map((g) => g.duty)];
@@ -884,6 +887,8 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       params.set('map', answer.cfg.map);
       if (answer.cfg.ai) params.set('ai', answer.cfg.ai);
       else params.delete('ai');
+      if (answer.cfg.time) params.set('time', answer.cfg.time);
+      else params.delete('time');
       ui.hide();
       // Our role as the host has it, unless we changed it in the last instant.
       return new Coop(

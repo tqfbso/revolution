@@ -2166,3 +2166,35 @@ loses to going in together. What is left of them, built honestly:
 The style is two bits of the commander's flags, set by a new command (`CMD_STYLE`), so it
 is in the state hash and travels to every player in co-op like any other order. Disbanding
 a commander clears it. Golden hash unchanged.
+
+## 113. Night battles: you see what is lit (2026-11-14)
+
+Roadmap item 9. A night battle is a choice at the start (Menu, Time: night, or
+`?time=night`), not a clock that runs during a game: a day and night cycle would change the
+rules under a plan half carried out.
+
+- **Shorter sight.** At night every unit sees and shoots six tenths as far as by day
+  (`NIGHT_SIGHT_PCT`). The reconnaissance team and its drone are the exception: night
+  optics are what they are for, and at night they are worth having.
+- **Light gives you away.** A unit is _lit_, and seen at full daytime range, when it has
+  fired in the last 2.5 seconds (its muzzle flash), stands within 14 m of a vehicle that
+  has been burning for less than 45 seconds, or is under a flare. So the first to fire is
+  the first to be shot at from beyond his own sight, and a tank burning in a street shows
+  the squads round it.
+- **Flares.** Any gun fires one in place of a shell (key I, or the Flare button; the
+  nearest selected gun fires). It hangs 30 seconds and lights 42 m around, both sides
+  alike. The computer and the player's commanders fire one over the objective when an
+  assault goes in and renew it while the assault lasts. At most 16 hang at once.
+- **Weapon range is unchanged**: guns that are given a target (a lit one, or one a scout
+  sees) still reach it. Cameras and the spotter rules are as by day.
+- **Readability.** The night is moonlit, not black: ground, buildings and troops stay
+  legible, team colours and icons are as by day, and fire stands out. Muzzle flashes are
+  twice the size, wrecks burn visibly for as long as the sim counts them a fire, and the
+  two flares nearest the camera are real lights. The fog of war follows the same rules as
+  the sim: the short sight, plus circles for flares, flashes and fires.
+
+In the sim: `World.night`, set by `CMD_NIGHT` on the first tick; `World.lit`, recomputed
+every 4 ticks only at night; flares are part of the state hash only at night. By day not
+one instruction differs, so the golden hash is unchanged. Co-op carries the choice in the
+host's game settings. A 30 minute Hard against Hard game on the city map runs at the same
+cost by night as by day (1.6 ms a tick).

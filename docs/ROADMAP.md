@@ -405,7 +405,9 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 8. The computer fighting in cities (U5): BUILT (decision 110). Its sappers fortify the
    houses its garrisons hold, garrisons without houses lie up in the ruins, and the
    player's commanders do both as well. Garrisoning and storming were already there.
-9. Night battles: flares, muzzle flashes, fog of war that matters more
+9. Night battles: BUILT (decision 113). Menu > Time: night, or `?time=night`. Sight is six
+   tenths of the day's except for scouts; whatever is lit (a muzzle flash, a burning
+   vehicle, a flare) is seen at daytime range; guns fire flares (I).
 10. PvP for up to four players, free-for-all or 2v2, on the co-op netcode
 11. Factions (M10), then weather (R4)
 

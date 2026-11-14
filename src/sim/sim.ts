@@ -16,6 +16,7 @@ import {
   CMD_LOAD,
   CMD_MOVE,
   CMD_SPAWN,
+  CMD_NIGHT,
   CMD_STOP,
   CMD_CAMERA,
   CMD_UNLOAD,
@@ -144,10 +145,21 @@ import {
   TOWN_FUEL,
   TOWN_INCOME,
   TOWN_SUPPLIES,
+  BURN_RADIUS,
+  BURN_TICKS,
+  FLARE_RADIUS,
+  FLARE_TICKS,
+  FLASH_TICKS,
+  KIND_DRONE,
+  KIND_RECON,
+  NIGHT_SIGHT_PCT,
 } from './units';
 import {
   CHASE_FIELDS,
   EV_BREACH,
+  EV_FLARE,
+  FLAG_FLARE,
+  MAX_FLARES,
   EV_GUTTED,
   EV_STORM,
   EV_STORMED,
@@ -385,6 +397,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateJamming(w);
   updateSpotters(w);
   updateCameras(w);
+  if (w.night !== 0) updateLit(w);
   acquireTargets(w);
   armStrikes(w);
   updateCivilians(w);
@@ -531,7 +544,10 @@ function applyCommand(w: World, cmd: Command): void {
       routeUnits(w, units, x, y);
       for (let k = 0; k < units.length; k++) {
         const id = units[k];
-        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | FLAG_BOMBARD | (cmd.smoke ? FLAG_SMOKE : 0);
+        w.flags[id] =
+          (w.flags[id] & ~ORDER_FLAGS) |
+          FLAG_BOMBARD |
+          (cmd.smoke ? FLAG_SMOKE : cmd.flare ? FLAG_FLARE : 0);
       }
       break;
     }
@@ -561,6 +577,9 @@ function applyCommand(w: World, cmd: Command): void {
       for (let k = 0; k < units.length; k++) w.flags[units[k]] = FLAG_HOLD;
       break;
     }
+    case CMD_NIGHT:
+      w.night = cmd.on ? 1 : 0;
+      break;
     case CMD_STOP: {
       const units = validUnits(w, cmd.units);
       for (let k = 0; k < units.length; k++) w.flags[units[k]] = 0;
@@ -591,7 +610,8 @@ const ORDER_FLAGS =
   FLAG_HOLD |
   FLAG_FOCUS |
   FLAG_BREACH |
-  FLAG_STORM;
+  FLAG_STORM |
+  FLAG_FLARE;
 
 /**
  * Send each squad to the nearest carrier of its own army that still has a seat free,
@@ -1512,6 +1532,7 @@ function acquireTargets(w: World): void {
   const n = w.count;
   const tick = w.tick;
   const map = w.map;
+  const night = w.night !== 0;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const ki = w.kind[i];
@@ -1538,7 +1559,9 @@ function acquireTargets(w: World): void {
     const t = w.attack[i];
     const phase = tick + i;
     const dmgTable = KINDS[ki].damage;
-    const sight2 = SIGHT_SQ[ki];
+    const day2 = SIGHT_SQ[ki];
+    // In the dark it sees less far, except what is lit (decision 113).
+    const sight2 = night ? NIGHT_SQ[ki] : day2;
     const air = IS_AIR[ki];
     const z = eyeZ[i];
     const own = w.inside[i];
@@ -1555,7 +1578,9 @@ function acquireTargets(w: World): void {
       const d2 = dx * dx + dy * dy;
       targetKey = d2 + PRIORITY[ki * KIND_COUNT + w.kind[t]];
       // Seen with its own eyes, or known because someone else has it in sight.
-      const mine = d2 <= sight2 && (d2 <= CONCEAL_RANGE_SQ || !concealed(w, t));
+      const mine =
+        d2 <= (night && w.lit[t] !== 0 ? day2 : sight2) &&
+        (d2 <= CONCEAL_RANGE_SQ || !concealed(w, t));
       valid = d2 <= (focus ? FOCUS_RANGE_SQ : ACQUIRE_RANGE_SQ) && (mine || w.spotted[t] > tick);
       if (valid && (phase & SIGHT_RECHECK_MASK) === 0) {
         const tz = eyeZ[t];
@@ -1619,7 +1644,9 @@ function acquireTargets(w: World): void {
         if (key >= bestKey && (key > bestKey || j >= best)) continue;
         // Beyond its own sight, or concealed (forest, rubble, a building, a recon team) and
         // not close: only if the army already knows about it.
-        const mine = d2 <= sight2 && (d2 <= CONCEAL_RANGE_SQ || !concealed(w, j));
+        const mine =
+          d2 <= (night && w.lit[j] !== 0 ? day2 : sight2) &&
+          (d2 <= CONCEAL_RANGE_SQ || !concealed(w, j));
         if (!mine && w.spotted[j] <= tick) {
           // Enemies about, none of them visible: look again at the slow rate.
           blocked = true;
@@ -1947,7 +1974,7 @@ function dangerClose(w: World, x: number, y: number, team: number): boolean {
 const ARMOUR_BLAST = (r: number) => Math.trunc(r / 3);
 
 /** Fire a shell from gun `i` at a point `dist` away. It lands later, and not exactly there. */
-function launch(w: World, i: number, tx: number, ty: number, dist: number, smoke: boolean): void {
+function launch(w: World, i: number, tx: number, ty: number, dist: number, load: number): void {
   const scatter = SCATTER_MIN + (dist >> SCATTER_SHIFT);
   const x = clampInt(tx - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
   const y = clampInt(ty - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
@@ -1960,8 +1987,82 @@ function launch(w: World, i: number, tx: number, ty: number, dist: number, smoke
   w.shTick[k] = w.tick + SHELL_BASE_TICKS + (dist >> SHELL_TICKS_SHIFT);
   w.shOwner[k] = i;
   w.shKind[k] = w.kind[i];
-  w.shSmoke[k] = smoke ? 1 : 0;
+  w.shSmoke[k] = load;
   w.events.push(EV_LAUNCH, i, packPoint(x, y));
+}
+
+/** What a shell carries besides high explosive (World.shSmoke). */
+const SHELL_SMOKE = 1;
+const SHELL_FLARE = 2;
+
+/**
+ * A flare bursts over (x, y) and hangs there for FLARE_TICKS: everyone under it is lit,
+ * whichever side fired it. With the sky full of them, the one nearest burnt out goes.
+ */
+function lightFlare(w: World, x: number, y: number): void {
+  let k = w.flareCount;
+  if (k >= MAX_FLARES) {
+    k = 0;
+    for (let j = 1; j < MAX_FLARES; j++) if (w.flareUntil[j] < w.flareUntil[k]) k = j;
+  } else w.flareCount++;
+  w.flareX[k] = x;
+  w.flareY[k] = y;
+  w.flareUntil[k] = w.tick + FLARE_TICKS;
+  w.events.push(EV_FLARE, packPoint(x, y), FLARE_TICKS);
+}
+
+const burnX = new Int32Array(64);
+const burnY = new Int32Array(64);
+const NIGHT_SQ = KINDS.map((k, i) => {
+  const s =
+    i === KIND_RECON || i === KIND_DRONE ? k.sight : Math.trunc((k.sight * NIGHT_SIGHT_PCT) / 100);
+  return s * s;
+});
+
+/**
+ * Night: who is lit. A unit that has just fired (its muzzle flash), one under a flare, one
+ * beside a vehicle that is still burning. The lit are seen as far as by day.
+ */
+function updateLit(w: World): void {
+  const tick = w.tick;
+  let n = 0;
+  for (let k = 0; k < w.flareCount; k++) {
+    if (w.flareUntil[k] > tick) {
+      w.flareX[n] = w.flareX[k];
+      w.flareY[n] = w.flareY[k];
+      w.flareUntil[n++] = w.flareUntil[k];
+    }
+  }
+  w.flareCount = n;
+  if ((tick & 3) !== 0) return;
+  let fires = 0;
+  for (let i = 0; i < w.count && fires < burnX.length; i++) {
+    if (w.state[i] !== STATE_WRECK) continue;
+    const wreck = KINDS[w.kind[i]].wreckTicks;
+    if (wreck < BURN_TICKS || w.cooldown[i] <= wreck - BURN_TICKS) continue;
+    burnX[fires] = w.posX[i];
+    burnY[fires++] = w.posY[i];
+  }
+  const flare2 = FLARE_RADIUS * FLARE_RADIUS;
+  const burn2 = BURN_RADIUS * BURN_RADIUS;
+  for (let i = 0; i < w.count; i++) {
+    if (w.state[i] !== STATE_ALIVE) continue;
+    const reload = KINDS[w.kind[i]].reload;
+    let lit = w.cooldown[i] > 0 && reload > 0 && reload - w.cooldown[i] < FLASH_TICKS ? 1 : 0;
+    const x = w.posX[i];
+    const y = w.posY[i];
+    for (let k = 0; k < n && lit === 0; k++) {
+      const dx = w.flareX[k] - x;
+      const dy = w.flareY[k] - y;
+      if (dx * dx + dy * dy <= flare2) lit = 1;
+    }
+    for (let k = 0; k < fires && lit === 0; k++) {
+      const dx = burnX[k] - x;
+      const dy = burnY[k] - y;
+      if (dx * dx + dy * dy <= burn2) lit = 1;
+    }
+    w.lit[i] = lit;
+  }
 }
 
 /** A smoke shell bursts: the cells around the point are filled for SMOKE_TICKS. */
@@ -2022,8 +2123,10 @@ function resolveShells(w: World): void {
     w.shKind[k] = w.shKind[last];
     if (w.shSmoke[k] !== 0) {
       // (This is the smoke flag of the shell just landed: slot k is only overwritten below.)
+      const load = w.shSmoke[k];
       w.shSmoke[k] = w.shSmoke[last];
-      layGroundSmoke(w, x, y);
+      if (load === SHELL_FLARE) lightFlare(w, x, y);
+      else layGroundSmoke(w, x, y);
       continue;
     }
     w.shSmoke[k] = w.shSmoke[last];
@@ -2132,9 +2235,11 @@ function fire(w: World): void {
       const dy = ty - w.posY[i];
       const d2 = dx * dx + dy * dy;
       if (d2 > kind.range * kind.range || d2 < kind.minRange * kind.minRange) continue;
-      launch(w, i, tx, ty, isqrt(d2), (flags & FLAG_SMOKE) !== 0);
-      // A smoke mission is one shell per gun.
-      if ((flags & FLAG_SMOKE) !== 0) w.flags[i] = 0;
+      const load =
+        (flags & FLAG_SMOKE) !== 0 ? SHELL_SMOKE : (flags & FLAG_FLARE) !== 0 ? SHELL_FLARE : 0;
+      launch(w, i, tx, ty, isqrt(d2), load);
+      // A smoke or flare mission is one shell per gun.
+      if (load !== 0) w.flags[i] = 0;
       continue;
     }
     if ((w.flags[i] & FLAG_SIEGE) !== 0) {

@@ -1,12 +1,12 @@
 // Headless match: AI against AI (or against nobody), printing a line a minute.
 // Run: npx esbuild tools/aimatch.ts --bundle --platform=node --outfile=/tmp/aimatch.cjs && node /tmp/aimatch.cjs [seed] [minutes] [levelA] [levelB]
 import { aiReport, aiThink, createAi, type AiLevel } from '../src/sim/ai';
-import type { Command } from '../src/sim/commands';
+import { CMD_NIGHT, type Command } from '../src/sim/commands';
 import { B_HQ } from '../src/sim/economy';
 import { generateMap } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
-import { createWorld, hashWorld, NO_TEAM } from '../src/sim/world';
+import { EV_FLARE, createWorld, hashWorld, NO_TEAM } from '../src/sim/world';
 
 const seed = Number(process.argv[2] ?? 1);
 const minutes = Number(process.argv[3] ?? 20);
@@ -26,7 +26,10 @@ const ais = levels.map((l, t) =>
   l === 'off' ? null : createAi(t, l as AiLevel, seed, t === 1 ? humans : 1),
 );
 let cmds: Command[] = skirmishCommands(w.map);
+// NIGHT=1: a night battle.
+if (process.env.NIGHT) cmds.unshift({ type: CMD_NIGHT, on: true });
 let worst = 0;
+let flares = 0;
 let total = 0;
 let stepTotal = 0;
 let stepWorst = 0;
@@ -45,6 +48,7 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
   if (sm > 40 && process.env.SPIKES)
     console.log(`  spike ${sm.toFixed(0)} ms at tick ${tick}, ${w.count} units`);
   cmds = [];
+  for (let e = 0; e < w.events.length; e += 3) if (w.events[e] === EV_FLARE) flares++;
   w.events.length = 0;
   for (const ai of ais) {
     if (ai && ai.plan !== lastPlan[ai.team]) {
@@ -82,3 +86,4 @@ console.log(
 console.log(
   `ai think: worst ${worst.toFixed(2)} ms, mean ${(total / w.tick).toFixed(4)} ms/tick; hash ${hashWorld(w).toString(16)}`,
 );
+if (flares > 0) console.log(`flares fired: ${flares}`);

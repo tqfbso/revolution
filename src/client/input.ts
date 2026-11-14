@@ -97,9 +97,10 @@ export class Input {
           this.drawing = true;
           dom.setPointerCapture(e.pointerId);
         } else card.cancelTool();
-      } else if (e.button === 0 && card.armed === 'smoke') {
+      } else if (e.button === 0 && (card.armed === 'smoke' || card.armed === 'flare')) {
+        const flare = card.armed === 'flare';
         card.arm('');
-        this.smokeAt(e.clientX, e.clientY);
+        this.smokeAt(e.clientX, e.clientY, flare);
       } else if (e.button === 0 && this.attackMoveArmed) {
         // C, then left click: attack-move to the spot.
         this.armAttackMove(false);
@@ -179,6 +180,9 @@ export class Input {
       } else if (e.code === 'KeyF' && units.selectedCount > 0) {
         // Smoke: each selected gun puts one smoke shell where the pointer is.
         this.smokeAt(this.pointerX, this.pointerY);
+      } else if (e.code === 'KeyI' && units.selectedCount > 0 && units.night) {
+        // Night: one selected gun in range puts a flare over the pointer.
+        this.smokeAt(this.pointerX, this.pointerY, true);
       } else if (e.code === 'KeyU' && units.selectedCount > 0) {
         send({ type: CMD_UNLOAD, units: units.selectedIds().filter((id) => units.load[id] > 0) });
       } else if (e.code === 'KeyL' && units.selectedCount > 0) {
@@ -201,12 +205,27 @@ export class Input {
     return this.structureAt(this.pointerX, this.pointerY).ground;
   }
 
-  private smokeAt(clientX: number, clientY: number): void {
+  private smokeAt(clientX: number, clientY: number, flare = false): void {
     const units = this.units;
-    const guns = units.selectedIds().filter((id) => KINDS[units.kindOf(id)].indirect);
+    let guns = units.selectedIds().filter((id) => KINDS[units.kindOf(id)].indirect);
     const { ground } = this.structureAt(clientX, clientY);
     if (guns.length > 0 && ground) {
-      this.send({ type: CMD_BOMBARD, units: guns, x: fx(ground.x), y: fx(ground.z), smoke: true });
+      if (flare) {
+        // One flare is enough: the gun nearest the place fires it.
+        const d = (id: number) => {
+          const p = units.centreOf([id]);
+          return p ? Math.hypot(p.x - ground.x, p.z - ground.z) : 1e9;
+        };
+        guns = [guns.reduce((a, b) => (d(b) < d(a) ? b : a))];
+        this.send({ type: CMD_BOMBARD, units: guns, x: fx(ground.x), y: fx(ground.z), flare });
+      } else
+        this.send({
+          type: CMD_BOMBARD,
+          units: guns,
+          x: fx(ground.x),
+          y: fx(ground.z),
+          smoke: true,
+        });
       this.mark(ground.x, ground.y + 0.15, ground.z);
     }
   }

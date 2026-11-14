@@ -22,6 +22,10 @@ import {
   KIND_TANK,
   KIND_TRUCK,
   SMOKE_CELLS,
+  BURN_TICKS,
+  FLARE_RADIUS,
+  FLASH_TICKS,
+  NIGHT_SIGHT_PCT,
 } from '../sim/units';
 import { CLASS_AIR } from '../sim/map';
 import {
@@ -32,6 +36,7 @@ import {
   EV_DEATH,
   EV_GUTTED,
   EV_IMPACT,
+  EV_FLARE,
   EV_SMOKE,
   EV_LAUNCH,
   EV_SHOT,
@@ -151,7 +156,26 @@ const CHUTE_HEIGHT = 15;
 const FOG_SIGHT = KINDS.map(
   (k) => (Math.ceil(k.sight / 4096) + 1) * (k.cls === CLASS_AIR ? -1 : 1),
 );
+/** The same at night (decision 113): six tenths, except the scouts and their drone. */
+const NIGHT_FOG_SIGHT = KINDS.map((k, i) =>
+  i === KIND_RECON || i === KIND_DRONE
+    ? FOG_SIGHT[i]
+    : (Math.ceil((k.sight * NIGHT_SIGHT_PCT) / 100 / 4096) + 1) * (k.cls === CLASS_AIR ? -1 : 1),
+);
+/** What a flare shows, in cells, and how long a muzzle flash and a burning wreck do. */
+const FLARE_CELLS = Math.round(FLARE_RADIUS / 4096);
+const FLASH_SECONDS = FLASH_TICKS / 20;
+const BURN_SECONDS = BURN_TICKS / 20;
 const JAM_RADIUS = KINDS.map((k) => k.jam / 1024);
+
+/** How high a flare hangs: it bursts at 46 m and comes down under its parachute. */
+export function flareHeight(
+  f: { y: number; from: number; until: number },
+  seconds: number,
+): number {
+  const t = Math.min(1, Math.max(0, (seconds - f.from) / (f.until - f.from)));
+  return f.y + 46 - 24 * t;
+}
 
 export interface LodStats {
   /** Units drawn at each level of detail this frame, and units culled as off-screen. */
@@ -374,6 +398,7 @@ export class UnitView {
       this.diedAt.fill(-1e9);
       this.fog.reset();
       this.smokes.length = 0;
+      this.flares.length = 0;
       this.scars.clear();
     }
     const curr = this.curr;
@@ -437,12 +462,14 @@ export class UnitView {
     // Sight is refreshed every other tick (10 Hz): plenty for units that move this slowly.
     if (this.fogAge++ % 2 === 0) {
       this.fog.clock = now / 1000;
+      const sights = this.night ? NIGHT_FOG_SIGHT : FOG_SIGHT;
+      if (this.night) this.nightLights(n, now / 1000);
       this.fog.update(
         this.curr,
         n,
         (id) => this.isMine(id),
         // A jammed drone sends nothing back.
-        (id) => (IS_DRONE[this.kind[id]] && this.load[id] > 0 ? 0 : FOG_SIGHT[this.kind[id]]),
+        (id) => (IS_DRONE[this.kind[id]] && this.load[id] > 0 ? 0 : sights[this.kind[id]]),
       );
     }
     // Vehicles wear the ground they drive over (where the player can see it happen): a
@@ -480,6 +507,67 @@ export class UnitView {
             ? SND_CANNON
             : SND_RIFLE;
     sound.at(snd, x, z, this.fog.sees(x, z));
+  }
+
+  /** A night battle: shorter sight, and light shows what is near it. */
+  night = false;
+  /** Flares hanging over the field (world metres; `from` and `until` in seconds). */
+  readonly flares: { x: number; y: number; z: number; from: number; until: number }[] = [];
+  /** Where the player has troops, in 16 m squares. */
+  private readonly mineNear = new Uint8Array(64 * 64);
+
+  /**
+   * Night: tell the fog what is lit. A flare shows the ground under it to everyone; an
+   * enemy that has just fired, or the ground round a burning vehicle, shows to troops
+   * within their daytime sight of it.
+   */
+  private nightLights(n: number, seconds: number): void {
+    const lights = this.fog.lights;
+    lights.length = 0;
+    for (const f of this.flares) lights.push(f.x >> 2, f.z >> 2, FLARE_CELLS);
+    const near = this.mineNear.fill(0);
+    const pos = this.curr;
+    const cell = (v: number) => Math.min(63, Math.max(0, v >> 4));
+    for (let i = 0; i < n; i++) {
+      if (this.isMine(i)) near[cell(pos[2 * i + 1]) * 64 + cell(pos[2 * i])] = 1;
+    }
+    for (let i = 0; i < n; i++) {
+      if (this.teamOf(i) === this.playerTeam) continue;
+      let r = 0;
+      if (this.isAlive(i)) {
+        if (seconds - this.shotAt[i] < FLASH_SECONDS) r = 1;
+      } else if (IS_VEHICLE[this.kind[i]] && seconds - this.diedAt[i] < BURN_SECONDS) r = 3;
+      if (r === 0) continue;
+      const cx = cell(pos[2 * i]);
+      const cy = cell(pos[2 * i + 1]);
+      let seen = false;
+      for (let dy = -2; dy <= 2 && !seen; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const x = cx + dx;
+          const y = cy + dy;
+          if (x >= 0 && y >= 0 && x < 64 && y < 64 && near[y * 64 + x] === 1) {
+            seen = true;
+            break;
+          }
+        }
+      }
+      if (seen) lights.push(pos[2 * i] >> 2, pos[2 * i + 1] >> 2, r);
+    }
+  }
+
+  /** Keep the flares burning as they drift down, and drop the ones that have gone out. */
+  private burnFlares(seconds: number): void {
+    const flares = this.flares;
+    for (let k = flares.length - 1; k >= 0; k--) {
+      const f = flares[k];
+      if (f.until < seconds) {
+        flares[k] = flares[flares.length - 1];
+        flares.pop();
+        continue;
+      }
+      this.effects.thin = 0;
+      this.effects.flare(f.x, flareHeight(f, seconds), f.z);
+    }
   }
 
   /** Smoke screens standing on the field. */
@@ -560,6 +648,14 @@ export class UnitView {
         const near = this.smokes.find((s) => Math.abs(s.x - x) + Math.abs(s.z - z) < 7);
         if (near) near.until = until;
         else this.smokes.push({ x, y: this.terrain.heightAt(x, z), z, until });
+        continue;
+      }
+      if (ev[e] === EV_FLARE) {
+        const x = unpackX(a);
+        const z = unpackY(a);
+        const y = this.terrain.heightAt(x, z);
+        this.flares.push({ x, y, z, from: seconds, until: seconds + b / 20 });
+        this.sound?.at(SND_HOWITZER, x, z, false);
         continue;
       }
       if (ev[e] === EV_IMPACT) {
@@ -781,6 +877,7 @@ export class UnitView {
     const info = this.info;
     const fx = this.effects;
     this.billow(seconds, dt);
+    if (this.night) this.burnFlares(seconds);
 
     this.projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projScreen);
@@ -987,7 +1084,9 @@ export class UnitView {
         if (!alive && lod < 2) {
           const age = seconds - this.diedAt[i];
           if (age < WRECK_SMOKE_SECONDS && Math.random() < dt * 3) {
-            fx.wreckSmoke(x, y, z, Math.max(0, 1 - age / 12));
+            // At night it burns for as long as the sim counts it a fire (decision 113).
+            const glow = this.night ? 0.3 * Math.max(0, 1 - age / BURN_SECONDS) : 0;
+            fx.wreckSmoke(x, y, z, Math.max(glow, 1 - age / 12));
           }
         }
       } else {

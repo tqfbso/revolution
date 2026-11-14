@@ -785,6 +785,14 @@
               <option value="ridge">Map: ridge</option>
               <option value="river">Map: river</option>
             </select>
+            <select
+              id="time-pick"
+              aria-label="Time of day"
+              title="Day or night. At night troops see less far, and flares (G), gunfire and burning wrecks show what is near them. Changing this starts a new game"
+            >
+              <option value="day">Time: day</option>
+              <option value="night">Time: night</option>
+            </select>
             <select id="volume" aria-label="Sound" title="Sound volume">
               <option value="0">Sound: off</option>
               <option value="0.35">Sound: quiet</option>
@@ -891,6 +899,10 @@ starting…</pre>
       destroyed<br />
       Ctrl+right click the ground: guns shell that spot (X to cease fire) · F: guns lay smoke at the
       pointer, which blinds both sides<br />
+      Night battles (Menu, Time: night): troops see six tenths as far, scouts and their drone as far
+      as by day. Whatever is lit is seen at daytime range: a unit that has just fired, anyone near a
+      burning vehicle, and everything under a flare. I: the nearest selected gun puts a flare over
+      the pointer for 30 seconds (it lights your own troops too)<br />
       Field works: select trucks or engineers (Barracks), pick a work at the bottom and drag a line
       on the ground. Walls and gates stop everything (gates open for you), barbed wire stops men,
       tank obstacles stop vehicles, trenches and sandbags are cover: right click them with infantry

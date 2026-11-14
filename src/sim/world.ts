@@ -56,6 +56,8 @@ export const FLAG_BREACH = 2048;
  * (set on top of FLAG_GARRISON by the sim when a squad sent into a house finds it held).
  */
 export const FLAG_STORM = 4096;
+/** With FLAG_BOMBARD: one illuminating shell per gun (decision 113). */
+export const FLAG_FLARE = 8192;
 /** Cells that can hold smoke at once. */
 export const MAX_SMOKE = 4096;
 
@@ -174,6 +176,10 @@ export const EV_RESERVE = 27;
 export const EV_PLANE = 28;
 /** a = where (see packPoint), b = team | squads << 8: the paratroops are out. */
 export const EV_PARADROP = 29;
+/** A flare has burst over a point: (packed point, ticks it burns). */
+export const EV_FLARE = 30;
+/** Flares burning at once. */
+export const MAX_FLARES = 16;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
@@ -354,6 +360,17 @@ export interface World {
   cAX: Int32Array;
   cAY: Int32Array;
   cFlags: Uint8Array;
+  /**
+   * Night (decision 113): 1 when the battle is fought in the dark. Ground troops then see
+   * 60% as far, except what is lit: who has just fired, who stands under a flare or beside
+   * a burning wreck. `lit` is per unit, refreshed a few times a second.
+   */
+  night: number;
+  lit: Uint8Array;
+  flareCount: number;
+  flareX: Int32Array;
+  flareY: Int32Array;
+  flareUntil: Int32Array;
   cSeq: Uint16Array;
   cEst: Int16Array;
   /**
@@ -525,6 +542,12 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     cAX: new Int32Array(MAX_TEAMS * MAX_COMMANDERS),
     cAY: new Int32Array(MAX_TEAMS * MAX_COMMANDERS),
     cFlags: new Uint8Array(MAX_TEAMS * MAX_COMMANDERS),
+    night: 0,
+    lit: new Uint8Array(MAX_UNITS),
+    flareCount: 0,
+    flareX: new Int32Array(MAX_FLARES),
+    flareY: new Int32Array(MAX_FLARES),
+    flareUntil: new Int32Array(MAX_FLARES),
     cSeq: new Uint16Array(MAX_TEAMS * MAX_COMMANDERS),
     cEst: new Int16Array(MAX_TEAMS * MAX_COMMANDERS * KIND_SLOTS),
     ration: new Uint8Array(MAX_UNITS),
@@ -648,6 +671,15 @@ export function hashWorld(w: World): number {
     mix(w.shY[k]);
     mix(w.shTick[k]);
     mix(w.shOwner[k] ^ (w.shKind[k] << 24) ^ (w.shSmoke[k] << 30));
+  }
+  // Only a night battle has any of this, so a day's hash is what it always was.
+  if (w.night !== 0) {
+    mix(w.flareCount + 1);
+    for (let k = 0; k < w.flareCount; k++) {
+      mix(w.flareX[k]);
+      mix(w.flareY[k]);
+      mix(w.flareUntil[k]);
+    }
   }
   mix(w.smokeCount);
   for (let k = 0; k < w.smokeCount; k++) {

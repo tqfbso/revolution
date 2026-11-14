@@ -2,7 +2,7 @@
 // never waits on game logic and game logic never waits on rendering.
 import { aiThink, createAi, type Ai } from '../sim/ai';
 import { createStaff, staffThink, type Staff } from '../sim/staff';
-import type { Command } from '../sim/commands';
+import { CMD_NIGHT, type Command } from '../sim/commands';
 import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
 import { fromFx } from '../sim/fixed';
 import { S_BUILDING, generateMap } from '../sim/map';
@@ -109,6 +109,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
           : msg.scenario === 'assault'
             ? assaultCommands(world.map, msg.units)
             : skirmishCommands(world.map);
+    if (msg.night) pending.unshift({ type: CMD_NIGHT, on: true });
     ais = [];
     if (msg.scenario === 'skirmish' && msg.ai !== 'off') {
       ais.push(createAi(1, msg.ai, msg.seed, msg.humans ?? 1));
