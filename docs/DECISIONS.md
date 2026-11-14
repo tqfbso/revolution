@@ -1872,7 +1872,7 @@ player keeps watching. "New game" starts again.
 they are left out of the world hash and the golden hash is unchanged (a test pins that a
 name on an order changes nothing).
 
-## 100. Buildings come apart in a battle: a second, larger cut (2026-11-14)
+## 104. Buildings come apart in a battle: a second, larger cut (2026-11-14)
 
 Fabio, after playing 095: buildings must be destroyed more easily still; it takes too long
 for a battle to do any meaningful damage. So the same levers again, further.

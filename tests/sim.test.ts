@@ -535,7 +535,7 @@ describe('cities', () => {
     step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [2, 3, 4, 5], structure: 0 }]);
     w.events.length = 0;
     let fell = -1;
-    // Four tank guns need about ten seconds for a small house (decision 100).
+    // Four tank guns need about ten seconds for a small house (decision 104).
     for (let t = 0; t < 2600 && fell < 0; t++) {
       step(w, []);
       if (hasEvent(w, EV_COLLAPSE)) fell = t;

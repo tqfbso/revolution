@@ -2004,7 +2004,7 @@ function resolveShells(w: World): void {
     }
     w.shSmoke[k] = w.shSmoke[last];
     w.events.push(EV_IMPACT, packPoint(x, y), 0);
-    // Masonry cracks further out than splinters kill (decision 100).
+    // Masonry cracks further out than splinters kill (decision 104).
     blastStructures(w, x, y, kind.siege, (kind.blast * 3) >> 1);
     blastWorks(w, x, y, kind.siege, kind.blast);
     civiliansShelled(w, x, y, kind.blast, w.team[owner]);

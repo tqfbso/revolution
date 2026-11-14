@@ -62,7 +62,7 @@ describe('buildings that die slowly (U1)', () => {
     expect(buildClass(2, 2, 3)).toBe(BUILD_HOUSE);
     expect(buildClass(2, 3, 5)).toBe(BUILD_BLOCK);
     expect(buildClass(3, 3, 2)).toBe(BUILD_HALL);
-    // Decisions 095 and 100 brought these down from 450, 900 and 1300, twice at Fabio's
+    // Decisions 095 and 104 brought these down from 450, 900 and 1300, twice at Fabio's
     // asking: the city is meant to come apart in a battle.
     expect(withHouse(2, 2, 3).sMaxHp[0]).toBe(90 * 4);
     expect(withHouse(2, 2, 4).sMaxHp[0]).toBe(180 * 4);
