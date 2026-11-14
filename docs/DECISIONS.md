@@ -2014,3 +2014,31 @@ against normal game ran to a finish in 26 minutes at 2.9 ms a tick mean.
 
 No change to the other maps (the city map's hash is the same before and after) and none to
 the golden hash.
+
+## 108. Infantry does not walk at armour it cannot hurt (2026-11-14)
+
+Formations piece 1 (proposal in the "Design tactical attack formations" thread; Fabio:
+infantry dies first, running at tanks). The cause was not the march formation but what
+happened at first contact: every unit dropped its place and walked at the nearest enemy until
+that enemy was inside its own range, so rifle squads (range 15) ended up in front of their
+own tanks (26) and missile teams (34), walking at tanks they do 3 a shot to.
+
+- **A table of what can hurt what.** Kind A is effective against kind B if it kills it in 45
+  shots or fewer. Rifle squads, engineers and IFVs are not effective against a tank; squads
+  and engineers are not against an IFV or a helicopter.
+- **A unit shoots whatever is in range, as before, but walks only at what it can hurt.** An
+  idle squad that sees a tank stays where it is. A squad on an attack-move marches on to
+  where it was sent and neither chases the tank nor stops for it.
+- **It picks a target it can hurt first**, unless one it cannot hurt is much nearer (24 m).
+  A squad shoots the enemy squad, not the tank beside it.
+- **Told to attack a tank, it goes** (the attack order is the player's decision).
+- **Point blank is the exception.** Rifle squads and paratroops rush a vehicle that has come
+  within 18 m of them and close to 6, where their rockets do four times the damage (decision
+  from the rebalance). A tank that drives into infantry still pays; one that stands off does
+  not get swarmed, and has to be answered with missile teams, tanks, guns or drones.
+
+Applies to everyone: direct orders, commanders, the computer.
+
+Checked against the army-mix pillar: 15 rifle squads and 10 missile teams (25 points) beat 5
+attacking tanks (25 points) on open ground with 16 of 25 left. Two computer games ran to a
+finish. Golden hash 1084769414 -> 1843229346.
