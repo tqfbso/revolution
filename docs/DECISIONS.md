@@ -2042,3 +2042,53 @@ Applies to everyone: direct orders, commanders, the computer.
 Checked against the army-mix pillar: 15 rifle squads and 10 missile teams (25 points) beat 5
 attacking tanks (25 points) on open ground with 16 of 25 left. Two computer games ran to a
 finish. Golden hash 1084769414 -> 1843229346.
+
+## 109. The staged attack was measured and not built (2026-11-14)
+
+Formations piece 2 was a drill for a commander's attack: recon ahead, missile teams (and
+tanks in open country) set an overwatch at stand-off range, the squads wait until the enemy
+armour is dead, smoke has landed or 40 seconds are up, then infantry leads in a town with the
+tanks 25 m behind. It was built in full and run against the attack as it stands after
+decision 108 (the whole body goes in together, each unit halting at the range of its own
+weapon). Same seed, same armies, one commander against a town; army points lost, and seconds
+until the town was secured ("lost" = the commander broke off beaten):
+
+| Fight                                                              | As it stands    | Staged          |
+| ------------------------------------------------------------------ | --------------- | --------------- |
+| Hill town, 2 tanks + 3 squads, against 12 squads + 5 missile teams | 3 of 18, 53 s   | 5 of 18, 67 s   |
+| The same with 2 tanks of its own                                   | 2 of 28, 49 s   | 9 of 28, 72 s   |
+| Hill town, 3 fighting vehicles + 4 squads                          | 1 of 17, 53 s   | 7 of 17, 71 s   |
+| Hill town, 8 squads, no armour                                     | 0 of 27, 53 s   | 1 of 27, 52 s   |
+| Hill town from far off, 3 tanks, missile teams only                | 2 of 17, 94 s   | 17 of 17, lost  |
+| City quarter, 3 tanks + 6 squads                                   | 6 of 33, 87 s   | 12 of 33, 172 s |
+| City quarter, 2 tanks + 2 fighting vehicles + 6 squads             | 3 of 33, 72 s   | 29 of 33, lost  |
+| City quarter, 5 tanks + 6 squads + 2 missile teams                 | 9 of 39, 91 s   | 21 of 39, lost  |
+| City centre, 4 tanks + 3 fighting vehicles + 8 squads              | 16 of 60, 117 s | 25 of 60, lost  |
+
+Seventeen fights were run; the staged attack lost more in every one. Tanks trailing the
+squads in a town made each of them worse again (the first row: 5 lost becomes 5, the second
+9 becomes 11, the no-armour row 1 becomes 3). Recon sent ahead on its own cost the drone, and
+about one point more, in 15 of 17.
+
+Why, in this game's rules:
+
+- **Fire is spread over whoever is in sight.** Sent ahead alone, five missile teams are the
+  only thing two tanks have to shoot at, and they die before the squads arrive. Going in
+  together, the tanks shoot at twenty things while every missile team shoots at them.
+- **There is no stand-off uphill or in a street.** A missile reaches 34 and a tank gun 26,
+  but a tank on higher ground gains up to 5 and the team below loses 2, and among houses
+  nobody sees anybody until about 25. The overwatch position the drill needs often does not
+  exist.
+- **Squads cannot hurt a tank, so a tank in front of them is cover, not a liability.** Rifle
+  fire does nothing to it, and since decision 108 the squads no longer run past it at the
+  enemy's armour. Holding the tanks back hands the squads the fire the tanks would have
+  taken for free.
+- **The attack already sorts itself by range.** Missile teams stop and fire from furthest
+  back, tanks from 26, squads close only with what they can hurt. That is the support by
+  fire the drill was meant to add, without the wait.
+
+So nothing of the drill ships: no overwatch, no wait, no trailing tanks, no recon sent ahead.
+Decision 108 was the fix for infantry dying first. `tests/assault.test.ts` pins five of the
+fights above with room to spare, so that a later change to the attack has to do at least as
+well. Pieces 3 (drill presets per commander) and 4 (the computer uses the drill) are shelved
+with it; what is still worth having from them is noted in the roadmap.
