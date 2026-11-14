@@ -1374,6 +1374,81 @@ function bridgeParts(
   return parts;
 }
 
+/**
+ * A bridge that is a square over a river running under it corner to corner (the European
+ * city): stone paving, a carriageway each way across it, and a balustrade along the edges
+ * that stand over the water. Cut, only the two corners that rest on the banks are left.
+ */
+function squareBridgeParts(
+  x0: number,
+  z0: number,
+  side: number,
+  top: number,
+  cut: boolean,
+): Part[] {
+  const parts: Part[] = [];
+  const STONE = 0x8a877d;
+  const mid = side / 2;
+  const slab = (
+    cx: number,
+    cz: number,
+    w: number,
+    d: number,
+    sag = 0,
+    rot?: [number, number, number],
+  ) =>
+    parts.push({ size: [w, 0.4, d], at: [x0 + cx, top - 0.2 - sag, z0 + cz], rot, color: STONE });
+  const lane = 11.2;
+  if (cut) {
+    // What rests on the west bank (south-west corner) and on the east bank (north-east).
+    const keep = side * 0.3;
+    slab(keep / 2, side - keep / 2, keep, keep);
+    slab(side - keep / 2, keep / 2, keep, keep);
+    slab(mid - 4, mid + 5, side * 0.34, side * 0.3, 2.3, [0.3, 0.5, -0.2]);
+    slab(mid + 5, mid - 4, side * 0.3, side * 0.34, 2.5, [-0.25, 0.3, 0.3]);
+    slab(mid, mid, side * 0.22, side * 0.2, 3, [0.15, 0.8, 0.1]);
+  } else {
+    slab(mid, mid, side, side);
+    parts.push({ size: [side, 0.04, lane], at: [x0 + mid, top + 0.02, z0 + mid], color: ASPHALT });
+    parts.push({ size: [lane, 0.04, side], at: [x0 + mid, top + 0.021, z0 + mid], color: ASPHALT });
+    // Balustrades over the water: the north-west and the south-east corner.
+    const run = mid - lane / 2 - 0.6;
+    const rail = (cx: number, cz: number, w: number, d: number) =>
+      parts.push({
+        size: [w, 1.0, d],
+        at: [x0 + cx, top + 0.5, z0 + cz],
+        color: STONE,
+        shade: 0.86,
+      });
+    rail(run / 2, 0.25, run, 0.5);
+    rail(0.25, run / 2, 0.5, run);
+    rail(side - run / 2, side - 0.25, run, 0.5);
+    rail(side - 0.25, side - run / 2, 0.5, run);
+    for (const [cx, cz] of [
+      [0.4, 0.4],
+      [run, 0.4],
+      [0.4, run],
+      [side - 0.4, side - 0.4],
+      [side - run, side - 0.4],
+      [side - 0.4, side - run],
+    ]) {
+      parts.push({ size: [0.8, 1.5, 0.8], at: [x0 + cx, top + 0.75, z0 + cz], color: STONE });
+      parts.push({ size: [0.12, 3.4, 0.12], at: [x0 + cx, top + 3.2, z0 + cz], color: SHEET });
+      parts.push({ size: [0.4, 0.3, 0.4], at: [x0 + cx, top + 5, z0 + cz], color: 0xd8d2b4 });
+    }
+  }
+  // Two piers in the stream.
+  for (const k of [-1, 1]) {
+    parts.push({
+      size: [2.2, top + 3, 2.2],
+      at: [x0 + mid + k * 3, (top - 3) / 2 - (cut ? 1 : 0.4), z0 + mid + k * 3],
+      color: CONCRETE,
+      shade: 0.8,
+    });
+  }
+  return parts;
+}
+
 export class StructureView {
   readonly group = new THREE.Group();
   /** Per structure, refilled every frame by the unit view: own (or revealed) occupants. */
@@ -1559,7 +1634,9 @@ export class StructureView {
     const base = fromFx(m.sBase[s]);
     const bridge = m.sKind[s] === S_BRIDGE;
     const parts = bridge
-      ? bridgeParts(x0, z0, w, d, base, fromFx(m.sEast[s]), state === 2)
+      ? w === d
+        ? squareBridgeParts(x0, z0, w, base, state === 2)
+        : bridgeParts(x0, z0, w, d, base, fromFx(m.sEast[s]), state === 2)
       : m.sKind[s] === S_BASE && state !== 2
         ? baseParts(s, this.baseType[s], this.baseTeam[s], x0, z0, w, d, base, state)
         : state === 2

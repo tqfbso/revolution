@@ -12,7 +12,13 @@ const seed = Number(process.argv[2] ?? 1);
 const minutes = Number(process.argv[3] ?? 20);
 const levels = [process.argv[4] ?? 'normal', process.argv[5] ?? 'normal'];
 const layout =
-  process.env.MAP === 'river' ? 'river' : process.env.MAP === 'ridge' ? 'ridge' : 'city';
+  process.env.MAP === 'river'
+    ? 'river'
+    : process.env.MAP === 'ridge'
+      ? 'ridge'
+      : process.env.MAP === 'euro'
+        ? 'euro'
+        : 'city';
 const w = createWorld(seed, generateMap(seed, layout));
 // HUMANS=3 gives team 1 (the side the computer plays in a skirmish) its co-op tuning.
 const humans = Number(process.env.HUMANS ?? 1);

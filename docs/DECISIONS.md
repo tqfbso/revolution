@@ -1978,3 +1978,39 @@ changes (476858902 to 1084769414) because the hash now includes those fields.
 **Not done.** The computer does not use transport helicopters. Helicopters do not have to
 return to a pad to rearm. There is no fighter cover: the plane's only enemy is air
 defence.
+
+## 107. The European city: one dense city on a river, bridges balanced by covered crossings (2026-11-14)
+
+Roadmap item 7 (Fabio: "much denser, big parks, an elevated highway, a river with a few
+bridges balanced by tunnels, a central station, fighting inch by inch"). A fourth map layout,
+`euro` (`?map=euro`, or Menu > Map: European city). The city map stays the default until
+Fabio has played both.
+
+- **One city, not nine towns.** A band of blocks five deep on each bank of a river that runs
+  down the mirror line of the map, on one street grid. 680 buildings against the city map's
+  444, in about a third of the map; the rest is fields, a village and a road net behind each
+  bank. The limit of 1024 structures leaves about 340 for bases.
+- **The river cannot be forded.** Seven crossings: four bridges (cut and mended like the river
+  map's) and three places where the river runs under the ground in a culvert, under the
+  cathedral square in the middle and in the fields at both ends. Real tunnels would need a
+  second level of pathfinding; a culvert gives the same play (a crossing no gun can cut) for
+  none of that cost. Cutting all four bridges sends the fight to the square and the flanks; it
+  never seals a bank. A test shuts every bridge and two of the three culverts and still finds
+  a way for vehicles.
+- **Bridges are squares.** The river runs along the diagonal, the streets along the axes, so a
+  street reaches the river at a corner and meets its mirror image there. A bridge is therefore
+  a square of eleven cells with four streets on it, drawn as a stone bridge square with
+  balustrades over the water.
+- **The motorway** is an embankment nobody can cross (cliff cells), one in each half, with a
+  deck drawn on top (`map.decks`, scenery only). Four streets pass under it, two are shut by
+  it. It breaks the long view down the bank and makes moves along the bank go through gates.
+- **Parks** are woods and lawns with paths: infantry ground with a rich supply site in the
+  middle of each, a short walk from the river.
+- Thirteen flags: four quarters on each bank facing the crossings, a station quarter and a
+  village behind them, and the shared Cathedral Square.
+
+The AI needed no change to play it: the map names its seven crossings as lanes. A hard
+against normal game ran to a finish in 26 minutes at 2.9 ms a tick mean.
+
+No change to the other maps (the city map's hash is the same before and after) and none to
+the golden hash.
