@@ -1,4 +1,4 @@
-// Rejoining a co-op game in progress (decision 100).
+// Rejoining a co-op game in progress (decision 104).
 //
 // The world is never sent. The game is deterministic, so a player who comes back is sent
 // what every sim was sent: the orders, tick by tick, from the first tick. His sim plays

@@ -56,8 +56,8 @@ export const BUILD_HOUSE = 0;
 export const BUILD_BLOCK = 1;
 export const BUILD_HALL = 2;
 /** Structure per cell of ground plan, and wall strength per cell of face, by class. */
-export const BUILD_HP: readonly number[] = [200, 400, 600];
-export const WALL_HP: readonly number[] = [120, 220, 320];
+export const BUILD_HP: readonly number[] = [90, 180, 280];
+export const WALL_HP: readonly number[] = [60, 110, 160];
 /** The faces of a building, in the order its wall strengths are stored: -y, +x, +y, -x. */
 export const FACE_NORTH = 0;
 export const FACE_EAST = 1;
@@ -72,8 +72,8 @@ export const STAGE_DAMAGED = 1;
 export const STAGE_GUTTED = 2;
 export const STAGE_RUIN = 3;
 /** Percent of its structure below which a building is damaged, and gutted. */
-export const DAMAGED_PCT = 80;
-export const GUTTED_PCT = 35;
+export const DAMAGED_PCT = 90;
+export const GUTTED_PCT = 40;
 
 /** The class of a building, from its ground plan and height. */
 export function buildClass(w: number, h: number, floors: number): number {

@@ -166,7 +166,7 @@ let lastReport = 0;
 function follow(w: World, now: number): void {
   lastTime = now;
   const waiting = frames.length - head;
-  // Far behind means a player who came back (decision 100): the whole game so far is
+  // Far behind means a player who came back (decision 104): the whole game so far is
   // waiting. It is played through flat out; what happened on the way is not shown or
   // sounded, and the hashes are compared again once he is level.
   const replay = waiting > REPLAY_BEHIND;

@@ -132,7 +132,7 @@ describe('co-op lockstep', () => {
   });
 });
 
-describe('co-op rejoin (decision 100)', () => {
+describe('co-op rejoin (decision 104)', () => {
   it('the record, cut into pieces and put together again, is the game tick for tick', () => {
     const log = new GameLog();
     const all: Frame[] = [];
