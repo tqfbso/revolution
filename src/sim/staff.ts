@@ -98,6 +98,8 @@ const WEAK = 60;
  */
 const GATHERED = 70;
 const GATHER_WAIT = 20 * TICK_RATE;
+/** The same wait when troops that were given to it elsewhere are still on their way to that place. */
+const JOIN_WAIT = 45 * TICK_RATE;
 /**
  * How far out of the objective an attack closes up: past the edge of the town (or the
  * point) by more than anything in it sees (a tank's 44) or shoots (40). It used to be 60
@@ -241,6 +243,11 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
     }
     units.sort((a, b) => a - b);
   }
+  const mission = w.cMission[k];
+  // A new mission for troops that stand all over the map: the largest lot of them is the
+  // body, the others make their own way to where it is going (see `rally`).
+  if (p.seq !== w.cSeq[k] && mission !== M_NONE && mission !== M_MOVE && mission !== M_SCREEN)
+    core(st, w, p);
   p.count = units.length + p.joining.length + p.riders;
   if (units.length === 0) {
     stoodDown(p);
@@ -252,16 +259,12 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
   p.power = power;
   p.cx = cx;
   p.cy = cy;
-  const mission = w.cMission[k];
   if (p.seq !== w.cSeq[k]) begin(st, w, out, c, power, cx, cy);
   if (power > f.launch) f.launch = power;
   p.need = power * 100 < f.launch * WEAK;
   p.fighting = false;
   for (const i of units) if (w.attack[i] !== NO_TARGET) p.fighting = true;
-  const lagging = p.joining.filter(
-    (i) => (w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET,
-  );
-  order(out, CMD_ATTACK_MOVE, lagging, cx, cy);
+  rally(st, w, out, c, cx, cy);
   // The computer player's parts take "behind" to be toward its staging area: for this
   // commander, that is the place it falls back to.
   ai.stageX = p.backX;
@@ -297,6 +300,101 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
     else pickets(ai, w, out, units, tx, ty);
   }
   unload(ai, w, out, p);
+}
+
+/**
+ * Troops given to a commander from several parts of the map used to form up first at the
+ * middle of where they all stood: those already at the objective walked back from it, and
+ * the guns and drones made for an empty field. Instead the largest lot that stands
+ * together is the body and the plan is made for it; everyone else is "joining" and goes
+ * straight to where the body is going.
+ */
+function core(st: Staff, w: World, p: Post): void {
+  const units = p.units;
+  if (units.length < 2) return;
+  const [cx, cy] = centre(w, units);
+  if (!scattered(w, units, cx, cy)) return;
+  // The unit with the most of the line around it (its own kind of troops, if it has none).
+  const line = units.filter((i) => LINE[w.kind[i]]);
+  const pool = line.length > 0 ? line : units;
+  const stride = Math.ceil(pool.length / 150);
+  let seed = pool[0];
+  let most = -1;
+  for (let a = 0; a < pool.length; a += stride) {
+    const i = pool[a];
+    let n = 0;
+    for (const j of pool) if (dist(w.posX[i], w.posY[i], w.posX[j], w.posY[j]) < fx(45)) n++;
+    if (n > most) {
+      most = n;
+      seed = i;
+    }
+  }
+  const sx = w.posX[seed];
+  const sy = w.posY[seed];
+  const keep: number[] = [];
+  for (const i of units) {
+    if (dist(w.posX[i], w.posY[i], sx, sy) < fx(50)) keep.push(i);
+    else {
+      st.body[i] = -1;
+      p.joining.push(i);
+    }
+  }
+  units.length = 0;
+  units.push(...keep);
+}
+
+/**
+ * Those on their way to the body go where the body is going, not to where it is: the next
+ * point of its march, the place it holds or attacks, the place it has fallen back to.
+ * Whoever is already there stays there. They are counted into the body when it comes up
+ * (see `run`), or when they stand at the place and it is close by.
+ */
+function rally(st: Staff, w: World, out: Command[], c: number, cx: number, cy: number): void {
+  const p = st.posts[c];
+  const f = p.f;
+  if (p.joining.length === 0) return;
+  const k = st.team * MAX_COMMANDERS + c;
+  const mission = w.cMission[k];
+  let x = cx;
+  let y = cy;
+  // Whoever is nearer the objective than that place stays where he is until the body
+  // goes in: troops already there are not marched out again to come back with it.
+  let ox = 0;
+  let oy = 0;
+  let inner = 0;
+  if (mission === M_MOVE) {
+    x = w.cX[k];
+    y = w.cY[k];
+  } else if (mission === M_NONE || mission === M_SCREEN) {
+    // No place to go to (a screen is a line, each man to his own spot): to the body.
+  } else if (f.state === F_RETREAT || p.regroup) {
+    x = p.backX;
+    y = p.backY;
+  } else if (f.state === F_MARCH && f.wps.length > 0) {
+    // The end of the march (a patrol has none: its next point). For an attack that is
+    // where it closes up, outside the objective.
+    const at = mission === M_PATROL ? 2 * f.wp : f.wps.length - 2;
+    x = f.wps[at];
+    y = f.wps[at + 1];
+    if (f.obj) {
+      ox = f.obj.x;
+      oy = f.obj.y;
+      inner = dist(x, y, ox, oy) + fx(20);
+    }
+  } else if (f.obj) {
+    x = f.obj.x;
+    y = f.obj.y;
+  }
+  const near = dist(cx, cy, x, y) < fx(120);
+  const go: number[] = [];
+  for (const i of p.joining) {
+    const d = dist(w.posX[i], w.posY[i], x, y);
+    if (d < fx(45) && near) st.body[i] = c;
+    else if (inner > 0 && dist(w.posX[i], w.posY[i], ox, oy) < inner) continue;
+    else if ((w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET && d > fx(30))
+      go.push(i);
+  }
+  order(out, mission === M_MOVE ? CMD_MOVE : CMD_ATTACK_MOVE, go, x, y);
 }
 
 /** A new mission (or new troops for a commander that had none): make the plan. */
@@ -609,19 +707,18 @@ function march(
       all++;
       if (dist(w.posX[i], w.posY[i], tx, ty) < room) up++;
     }
+    // Those making their own way here count too, and are given a little longer.
+    let coming = 0;
     for (const i of p.joining) {
-      if (LINE[w.kind[i]] && dist(w.posX[i], w.posY[i], tx, ty) < fx(220)) all++;
+      if (LINE[w.kind[i]] && dist(w.posX[i], w.posY[i], tx, ty) < fx(300)) coming++;
     }
+    all += coming;
     if (half && p.gather < 0) p.gather = w.tick;
     const held = p.gather >= 0 ? w.tick - p.gather : 0;
-    if (all > 0 && up * 100 < all * GATHERED && !p.fighting && held <= GATHER_WAIT) {
+    const limit = coming > 0 ? JOIN_WAIT : GATHER_WAIT;
+    if (all > 0 && up * 100 < all * GATHERED && !p.fighting && held <= limit) {
       if (half) p.status = ST_GATHER;
       advance(ai, w, out, p, false);
-      // Those who came by another way and stopped short are called in.
-      const out2 = p.joining.filter(
-        (i) => (w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET,
-      );
-      order(out, CMD_ATTACK_MOVE, out2, tx, ty);
       return false;
     }
     return true;
