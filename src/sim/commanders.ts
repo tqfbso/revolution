@@ -2,11 +2,15 @@
 // commander, what each has been told to do, and what it is to be kept at. How a mission is
 // carried out is not decided here: that is the staff (src/sim/staff.ts), which reads this
 // table and hands in ordinary commands, exactly like a computer player does.
-import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, type Command } from './commands';
+import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, CMD_STYLE, type Command } from './commands';
 import { clampInt } from './fixed';
 import { KIND_COUNT } from './units';
 import {
   CF_AUTO,
+  CF_STYLE_MASK,
+  CF_STYLE_SHIFT,
+  STYLE_ARMOUR,
+  STYLE_TOGETHER,
   KIND_SLOTS,
   MAP_SIZE_FX,
   MAX_COMMANDERS,
@@ -110,6 +114,14 @@ export function applyCommanderCommand(w: World, cmd: Command): boolean {
       const c = cmd.team * MAX_COMMANDERS + cmd.slot;
       if (cmd.on) w.cFlags[c] |= CF_AUTO;
       else w.cFlags[c] &= ~CF_AUTO;
+      return true;
+    }
+    case CMD_STYLE: {
+      if (!validSlot(cmd.team, cmd.slot)) return true;
+      const style = cmd.style | 0;
+      if (style < STYLE_TOGETHER || style > STYLE_ARMOUR) return true;
+      const c = cmd.team * MAX_COMMANDERS + cmd.slot;
+      w.cFlags[c] = (w.cFlags[c] & ~(CF_STYLE_MASK << CF_STYLE_SHIFT)) | (style << CF_STYLE_SHIFT);
       return true;
     }
     default:

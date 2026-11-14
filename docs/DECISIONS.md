@@ -2143,3 +2143,26 @@ Fabio: the civilians were too big beside the soldiers and too boxy. They were: s
   civilians that is at most 280,000 points, and only those in sight are drawn.
 
 Client only: nothing in the sim changed.
+
+## 112. Attack style is the player's switch, not a drill (F3 and F4) (2026-11-14)
+
+Formations pieces 3 and 4 were written before decision 109 found that the staged attack
+loses to going in together. What is left of them, built honestly:
+
+- **Each commander has an attack style**, a button on its row that cycles through three:
+  **together** (the default: everyone goes in at once, which lost the fewest troops in
+  every fight measured), **infantry first** (vehicles keep 25 m behind the squads until the
+  squads are within 22 m of the objective) and **armour first** (the squads keep 25 m
+  behind the vehicles). The tooltip says what each costs.
+- **Why offer what measures worse:** the measurement was against tanks and squads. A player
+  who knows a town is full of missile teams may rather lose squads than tanks, and one who
+  is short of squads may rather risk the tanks. That is a judgement about what he can
+  afford to lose, which is the player's to make, and it costs nothing when left alone.
+- **The four presets of the proposal are three.** "Rush" was the present attack under
+  another name, and "combined" was the staged drill, which is not built.
+- **The computer does not use a drill (F4).** It attacks together on every level, because
+  that is what wins. Making Hard stage its attacks would have made Hard easier.
+
+The style is two bits of the commander's flags, set by a new command (`CMD_STYLE`), so it
+is in the state hash and travels to every player in co-op like any other order. Disbanding
+a commander clears it. Golden hash unchanged.

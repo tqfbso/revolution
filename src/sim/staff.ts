@@ -54,13 +54,17 @@ import {
 } from './commands';
 import { B_HQ } from './economy';
 import { clampInt, fx } from './fixed';
-import { CLASS_AIR, S_BUILDING, cellOfPos, wallMax } from './map';
+import { CLASS_AIR, CLASS_FOOT, S_BUILDING, cellOfPos, wallMax } from './map';
 import { structDist2 } from './sim';
 import { fortified } from './urban';
 import { KINDS, KIND_ARTILLERY } from './units';
 import {
   FLAG_BOMBARD,
+  CF_STYLE_MASK,
+  CF_STYLE_SHIFT,
   FLAG_MOVING,
+  STYLE_ARMOUR,
+  STYLE_TOGETHER,
   JOB_NONE,
   MAP_SIZE_FX,
   MAX_COMMANDERS,
@@ -319,7 +323,7 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
       f.quiet = 0;
     }
   } else if (mission === M_ATTACK) {
-    attack(ai, w, out, p, power, cx, cy);
+    attack(ai, w, out, p, power, cx, cy, (w.cFlags[k] >> CF_STYLE_SHIFT) & CF_STYLE_MASK);
   } else if (mission === M_HOLD) {
     p.status = ST_HOLD;
     station(ai, w, out, p, tx, ty, cx, cy);
@@ -888,6 +892,7 @@ function attack(
   power: number,
   cx: number,
   cy: number,
+  style: number,
 ): void {
   const map = w.map;
   const f = p.f;
@@ -924,7 +929,37 @@ function attack(
     return;
   }
   p.status = ST_ATTACK;
-  press(ai, w, out, f, units, cx, cy, points, point);
+  const [lead, rear] = split(w, units, style);
+  if (rear.length === 0) {
+    press(ai, w, out, f, units, cx, cy, points, point);
+  } else {
+    // The player's choice (decision 112): one element goes in, the other keeps a bound
+    // behind it until the first is on the place. Slower and dearer than going in together
+    // (decision 109), but it is the way to keep tanks out of a town full of missiles, or
+    // squads out of a field full of guns.
+    const tx = point >= 0 ? structX(map, point) : obj.x;
+    const ty = point >= 0 ? structY(map, point) : obj.y;
+    const [lx, ly] = centre(w, lead);
+    const d = dist(lx, ly, tx, ty);
+    if (d <= CLOSED_UP) {
+      press(ai, w, out, f, units, cx, cy, points, point);
+    } else {
+      press(ai, w, out, f, lead, lx, ly, points, point);
+      const [gx, gy] = ground(
+        map,
+        lx + Math.trunc(((lx - tx) * BOUND) / (d || 1)),
+        ly + Math.trunc(((ly - ty) * BOUND) / (d || 1)),
+      );
+      const go = rear.filter(
+        (i) =>
+          (w.flags[i] & FLAG_MOVING) === 0 &&
+          w.attack[i] === NO_TARGET &&
+          dist(w.posX[i], w.posY[i], gx, gy) > fx(12),
+      );
+      order(out, CMD_ATTACK_MOVE, go, gx, gy);
+      follow(ai, w, out, units, cx, cy);
+    }
+  }
   muster(w, out, units, obj.x, obj.y);
 }
 
@@ -956,6 +991,30 @@ function station(
   order(out, CMD_ATTACK_MOVE, rest, x, y);
   follow(ai, w, out, units, cx, cy);
   muster(w, out, units, x, y);
+}
+
+/** The element held back keeps this far behind the one that leads. */
+const BOUND = fx(25);
+/** The leading element this close to the place: the rest come in. */
+const CLOSED_UP = fx(22);
+
+/**
+ * The line of a body by attack style: who leads and who keeps a bound behind. Whoever has
+ * nobody to follow leads; with the default style, or only one sort in the body, the second
+ * list is empty.
+ */
+function split(w: World, units: readonly number[], style: number): [number[], number[]] {
+  if (style === STYLE_TOGETHER) return [units as number[], []];
+  const foot: number[] = [];
+  const wheels: number[] = [];
+  for (const i of units) {
+    const kind = w.kind[i];
+    if (!LINE[kind]) continue;
+    if (KINDS[kind].cls === CLASS_FOOT) foot.push(i);
+    else wheels.push(i);
+  }
+  if (foot.length === 0 || wheels.length === 0) return [units as number[], []];
+  return style === STYLE_ARMOUR ? [wheels, foot] : [foot, wheels];
 }
 
 /**

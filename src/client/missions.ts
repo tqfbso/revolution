@@ -2,7 +2,7 @@
 // troops (the selection, a control group, new units from the factories) and a mission at
 // a place; from then on its staff runs them (src/sim/staff.ts) and the board shows how it
 // is going: what each is doing, how strong it still is, who is asking for more.
-import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, type Command } from '../sim/commands';
+import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, CMD_STYLE, type Command } from '../sim/commands';
 import type { GameMap } from '../sim/map';
 import {
   ST_ARRIVED,
@@ -32,6 +32,7 @@ import {
 } from '../sim/world';
 import {
   COMMANDER_AUTO,
+  COMMANDER_STYLE_SHIFT,
   COMMANDER_FIGHTING,
   COMMANDER_NEED,
   COMMANDER_STRIDE,
@@ -126,6 +127,8 @@ export interface CommanderInfo {
   cx: number;
   cz: number;
   auto: boolean;
+  /** How it goes into an attack: 0 together, 1 infantry first, 2 armour first. */
+  style: number;
   need: boolean;
   fighting: boolean;
 }
@@ -143,6 +146,22 @@ export interface BoardHooks {
 
 /** Seconds within which a change of orders seen in the game counts as this player's own. */
 const MY_ORDER = 6;
+
+/** How a commander goes into an attack (decision 112). The first is the default. */
+const STYLES = [
+  {
+    name: 'together',
+    tip: 'Everyone goes in at once. In testing this loses the fewest troops and is the fastest.',
+  },
+  {
+    name: 'infantry first',
+    tip: 'Squads lead; vehicles keep 25 m behind until the squads are on the objective. Slower and costs more squads, but keeps tanks away from missile teams in a town.',
+  },
+  {
+    name: 'armour first',
+    tip: 'Vehicles lead; squads keep 25 m behind until the vehicles are on the objective. Spares the squads against guns, risks the vehicles against missiles.',
+  },
+];
 
 export class MissionBoard {
   open = false;
@@ -186,6 +205,7 @@ export class MissionBoard {
         cx: 0,
         cz: 0,
         auto: false,
+        style: 0,
         need: false,
         fighting: false,
       });
@@ -230,6 +250,7 @@ export class MissionBoard {
         c.cz = s.commanders[o + 8];
       }
       c.auto = (flags & COMMANDER_AUTO) !== 0;
+      c.style = (flags >> COMMANDER_STYLE_SHIFT) & 3;
       c.need = (flags & COMMANDER_NEED) !== 0;
       c.fighting = (flags & COMMANDER_FIGHTING) !== 0;
       // New orders, or troops for a commander that had none: whose is it now?
@@ -372,6 +393,9 @@ export class MissionBoard {
     } else if (act === 'auto') {
       this.send({ type: CMD_REINFORCE, team: ME, slot, on: !c.auto });
       c.auto = !c.auto;
+    } else if (act === 'style') {
+      c.style = (c.style + 1) % STYLES.length;
+      this.send({ type: CMD_STYLE, team: ME, slot, style: c.style });
     } else if (act === 'disband') {
       this.send({ type: CMD_MISSION, team: ME, slot, mission: -1, x: 0, y: 0 });
       this.focus = -1;
@@ -446,6 +470,7 @@ export class MissionBoard {
           `</div><div class="orders">` +
           `<button data-act="jump" data-s="${c.slot}" title="Look at its troops">Go to</button>` +
           `<button data-act="auto" data-s="${c.slot}" class="${c.auto ? 'on' : ''}" title="Replace losses: what ${c.name} loses is ordered again from your factories and sent to it, as money allows">Replace losses: ${c.auto ? 'on' : 'off'}</button>` +
+          `<button data-act="style" data-s="${c.slot}" class="${c.style ? 'on' : ''}" title="${STYLES[c.style].tip} Click to change.">Attack: ${STYLES[c.style].name}</button>` +
           `<button data-act="stand" data-s="${c.slot}" title="Stop where it is and wait for orders">Stand down</button>` +
           `<button data-act="disband" data-s="${c.slot}" title="Its troops go back under your own orders">Disband</button>` +
           `</div>`;
