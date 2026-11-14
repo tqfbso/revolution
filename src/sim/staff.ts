@@ -58,6 +58,7 @@ import {
   M_ATTACK,
   M_DEFEND,
   M_HOLD,
+  M_MOVE,
   M_NONE,
   M_PATROL,
   M_SCREEN,
@@ -79,6 +80,8 @@ export const ST_SCREEN = 7;
 export const ST_FALLBACK = 8;
 export const ST_REGROUP = 9;
 export const ST_GATHER = 10;
+export const ST_MOVE = 11;
+export const ST_ARRIVED = 12;
 
 /** Ticks between two thinks: once a second, like the hard computer player. */
 const PERIOD = 20;
@@ -93,8 +96,19 @@ const WEAK = 60;
  * An attack waits short of its objective until this share of its line has closed up (per
  * cent), but no longer than GATHER_WAIT once half of it is there, and not at all under fire.
  */
-const GATHERED = 85;
-const GATHER_WAIT = 60 * TICK_RATE;
+const GATHERED = 70;
+const GATHER_WAIT = 20 * TICK_RATE;
+/**
+ * How far out of the objective an attack closes up: past the edge of the town (or the
+ * point) by more than anything in it sees (a tank's 44) or shoots (40). It used to be 60
+ * from the middle, which in a town is among the houses: the body stood waiting for its
+ * stragglers in the enemy's sights.
+ */
+const STAND_OFF = fx(75);
+/** No known enemy this close to the place where it closes up, or it closes up further back. */
+const STAND_CLEAR = fx(60);
+/** A march that is close to its way point but cannot get half its line onto it moves on after this. */
+const MARCH_WAIT = 30 * TICK_RATE;
 
 /** One commander, as its staff sees it. */
 export interface Post {
@@ -256,6 +270,8 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
   const ty = w.cY[k];
   if (mission === M_NONE) {
     p.status = ST_IDLE;
+  } else if (mission === M_MOVE) {
+    move(w, out, p, tx, ty);
   } else if (f.state === F_RETREAT) {
     fallingBack(w, out, p);
   } else if (p.regroup) {
@@ -322,6 +338,14 @@ function begin(
     f.state = F_ASSAULT;
     return;
   }
+  if (mission === M_MOVE) {
+    // The place itself, not the town it may be in; everyone at once, by plain move orders,
+    // which do not stop to fight. Squads in houses come out, squads in carriers ride.
+    f.obj = { kind: OBJ_POINT, id: -1, x: tx, y: ty };
+    f.state = F_MARCH;
+    order(out, CMD_MOVE, units.slice(), ...ground(map, tx, ty));
+    return;
+  }
   const d = dist(cx, cy, tx, ty);
   if (mission === M_PATROL) {
     f.wps.push(...ground(map, tx, ty), ...ground(map, w.cAX[k], w.cAY[k]));
@@ -330,14 +354,29 @@ function begin(
     // objective, so that it arrives as one body.
     if (d > fx(60) && scattered(w, units, cx, cy)) f.wps.push(...ground(map, cx, cy));
     if (mission === M_ATTACK) {
-      if (d > fx(110)) {
-        f.wps.push(
-          ...ground(
-            map,
-            f.obj.x + Math.trunc(((cx - f.obj.x) * fx(60)) / d),
-            f.obj.y + Math.trunc(((cy - f.obj.y) * fx(60)) / d),
-          ),
-        );
+      // Close up out of the enemy's sight and reach, on the side it comes from; further
+      // back still if the enemy is known to stand there. From too near to do that, it
+      // goes straight in.
+      const od = dist(cx, cy, f.obj.x, f.obj.y);
+      let stand = (f.obj.kind === OBJ_TOWN ? map.townR[f.obj.id] : 0) + STAND_OFF;
+      if (od > stand + fx(40)) {
+        let sx: number;
+        let sy: number;
+        for (let tries = 0; ; tries++) {
+          sx = f.obj.x + Math.trunc(((cx - f.obj.x) * stand) / od);
+          sy = f.obj.y + Math.trunc(((cy - f.obj.y) * stand) / od);
+          let clear = true;
+          for (const e of ai.seen) {
+            if (KINDS[w.kind[e]].cls === CLASS_AIR) continue;
+            if (dist(w.posX[e], w.posY[e], sx, sy) < STAND_CLEAR) {
+              clear = false;
+              break;
+            }
+          }
+          if (clear || tries === 3 || od <= stand + fx(70)) break;
+          stand += fx(30);
+        }
+        f.wps.push(...ground(map, sx, sy));
       }
     } else if (d > fx(50)) f.wps.push(...ground(map, f.obj.x, f.obj.y));
   }
@@ -530,7 +569,8 @@ function regrouping(
  * One think of a march. The body moves on when half of its line has closed up on the way
  * point. True when it has arrived at the last one (a patrol, `loop`, never does). An
  * attack (`gather`) waits at the last one, short of the objective, for its stragglers and
- * for new arrivals that are nearly there, so that it goes in as one body.
+ * for new arrivals that are nearly there, so that it goes in as one body. That place is
+ * out of the enemy's sight (see STAND_OFF); it does not wait once it is shot at.
  */
 function march(
   ai: Ai,
@@ -574,7 +614,7 @@ function march(
     }
     if (half && p.gather < 0) p.gather = w.tick;
     const held = p.gather >= 0 ? w.tick - p.gather : 0;
-    if (all > 0 && up * 100 < all * GATHERED && !(half && p.fighting) && held <= GATHER_WAIT) {
+    if (all > 0 && up * 100 < all * GATHERED && !p.fighting && held <= GATHER_WAIT) {
       if (half) p.status = ST_GATHER;
       advance(ai, w, out, p, false);
       // Those who came by another way and stopped short are called in.
@@ -586,7 +626,7 @@ function march(
     }
     return true;
   }
-  if (half || (close && waited > 75 * TICK_RATE) || waited > 5 * MINUTE) {
+  if (half || (close && waited > MARCH_WAIT) || waited > 5 * MINUTE) {
     f.since = w.tick;
     if (last && !loop) return true;
     f.wp = last ? 0 : f.wp + 1;
@@ -609,6 +649,43 @@ function advance(ai: Ai, w: World, out: Command[], p: Post, all: boolean): void 
     (i) => (all || (w.flags[i] & FLAG_MOVING) === 0) && dist(w.posX[i], w.posY[i], tx, ty) > fx(30),
   );
   order(out, CMD_MOVE, go, tx, ty);
+}
+
+/**
+ * Move: go to the place and stand there. Plain move orders, so nobody stops to fight on
+ * the way; once there the troops shoot at what comes at them, like any troops standing
+ * about. It never breaks off and never goes into the houses: it is for manoeuvre.
+ */
+function move(w: World, out: Command[], p: Post, x: number, y: number): void {
+  const f = p.f;
+  const units = p.units;
+  if (f.state !== F_MARCH) {
+    p.status = ST_ARRIVED;
+    return;
+  }
+  p.status = ST_MOVE;
+  const room = fx(40) + Math.trunc(Math.sqrt(units.length)) * fx(1);
+  let up = 0;
+  let moving = 0;
+  const stuck: number[] = [];
+  for (const i of units) {
+    const d = dist(w.posX[i], w.posY[i], x, y);
+    if (d < room) up++;
+    if ((w.flags[i] & FLAG_MOVING) !== 0) moving++;
+    else if (d > 2 * room) stuck.push(i);
+  }
+  const waited = w.tick - f.since;
+  if (
+    up * 100 >= units.length * 80 ||
+    (moving === 0 && stuck.length === 0 && waited > 2 * TICK_RATE) ||
+    waited > 5 * MINUTE
+  ) {
+    f.state = F_ASSAULT;
+    p.status = ST_ARRIVED;
+    return;
+  }
+  // Whoever stopped far short of the place (a blocked street, a squad put down) goes on.
+  order(out, CMD_MOVE, stuck, ...ground(w.map, x, y));
 }
 
 /** At the objective: take it, with everything the computer player's assault has. */

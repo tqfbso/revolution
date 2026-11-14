@@ -1549,3 +1549,28 @@ get the level exactly as it stands: the golden hash and the two-player game are 
 
 **Not built:** joining a game in progress, a relay between guests if the host leaves,
 per-player ownership of units.
+
+## 094. A map grid, attacks that close up out of sight, and a Move mission (2026-11-14)
+
+Three asks from the first three-player evening.
+
+**Grid.** Eight by eight squares, A to H west to east and 1 to 8 north to south (128 m
+each): the reference the mission board already used for places outside towns, now drawn.
+Always on the minimap; on the battlefield with K or the Grid button (lines over the
+ground, the name of each square four times in it, remembered between games). A co-op ping
+(Z) now also reports "Player 2 pings C4" to everyone, spoken. `src/client/grid.ts`.
+
+**Attack.** A commander's attack closed up 60 m from the middle of its objective, which
+in a town is among the houses: it stood waiting for stragglers in the enemy's sights. It
+now closes up 75 m outside the edge of the town (or from the point): beyond a tank's sight
+(44) and reach (40), and up to 90 m further back if the enemy is known to stand at that
+place. It waits for 70% of its line (was 85%), 20 seconds at most once half are up (was
+60), and not at all once anyone in it is shot at. A march stuck near a way point moves on
+after 30 seconds (was 75).
+
+**Move** (`M_MOVE`, T with the commander's troops selected). Plain move orders to the
+place itself: nobody stops to fight on the way (moving units do not fire in this sim), no
+houses, no breaking off. Once there the troops stand and shoot at what comes at them. It
+is for manoeuvre; Attack and Hold remain the missions that fight for a place.
+
+The golden hash is unchanged (919328295): the computer player does not use the staff.

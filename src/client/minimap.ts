@@ -14,6 +14,7 @@ import {
   type GameMap,
 } from '../sim/map';
 import type { Fog } from './fog';
+import { GRID } from './grid';
 import type { StructureView } from './structures';
 import type { UnitView } from './units';
 import type { WorksView } from './works';
@@ -199,6 +200,33 @@ export class Minimap {
     this.ctx.putImageData(this.image, 0, 0);
 
     const ctx = this.ctx;
+    // The map grid, A to H across and 1 to 8 down: "meet me at C4".
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let k = 1; k < GRID; k++) {
+      const at = Math.round((k * N) / GRID) + 0.5;
+      ctx.moveTo(at, 0);
+      ctx.lineTo(at, N);
+      ctx.moveTo(0, at);
+      ctx.lineTo(N, at);
+    }
+    ctx.stroke();
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let k = 0; k < GRID; k++) {
+      const mid = ((k + 0.5) * N) / GRID;
+      for (const [text, x, y] of [
+        [String.fromCharCode(65 + k), mid, 6],
+        [String(k + 1), 5, mid],
+      ] as const) {
+        ctx.fillStyle = 'rgba(8,12,16,0.7)';
+        ctx.fillText(text, x + 1, y + 1);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillText(text, x, y);
+      }
+    }
     // Resource sites you have found: tan for supplies, amber for fuel.
     for (let k = 0; k < this.map.siteCount; k++) {
       const x = this.map.siteX[k] / 4096;

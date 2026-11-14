@@ -261,6 +261,10 @@
         padding: 2px 7px;
         font-size: 11px;
       }
+      #actions button.on {
+        border-color: #ffe082;
+        color: #ffe082;
+      }
       #missions button.on {
         outline: 1px solid #d8c27a;
         color: #ffe082;
@@ -681,6 +685,12 @@
         >
           Commanders <kbd>M</kbd>
         </button>
+        <button
+          id="grid-toggle"
+          title="Map grid on the battlefield: squares A1 to H8, the same as on the minimap, to tell each other where"
+        >
+          Grid <kbd>K</kbd>
+        </button>
         <button id="pause" title="Pause (Space). Orders given while paused start when you resume">
           Pause (Space)
         </button>
@@ -768,8 +778,11 @@ starting…</pre>
       sets the opponent and starts a new game.<br />
       Co-op (2 to 4 players): Menu, "Co-op: invite your team" gives one link to send to everyone;
       the host presses Start when all are in. Whoever opens it commands the same army with you
-      against the computer. Z rings the point under your pointer on both minimaps; the cyan box on
-      the minimap is where your partner is looking. Pause and speed are shared.<br />
+      against the computer. Z rings the point under your pointer on every minimap and tells everyone
+      its grid square; the cyan box on the minimap is where your partner is looking. Pause and speed
+      are shared.<br />
+      Map grid: the minimap is ruled in squares, A to H across and 1 to 8 down ("armour to C4"). K
+      (or the Grid button) draws the same squares and their names on the battlefield.<br />
       Engineers and trucks: B (or Repair / fortify), then right click a building, to mend it;
       engineers then fortify it. Engineers clear street rubble: right click it.<br />
       Economy: select trucks, right click a stockpile (tan marker) or an oil well (amber) to haul;
@@ -788,15 +801,18 @@ starting…</pre>
       units of that kind go straight to a town instead of the factory's rally point<br />
       Commanders (M, or the button at the top): select troops and press N, and they get a commander
       (Alpha to Hotel, eight at most). Open its row and give it a mission, then click the map (or
-      the minimap) for the place. Attack: it forms up, marches as one body, assaults with smoke and
-      guns, holds what it took, and breaks off and waits for reinforcements when it is losing. Hold:
-      stays to the last, infantry in the houses. Defend: holds, goes out to meet an enemy nearby,
-      gives ground to one far too strong and comes back. Patrol: back and forth between where it
-      stood and the place. Screen: a thin line of lookouts that pulls back from anything strong.
-      Replace losses: what it loses is ordered again and sent to it. Production's "Send to" can also
-      send every new unit of a kind to a commander. An order you give a unit yourself takes it out
-      of its commander's hands (select it and press + Add on the board to put it back). The board
-      also counts idle units and can hand them to the nearest commander<br />
+      the minimap) for the place. Attack: it forms up, marches as one body, closes up outside the
+      place where the enemy cannot see it (for 20 seconds at most), assaults with smoke and guns,
+      holds what it took, and breaks off and waits for reinforcements when it is losing. Move (or T
+      with its troops selected): goes to the place and stands there, without stopping to fight on
+      the way, going into houses or falling back. Hold: stays to the last, infantry in the houses.
+      Defend: holds, goes out to meet an enemy nearby, gives ground to one far too strong and comes
+      back. Patrol: back and forth between where it stood and the place. Screen: a thin line of
+      lookouts that pulls back from anything strong. Replace losses: what it loses is ordered again
+      and sent to it. Production's "Send to" can also send every new unit of a kind to a commander.
+      An order you give a unit yourself takes it out of its commander's hands (select it and press +
+      Add on the board to put it back). The board also counts idle units and can hand them to the
+      nearest commander<br />
       You command red. Drag: select · Double click: all of that type · Shift: add · Ctrl+A: all<br />
       Right click: move (breaks off a fight) · Right click an enemy: attack it · C then click or
       Alt+right click: attack-move · X: stop · H: hold position · G: hold fire · . (full stop): idle

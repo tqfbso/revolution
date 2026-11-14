@@ -302,7 +302,7 @@ export class Coop {
   onCommand: (c: Command) => void = () => {};
   onControl: (pause: boolean | undefined, speed: number | undefined) => void = () => {};
   onState: (paused: boolean, speed: number) => void = () => {};
-  onMark: (x: number, z: number) => void = () => {};
+  onMark: (x: number, z: number, from: number) => void = () => {};
   /** The host has gone: the guest's sim must run on its own clock from here. */
   onAlone: () => void = () => {};
   /** Our own hashes, by tick. */
@@ -459,7 +459,7 @@ export class Coop {
       // The host passes these on, saying whose they are.
       const from = this.role === 'host' ? seat : (m.from ?? 0);
       if (this.role === 'host') this.send({ ...m, from }, seat);
-      if (m.t === 'mark') this.onMark(m.x, m.z);
+      if (m.t === 'mark') this.onMark(m.x, m.z, from);
       else if (this.partners[from]) this.partners[from] = { x: m.x, z: m.z, at: performance.now() };
     } else if (m.t === 'gone') {
       this.present.delete(m.seat);

@@ -5,6 +5,7 @@
 import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, type Command } from '../sim/commands';
 import type { GameMap } from '../sim/map';
 import {
+  ST_ARRIVED,
   ST_ATTACK,
   ST_DEFEND,
   ST_FALLBACK,
@@ -12,6 +13,7 @@ import {
   ST_HOLD,
   ST_IDLE,
   ST_MARCH,
+  ST_MOVE,
   ST_PATROL,
   ST_REGROUP,
   ST_SCREEN,
@@ -23,6 +25,7 @@ import {
   M_ATTACK,
   M_DEFEND,
   M_HOLD,
+  M_MOVE,
   M_NONE,
   M_PATROL,
   M_SCREEN,
@@ -36,6 +39,7 @@ import {
   TASK_MOVING,
   type Snapshot,
 } from '../worker/protocol';
+import { gridRef } from './grid';
 import { COMMANDER_RGB } from './icons';
 import type { Posting } from './production';
 import type { UnitView } from './units';
@@ -59,6 +63,12 @@ const MISSIONS = [
     name: 'Attack',
     ask: 'attack',
     tip: 'Take a place. It forms up, marches as one body, assaults with smoke and guns, then holds what it took. It breaks off if it is losing and waits to be reinforced.',
+  },
+  {
+    m: M_MOVE,
+    name: 'Move',
+    ask: 'move to',
+    tip: 'Go to a place and stand there (T with its troops selected). It does not stop to fight on the way, does not go into the houses and never falls back: for getting a body where you want it. Once there it shoots at what comes at it.',
   },
   {
     m: M_HOLD,
@@ -85,7 +95,7 @@ const MISSIONS = [
     tip: 'A thin line of lookouts through the place you click, across the way from your base. It warns you and pulls back from anything strong.',
   },
 ];
-const MISSION_NAME = ['No orders', 'Attack', 'Hold', 'Defend', 'Patrol to', 'Screen'];
+const MISSION_NAME = ['No orders', 'Attack', 'Hold', 'Defend', 'Patrol to', 'Screen', 'Move to'];
 const STATUS: Record<number, string> = {
   [ST_IDLE]: 'Awaiting orders',
   [ST_MARCH]: 'On the march',
@@ -97,7 +107,9 @@ const STATUS: Record<number, string> = {
   [ST_SCREEN]: 'Screening',
   [ST_FALLBACK]: 'Falling back',
   [ST_REGROUP]: 'Regrouping',
-  [ST_GATHER]: 'Gathering for the attack',
+  [ST_GATHER]: 'Closing up out of sight, then going in',
+  [ST_MOVE]: 'Moving',
+  [ST_ARRIVED]: 'In place, awaiting orders',
 };
 
 export interface CommanderInfo {
@@ -207,6 +219,8 @@ export class MissionBoard {
         this.hooks.alert(`${c.name} is falling back`, c.cx, c.cz);
       } else if (c.status !== was.status && c.status === ST_SECURED) {
         this.hooks.alert(`${c.name} has taken ${this.place(c.x, c.z)}`, c.cx, c.cz);
+      } else if (c.status !== was.status && c.status === ST_ARRIVED && was.status === ST_MOVE) {
+        this.hooks.alert(`${c.name} is in place at ${this.place(c.x, c.z)}`, c.cx, c.cz);
       } else if (c.need && !was.need && !c.auto) {
         this.hooks.alert(`${c.name} needs reinforcements`, c.cx, c.cz);
       }
@@ -254,6 +268,25 @@ export class MissionBoard {
     return free.slot;
   }
 
+  /**
+   * T: tell a commander to move, without opening the board. The commander is the one whose
+   * troops are selected, or else the one opened on the board. False if there is none.
+   */
+  quickMove(): boolean {
+    const u = this.units;
+    let slot = -1;
+    for (const id of u.selectedIds()) {
+      if (u.cmdr[id] >= 0) {
+        slot = u.cmdr[id];
+        break;
+      }
+    }
+    if (slot < 0 && this.open) slot = this.focus;
+    if (slot < 0 || this.info[slot].count === 0) return false;
+    this.act('mission', slot, M_MOVE);
+    return true;
+  }
+
   /** The name of the town a point is in, or a rough map reference. */
   place(x: number, z: number): string {
     const map = this.map;
@@ -263,7 +296,7 @@ export class MissionBoard {
       const r = map.townR[t] / 1024 + 15;
       if (dx * dx + dz * dz < r * r) return map.townName[t];
     }
-    return `grid ${String.fromCharCode(65 + Math.min(7, Math.max(0, Math.floor(x / 128))))}${Math.min(8, Math.max(1, Math.floor(z / 128) + 1))}`;
+    return `grid ${gridRef(x, z)}`;
   }
 
   private act(act: string, slot: number, mission: number): void {
