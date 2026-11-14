@@ -152,6 +152,15 @@ interface Tuning {
   /** First tick of raids on trucks and outlying depots (0 = never), and IFVs in a raiding party. */
   raids: number;
   raidParty: number;
+  /**
+   * Skirmishing (decision 101): small parties that go out to the enemy's forward places,
+   * pick a fight and come home when it turns against them. How many may be out at once
+   * (0 = none), the first tick, ticks between two setting out, and squads in a party.
+   */
+  probes: number;
+  probeFrom: number;
+  probeEvery: number;
+  probeSize: number;
   /** Builds against what it has seen of the enemy. */
   counter: boolean;
   /** Lays smoke in front of a town it storms. */
@@ -209,6 +218,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     odds: 24,
     raids: 0,
     raidParty: 4,
+    probes: 0,
+    probeFrom: 0,
+    probeEvery: 0,
+    probeSize: 0,
     counter: false,
     smoke: false,
     sappers: 0,
@@ -246,6 +259,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     odds: 22,
     raids: 0,
     raidParty: 4,
+    probes: 1,
+    probeFrom: 10 * MINUTE,
+    probeEvery: 4 * MINUTE,
+    probeSize: 3,
     counter: false,
     smoke: false,
     sappers: 1,
@@ -282,11 +299,15 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     odds: 17,
     raids: 18 * MINUTE,
     raidParty: 4,
+    probes: 3,
+    probeFrom: 6 * MINUTE,
+    probeEvery: 90 * TICK_RATE,
+    probeSize: 5,
     counter: true,
     smoke: false,
     sappers: 2,
     traps: true,
-    rest: 150 * TICK_RATE,
+    rest: 5 * MINUTE,
     reach: 3,
     carriers: true,
     slow: 2,
@@ -313,11 +334,15 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     odds: 11,
     raids: 7 * MINUTE,
     raidParty: 6,
+    probes: 4,
+    probeFrom: 3 * MINUTE,
+    probeEvery: 45 * TICK_RATE,
+    probeSize: 7,
     counter: true,
     smoke: true,
     sappers: 3,
     traps: true,
-    rest: 45 * TICK_RATE,
+    rest: 2 * MINUTE,
     reach: 99,
     carriers: true,
     slow: 1,
@@ -355,6 +380,12 @@ const R_JOIN = 4;
 const R_SAPPER = 5;
 /** A truck that follows the army instead of hauling: its supply line. */
 const R_SUPPLY = 6;
+/** Skirmishing party k: R_PROBE + k (see Tuning.probes). Above every town's garrison. */
+const R_PROBE = 100;
+/** The most skirmishing parties any level keeps. They are forces 2 and up. */
+const MAX_PROBES = 4;
+/** A force that goes out, stings and comes home: the raid on the trucks, or a skirmishing party. */
+const raiding = (role: number) => role === R_RAID || role >= R_PROBE;
 /** Garrison of town t: R_TOWN + t. */
 const R_TOWN = 8;
 
@@ -395,6 +426,8 @@ export interface Force {
   done: number;
   /** Carriers wait for the squads that are to ride until this tick. */
   boardUntil: number;
+  /** Tick it first stood at its objective on this outing (0 = not yet). */
+  arrived: number;
 }
 
 /** A way over the river: a ford, with its bridge if it has one. */
@@ -467,8 +500,9 @@ export interface Ai {
   /** Trucks following the army (see Tuning.wagons). */
   wagons: number[];
   garr: number[][];
-  forces: [Force, Force];
-  members: [number[], number[]];
+  /** The field army, the raid on the trucks, then the skirmishing parties. */
+  forces: Force[];
+  members: number[][];
   stageX: number;
   stageY: number;
   alarm: Alarm | null;
@@ -488,6 +522,7 @@ export interface Ai {
   resC: number;
   lastAttack: number;
   lastRaid: number;
+  lastProbe: number;
   /** No new attack before this tick (set when one is broken off). */
   restUntil: number;
   /** Per town (and, last, the enemy base): the strength that was not enough last time. */
@@ -502,7 +537,7 @@ export interface Ai {
   laid: number;
   /** Its carriers with squads aboard, and the strength riding with the army and the raid. */
   loaded: number[];
-  aboard: [number, number];
+  aboard: number[];
   /** Attacks it has launched over the middle of the map. */
   attacks: number;
   /** One line on what it is up to, for tests and the debug overlay. */
@@ -531,6 +566,7 @@ export function newForce(role: number): Force {
     turned: false,
     done: 0,
     boardUntil: 0,
+    arrived: 0,
   };
 }
 
@@ -593,8 +629,12 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     sappers: [],
     wagons: [],
     garr: [],
-    forces: [force(R_ARMY), force(R_RAID)],
-    members: [[], []],
+    forces: [
+      force(R_ARMY),
+      force(R_RAID),
+      ...Array.from({ length: MAX_PROBES }, (_, k) => force(R_PROBE + k)),
+    ],
+    members: Array.from({ length: 2 + MAX_PROBES }, () => []),
     stageX: 0,
     stageY: 0,
     alarm: null,
@@ -608,6 +648,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     resC: 0,
     lastAttack: 0,
     lastRaid: 0,
+    lastProbe: 0,
     restUntil: 0,
     grudge: new Int32Array(MAX_TOWNS + 1),
     foeWorks: 0,
@@ -615,7 +656,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     nest: new Int32Array(MAX_TOWNS).fill(-1),
     laid: 0,
     loaded: [],
-    aboard: [0, 0],
+    aboard: new Array<number>(2 + MAX_PROBES).fill(0),
     attacks: 0,
     plan: '',
   };
@@ -870,11 +911,9 @@ export function perceive(ai: Ai, w: World): void {
   ai.joining.length = 0;
   ai.scouts.length = 0;
   ai.sappers.length = 0;
-  ai.members[0].length = 0;
-  ai.members[1].length = 0;
+  for (const m of ai.members) m.length = 0;
   ai.loaded.length = 0;
-  ai.aboard[0] = 0;
-  ai.aboard[1] = 0;
+  ai.aboard.fill(0);
   for (const g of ai.garr) g.length = 0;
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE || w.team[i] !== ai.team) {
@@ -899,8 +938,9 @@ export function perceive(ai: Ai, w: World): void {
     if (w.carrier[i] >= 0) {
       // Riding: out of reach of orders, but still part of the body it set out with.
       const r = ai.role[i];
-      if (r === R_ARMY || r === R_RAID) {
-        ai.aboard[r === R_ARMY ? 0 : 1] += Math.trunc((POWER[kind] * w.hp[i]) / KINDS[kind].hp);
+      if (r === R_ARMY || raiding(r)) {
+        const which = r === R_ARMY ? 0 : r === R_RAID ? 1 : 2 + r - R_PROBE;
+        ai.aboard[which] += Math.trunc((POWER[kind] * w.hp[i]) / KINDS[kind].hp);
       }
       continue;
     }
@@ -909,6 +949,7 @@ export function perceive(ai: Ai, w: World): void {
     else if (role === R_RESERVE) ai.reserve.push(i);
     else if (role === R_ARMY) ai.members[0].push(i);
     else if (role === R_RAID) ai.members[1].push(i);
+    else if (role >= R_PROBE && role < R_PROBE + MAX_PROBES) ai.members[2 + role - R_PROBE].push(i);
     else if (role === R_SCOUT) ai.scouts.push(i);
     else if (role === R_JOIN) ai.joining.push(i);
     else if (role === R_SAPPER) ai.sappers.push(i);
@@ -1510,8 +1551,7 @@ function military(ai: Ai, w: World, out: Command[]): void {
   garrisons(ai, w, out);
   scouting(ai, w, out);
   runReserve(ai, w, out);
-  runForce(ai, w, out, 0);
-  runForce(ai, w, out, 1);
+  for (let which = 0; which < ai.forces.length; which++) runForce(ai, w, out, which);
   supplyLine(ai, w, out);
   dismount(ai, w, out);
 }
@@ -2196,6 +2236,50 @@ function raidTarget(ai: Ai, w: World): Objective | null {
   return best;
 }
 
+/**
+ * Where a skirmishing party of this strength goes: a flag the enemy holds or nobody
+ * does, a stockpile on his side, or a place where a few of his troops were seen lately.
+ * Never his base, never where another party is going, and nowhere it expects to meet much
+ * more than itself: the point is a fight it can walk away from.
+ */
+function probeTarget(ai: Ai, w: World, power: number): Objective | null {
+  const map = w.map;
+  let best: Objective | null = null;
+  let bestCost = 0;
+  const consider = (x: number, y: number) => {
+    if (dist(x, y, ai.foeX, ai.foeY) < fx(110)) return;
+    const there = expect(ai, w, x, y, 1, 0);
+    if (there > 2 * power + 30) return;
+    let cost =
+      4 * there + (dist(x, y, ai.stageX, ai.stageY) >> (FP_SHIFT + 2)) + nextInt(ai.rng, 120);
+    for (const o of ai.forces) {
+      if (o.state !== F_IDLE && o.obj !== null && dist(x, y, o.obj.x, o.obj.y) < fx(60))
+        cost += 400;
+    }
+    if (best === null || cost < bestCost) {
+      best = { kind: OBJ_POINT, id: -1, x, y };
+      bestCost = cost;
+    }
+  };
+  // A level with a single party only answers the enemy: it goes where he holds a flag or
+  // was seen, and takes no empty ground with it (easy stays small, decision 070).
+  const grab = ai.tune.probes > 1;
+  for (let t = 0; t < map.townCount; t++) {
+    const owner = w.townOwner[t];
+    if (owner === ai.enemy || (grab && owner !== ai.team)) consider(map.townX[t], map.townY[t]);
+  }
+  for (let k = 0; grab && k < map.siteCount; k++) {
+    if (bankOf(ai, map.siteX[k], map.siteY[k]) === ai.side) continue;
+    if (map.siteKind[k] !== SITE_FUEL && w.siteStock[k] <= 0) continue;
+    consider(map.siteX[k], map.siteY[k]);
+  }
+  for (let c = 0; c < CC; c++) {
+    if (ai.threat[c] <= 0 || w.tick - ai.seenAt[c] > 2 * MINUTE) continue;
+    consider(((c % CD) << CS) + (1 << (CS - 1)), (Math.trunc(c / CD) << CS) + (1 << (CS - 1)));
+  }
+  return best;
+}
+
 function setOut(ai: Ai, w: World, f: Force, units: number[], obj: Objective): void {
   const [cx, cy] = centre(w, units);
   if (f.role === R_ARMY) {
@@ -2203,13 +2287,14 @@ function setOut(ai: Ai, w: World, f: Force, units: number[], obj: Objective): vo
     ai.plan = `attack ${obj.kind === OBJ_TOWN ? w.map.townName[obj.id] : what}`;
   }
   f.obj = obj;
-  f.wps = route(ai, w, cx, cy, obj, f.role === R_RAID);
+  f.wps = route(ai, w, cx, cy, obj, raiding(f.role));
   f.wp = 0;
   f.state = f.wps.length > 0 ? F_MARCH : F_ASSAULT;
   f.since = w.tick;
   f.quiet = 0;
   f.smoked = false;
   f.turned = false;
+  f.arrived = 0;
 }
 
 /** Break off. A beaten army remembers what it was beaten with, and comes back with more. */
@@ -2230,7 +2315,8 @@ function retreat(ai: Ai, f: Force, w: World, beaten: boolean): void {
 function runForce(ai: Ai, w: World, out: Command[], which: number): void {
   const f = ai.forces[which];
   const units = ai.members[which];
-  const raid = which === 1;
+  const raid = which >= 1;
+  const probe = which >= 2;
   const tick = w.tick;
   const tune = ai.tune;
   if (!raid && (f.state === F_IDLE || f.state === F_RETREAT) && ai.joining.length > 0) {
@@ -2244,7 +2330,30 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
     const al = ai.alarm;
     if (al !== null && (al.base || al.threat * 3 > strength(w, ai.reserve))) return;
     if (!raid && tick < ai.restUntil) return;
-    if (raid) {
+    if (probe) {
+      if (which - 2 >= tune.probes || tick < tune.probeFrom) return;
+      if (tick - ai.lastProbe < tune.probeEvery) return;
+      // Squads that are whole, and one carrier with them if there is one: enough to be
+      // worth shooting at, too few to be worth an army's while.
+      const party: number[] = [];
+      let carrier = -1;
+      for (const i of ai.reserve) {
+        if (w.hp[i] * 4 < KINDS[w.kind[i]].hp * 3) continue;
+        if (FOOT(w.kind[i]) && party.length < tune.probeSize) party.push(i);
+        else if (w.kind[i] === KIND_IFV && carrier < 0) carrier = i;
+      }
+      if (party.length < Math.min(3, tune.probeSize)) return;
+      if (carrier >= 0 && tune.probeSize >= 5) party.push(carrier);
+      const obj = probeTarget(ai, w, strength(w, party));
+      if (obj === null) return;
+      for (const i of party) ai.role[i] = f.role;
+      ai.reserve = ai.reserve.filter((i) => ai.role[i] === R_RESERVE);
+      f.launch = strength(w, party);
+      f.done = 0;
+      ai.lastProbe = tick;
+      setOut(ai, w, f, party, obj);
+      units.push(...party);
+    } else if (raid) {
       if (tune.raids === 0 || tick < tune.raids || tick - ai.lastRaid < 3 * MINUTE) return;
       const ifvs = ai.reserve.filter(
         (i) => w.kind[i] === KIND_IFV && w.hp[i] * 2 > KINDS[KIND_IFV].hp,
@@ -2309,14 +2418,15 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
   const local = expect(ai, w, cx, cy, 2, 0);
   const a = ai.alarm;
   if (
-    power * 100 < f.launch * tune.breakOff ||
+    // (A skirmishing party is not there to win: it goes home as soon as it is hurt.)
+    power * 100 < f.launch * (probe ? 70 : tune.breakOff) ||
     local > 2 * power + 40 ||
     (local * 10 > power * tune.odds && power * 10 < f.launch * 9) ||
     (a !== null && a.base && a.threat * 2 > 3 * strength(w, ai.reserve) + 20)
   ) {
     retreat(ai, f, w, true);
     order(out, CMD_MOVE, units, ai.stageX, ai.stageY);
-    ai.plan = raid ? 'raid breaks off' : 'army falls back';
+    if (!probe) ai.plan = raid ? 'raid breaks off' : 'army falls back';
     return;
   }
   if (!raid) {
@@ -2560,7 +2670,8 @@ function assault(
   const map = w.map;
   const obj = f.obj!;
   const tick = w.tick;
-  const raid = f.role === R_RAID;
+  const raid = raiding(f.role);
+  const probe = f.role >= R_PROBE;
   const reach = obj.kind === OBJ_TOWN ? map.townR[obj.id] + fx(30) : fx(70);
   let foes = 0;
   for (const e of ai.seen) {
@@ -2600,12 +2711,16 @@ function assault(
     done = f.quiet >= 10 && points.length === 0;
   } else {
     done = f.quiet >= (raid ? 12 : 6) && (obj.id < 0 || w.sHp[obj.id] <= 0);
-    if (raid && tick - f.since > 90 * TICK_RATE) done = true;
+    if (probe) {
+      // A minute at the place, fight or no fight; then home.
+      if (f.arrived === 0 && dist(cx, cy, obj.x, obj.y) < reach) f.arrived = tick;
+      done = f.arrived > 0 && tick - f.arrived > 60 * TICK_RATE;
+    } else if (raid && tick - f.since > 90 * TICK_RATE) done = true;
   }
   if (done || tick - f.since > 6 * MINUTE) {
     f.done++;
     let next = raid
-      ? f.done < 2
+      ? f.done < 2 && !probe
         ? raidTarget(ai, w)
         : null
       : done
@@ -2755,7 +2870,10 @@ export function aiReport(ai: Ai, w: World): string {
     `t${t} ${ai.level} tier ${w.tier[t]} pop ${w.pop[t]}/${w.popCap[t]} ` +
     `S ${w.supplies[t]} F ${w.fuel[t]} C ${w.credits[t]} trucks ${ai.trucks.length} towns ${towns} ` +
     `garrison ${garrison} reserve ${ai.reserve.length} army ${ai.members[0].length} ${states[f.state]} ` +
-    `raid ${ai.members[1].length} scouts ${ai.scouts.length} seen ${ai.seen.length} ` +
+    `raid ${ai.members[1].length} probes ${ai.members
+      .slice(2)
+      .map((m) => m.length)
+      .join('/')} scouts ${ai.scouts.length} seen ${ai.seen.length} ` +
     `wagons ${ai.wagons.length} hungry ${hungryPoints(w, t)} ` +
     `works ${ai.laid} foe works ${ai.foeWorks} units ${Array.from(ai.have).join(',')} | ${ai.plan}`
   );

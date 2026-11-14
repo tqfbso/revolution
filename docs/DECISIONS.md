@@ -1766,3 +1766,38 @@ game tick for tick; a late player's world hashes equal to the host's), and three
 browsers over `?net=local`: one closed, opened the link again, caught up, 14 hashes
 compared with the others and none different. Not checked: over the real broker between
 machines. Golden hash unchanged (nothing in the sim changed).
+
+## 101. The computer skirmishes: small parties out all the time, big attacks rarer (2026-11-14)
+
+Fabio: he would like the computer "more in favour of skirmishes instead of larger
+battles, like small units coming and provoking". Until now it sat still between its big
+attacks, apart from one raid by carriers on the trucks (normal and hard, late).
+
+**Decided:** skirmishing parties (`Tuning.probes`, forces 2 and up in `ai.forces`). A
+party is a handful of whole squads from the reserve and, from five squads up, one
+carrier. It goes to a flag the enemy holds or nobody does, a stockpile on his side, or a
+place where a few of his troops were seen in the last two minutes; never his base, never
+where another party is going, and nowhere it expects to meet much more than twice its
+own strength. It stays a minute, fight or no fight, and comes home; it also breaks off as
+soon as it is down to 70% (an army holds on to 50%). It reuses the raid's machinery
+(march, press, break off, fall back to the staging area).
+
+| Level   | Parties out at once | From minute | One sets out every | Squads | Pause between big attacks |
+| ------- | ------------------- | ----------- | ------------------ | ------ | ------------------------- |
+| Recruit | 0                   |             |                    |        | 8 min (as before)         |
+| Easy    | 1                   | 10          | 4 min              | 3      | 5 min (as before)         |
+| Normal  | 3                   | 6           | 90 s               | 5 + 1  | 5 min (was 2.5)           |
+| Hard    | 4                   | 3           | 45 s               | 7 + 1  | 2 min (was 45 s)          |
+
+Easy's single party only answers the player (a flag he holds, a place he was seen): it
+takes no empty ground, so easy stays as small as decision 070 made it.
+
+**A consequence to watch:** a party that finds a flag empty takes it (six squads need ten
+seconds), so on normal and hard an unguarded flag does not stay yours. That is the
+provocation asked for, and it makes garrisons matter, but it is also more pressure than
+normal had this morning.
+
+**Checked** (headless, city map): normal still stands at 320 army points and makes its
+first big attack at minute 17. Normal beats easy on three seeds (in 22 to 25 minutes;
+before, 27 to 44), hard beats normal on two (25 and 34 minutes). Golden hash unchanged
+(the pinned run has no computer player).
