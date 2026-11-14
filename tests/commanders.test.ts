@@ -3,6 +3,8 @@ import {
   CMD_ASSIGN,
   CMD_DEST,
   CMD_FOUND,
+  CMD_GARRISON,
+  CMD_MOVE,
   CMD_MISSION,
   CMD_ORDER,
   CMD_REINFORCE,
@@ -11,7 +13,7 @@ import {
 } from '../src/sim/commands';
 import { B_BARRACKS, B_DEPOT, B_HQ } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
-import { flatMap, generateMap } from '../src/sim/map';
+import { S_BUILDING, flatMap, generateMap } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import {
@@ -35,6 +37,7 @@ import { KIND_DRONE, KIND_IFV, KIND_INFANTRY, KIND_STRIKE, KIND_TANK } from '../
 import {
   CF_AUTO,
   DEST_COMMANDER,
+  FLAG_SIEGE,
   KIND_SLOTS,
   MAX_COMMANDERS,
   M_ATTACK,
@@ -489,6 +492,44 @@ describe('sub-commanders: the staff', () => {
       return hashWorld(w);
     };
     expect(once()).toBe(once());
+  }, 60000);
+});
+
+describe('sub-commanders: an emptied house', () => {
+  it('stops shelling a house once nobody is left in it', () => {
+    const { w, st } = field();
+    const t = town(w, 'Ridgetop');
+    const map = w.map;
+    let house = -1;
+    for (let s = 0; s < map.structCount && house < 0; s++) {
+      if (map.sKind[s] === S_BUILDING && map.sTown[s] === t) house = s;
+    }
+    const hx = ((2 * map.sX[house] + map.sW[house]) * 4) / 2;
+    const hy = ((2 * map.sY[house] + map.sH[house]) * 4) / 2;
+    const foes = add(w, [spawn(1, KIND_INFANTRY, 2, hx, hy + 6)]);
+    step(w, [{ type: CMD_GARRISON, units: foes, structure: house }]);
+    for (let k = 0; k < 10 * TICK_RATE; k++) step(w, []);
+    expect(w.sOcc[house]).toBe(2);
+    // A house that stands whatever is fired at it, so that only the order can end the fire.
+    w.sHp[house] = 10_000_000;
+    const tanks = add(w, [spawn(0, KIND_TANK, 4, hx - 60, hy)]);
+    step(w, [
+      { type: CMD_ASSIGN, units: tanks, slot: 0 },
+      mission(0, M_ATTACK, map.townX[t], map.townY[t]),
+    ]);
+    const sieging = () => tanks.filter((i) => (w.flags[i] & FLAG_SIEGE) !== 0).length;
+    let shelled = false;
+    play(w, st, 40, () => (shelled ||= sieging() > 0));
+    expect(shelled).toBe(true);
+    // The garrison leaves (how it goes does not matter: the house is empty).
+    step(w, [{ type: CMD_MOVE, units: foes, x: fx(hx + 300), y: fx(hy) }]);
+    expect(w.sOcc[house]).toBe(0);
+    play(w, st, 4);
+    expect(sieging()).toBe(0);
+    const hp = w.sHp[house];
+    play(w, st, 30);
+    expect(w.sHp[house]).toBe(hp);
+    expect(sieging()).toBe(0);
   }, 60000);
 });
 

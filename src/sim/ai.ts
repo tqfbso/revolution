@@ -204,7 +204,7 @@ interface Tuning {
   /** Trucks it sends along behind an attack, so the army is still in supply when it arrives. */
   wagons: number;
   /**
-   * The air (decision 105): attack helicopters it keeps (it builds a helipad for them),
+   * The air (decision 106): attack helicopters it keeps (it builds a helipad for them),
    * paratroop squads it trains for one drop (0 = none), the first tick it drops them and
    * the ticks between two drops.
    */
@@ -1056,6 +1056,13 @@ export function perceive(ai: Ai, w: World): void {
   for (let s = 0; s < map.structCount; s++) {
     if (w.sTeam[s] === NO_TEAM || w.sTeam[s] === ai.team || ai.known[s] !== 0) continue;
     if (watched[square(structX(map, s), structY(map, s))] !== 0) ai.known[s] = 1;
+  }
+  // A house it took to be held is remembered as held for three minutes. Once the last man
+  // in it is dead or gone and it has eyes on the place, it knows better: it used to go on
+  // shelling the empty house until it fell down or the three minutes were up.
+  for (let s = 0; s < map.structCount; s++) {
+    if (ai.occupied[s] <= tick || w.sOcc[s] !== 0) continue;
+    if (watched[square(structX(map, s), structY(map, s))] !== 0) ai.occupied[s] = 0;
   }
   // Enemy field works: the ones standing where it has looked lately.
   let works = 0;
@@ -2849,6 +2856,7 @@ function assault(
       pointD = d;
     }
   }
+  ceaseFire(w, out, units, point);
   let done = false;
   if (obj.kind === OBJ_TOWN) {
     const owner = w.townOwner[obj.id];
@@ -3012,6 +3020,27 @@ export function press(
   if (shell.length > 0) out.push({ type: CMD_ATTACK_STRUCTURE, units: shell, structure: point });
   order(out, CMD_ATTACK_MOVE, line, tx, ty);
   follow(ai, w, out, units, cx, cy);
+}
+
+/**
+ * Tanks, guns and engineers told to bring a house down keep at it until it falls: the
+ * order has no end of its own. So whoever is working on a house that is not the strong
+ * point any more (`point`, or -1 for none) is stopped here, and the next orders pick him
+ * up. With `every`, base buildings too: for troops that have been sent somewhere else.
+ */
+export function ceaseFire(
+  w: World,
+  out: Command[],
+  units: readonly number[],
+  point: number,
+  every = false,
+): void {
+  for (const i of units) {
+    if ((w.flags[i] & FLAG_SIEGE) === 0) continue;
+    const s = w.orderStruct[i];
+    if (s === point || (!every && w.map.sKind[s] !== S_BUILDING)) continue;
+    out.push({ type: CMD_MOVE, units: [i], x: w.posX[i], y: w.posY[i] });
+  }
 }
 
 /** Numbers for tests and for watching the AI play: what it has and what it is doing. */

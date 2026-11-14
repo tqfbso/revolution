@@ -1898,7 +1898,26 @@ Ruins and gutted shells are still positions, and fortifying still takes a quarte
 buildings are marked or worse and 21 levelled (19 and 5 after 095); on seed 2, 117 of 552
 after 30 minutes. Golden hash 476858902.
 
-## 105. Helicopters limited by their pads, paratroops dropped from a reserve (2026-11-14)
+## 105. Guns stop shelling a house once nobody is left in it (2026-11-14)
+
+Fabio: on a commander's attack on a town, tanks sometimes go on shooting at buildings
+with nobody there, until they are given another order.
+
+Two causes. A house seen with enemy troops in it was remembered as held for three minutes
+after the last sighting, whatever became of them, and stayed a strong point of the town
+for that long. And the order to bring a house down has no end of its own: once the house
+left the list of strong points, the staff simply stopped looking at the tanks working on
+it, so they fired until it fell (reproduced: four tanks of four still shelling an empty
+house 30 seconds on). When the town was declared taken in that state the staff never
+looked at them again.
+
+Now the computer and the staff forget a house the moment it is empty and they have eyes
+on it (`perceive`), and whoever is still shelling a house that is not the current strong
+point is stopped (`ceaseFire` in `src/sim/ai.ts`, called by the computer's assault, the
+staff's attack, and on every new mission). Base buildings are still shelled empty or not.
+Golden hash unchanged.
+
+## 106. Helicopters limited by their pads, paratroops dropped from a reserve (2026-11-14)
 
 Roadmap item 6. Fabio's brief: helicopters capped by helipads at about three a pad, "not
 necessarily expensive but limited by landing space", in a transport and an attack role;
