@@ -4,6 +4,7 @@ import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS, M_NONE } from './sim/world';
 import { ALERT_NOTE, Alerts } from './client/alerts';
+import { SAY_URGENT } from './client/voice';
 import { Cameras } from './client/cameras';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
@@ -282,9 +283,14 @@ async function start(): Promise<void> {
     {
       lookAt,
       ask: (text, done) => input.ask(text, done),
-      alert: (text, x, z) => alerts?.report(ALERT_NOTE, x, z, text, performance.now() / 1000),
+      report: (r, mine) => {
+        // A partner's commander: only what the whole team should see, and not out loud.
+        if (!mine && r.level !== SAY_URGENT) return;
+        alerts?.commander(r.text, r.x, r.z, r.level, r.bad, mine, performance.now() / 1000);
+      },
     },
   );
+  board.shared = coop !== null;
   production.postings = () => board.postings();
   const boardBtn = document.getElementById('missions-toggle');
   boardBtn?.addEventListener('click', () => {

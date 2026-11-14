@@ -140,6 +140,8 @@ export interface Post {
   gather: number;
   /** Houses its infantry holds at the objective, the nearest first. */
   houses: number[];
+  /** New orders this think: those on their way to the body turn round at once. */
+  turn: boolean;
 }
 
 export interface Staff {
@@ -148,6 +150,8 @@ export interface Staff {
   posts: Post[];
   /** Per unit: the commander whose body it has joined, or -1. */
   body: Int8Array;
+  /** Per commander: the mission counter (World.cSeq) the staff last acted on. */
+  heard: Int32Array;
 }
 
 export function createStaff(team: number, seed = 1): Staff {
@@ -173,14 +177,28 @@ export function createStaff(team: number, seed = 1): Staff {
       regroup: false,
       gather: -1,
       houses: [],
+      turn: false,
     });
   }
-  return { team, ai: createAi(team, 'hard', seed), posts, body: new Int8Array(MAX_UNITS).fill(-1) };
+  return {
+    team,
+    ai: createAi(team, 'hard', seed),
+    posts,
+    body: new Int8Array(MAX_UNITS).fill(-1),
+    heard: new Int32Array(MAX_COMMANDERS),
+  };
 }
 
 /** The staff's commands for this tick, appended to `out`. Call once per tick, before step(). */
 export function staffThink(st: Staff, w: World, out: Command[]): void {
-  if ((w.tick + 3 * st.team) % PERIOD !== 0) return;
+  // A commander with new orders does not wait for the staff's next think (up to a second
+  // away): its staff sits down the tick the order arrives, for that commander alone.
+  const due = (w.tick + 3 * st.team) % PERIOD === 0;
+  let told = 0;
+  for (let c = 0; c < MAX_COMMANDERS; c++) {
+    if (st.heard[c] !== w.cSeq[st.team * MAX_COMMANDERS + c]) told |= 1 << c;
+  }
+  if (!due && told === 0) return;
   const ai = st.ai;
   if (!ai.ready && !setUp(ai, w)) return;
   let any = false;
@@ -210,7 +228,10 @@ export function staffThink(st: Staff, w: World, out: Command[]): void {
     return;
   }
   perceive(ai, w);
-  for (let c = 0; c < MAX_COMMANDERS; c++) run(st, w, out, c);
+  for (let c = 0; c < MAX_COMMANDERS; c++) {
+    st.heard[c] = w.cSeq[st.team * MAX_COMMANDERS + c];
+    if (due || (told & (1 << c)) !== 0) run(st, w, out, c);
+  }
 }
 
 function stoodDown(p: Post): void {
@@ -352,6 +373,8 @@ function core(st: Staff, w: World, p: Post): void {
 function rally(st: Staff, w: World, out: Command[], c: number, cx: number, cy: number): void {
   const p = st.posts[c];
   const f = p.f;
+  const turn = p.turn;
+  p.turn = false;
   if (p.joining.length === 0) return;
   const k = st.team * MAX_COMMANDERS + c;
   const mission = w.cMission[k];
@@ -391,7 +414,11 @@ function rally(st: Staff, w: World, out: Command[], c: number, cx: number, cy: n
     const d = dist(w.posX[i], w.posY[i], x, y);
     if (d < fx(45) && near) st.body[i] = c;
     else if (inner > 0 && dist(w.posX[i], w.posY[i], ox, oy) < inner) continue;
-    else if ((w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET && d > fx(30))
+    else if (
+      d > fx(30) &&
+      // Under new orders even those on the move turn round: they were going somewhere else.
+      (turn || ((w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET))
+    )
       go.push(i);
   }
   order(out, mission === M_MOVE ? CMD_MOVE : CMD_ATTACK_MOVE, go, x, y);
@@ -417,6 +444,7 @@ function begin(
   const tx = w.cX[k];
   const ty = w.cY[k];
   p.seq = w.cSeq[k];
+  p.turn = true;
   p.regroup = false;
   p.gather = -1;
   f.launch = power;
@@ -483,8 +511,62 @@ function begin(
     return;
   }
   f.state = F_MARCH;
-  const busy = d > fx(200) ? mount(w, out, f, units) : undefined;
+  // Nobody walks to a carrier and waits for it to fill under fire: it goes as it stands.
+  const contact = units.some((i) => w.attack[i] !== NO_TARGET);
+  const busy = d > fx(200) && !contact ? mount(w, out, f, units) : undefined;
   marchOrders(ai, w, out, f, units, true, busy);
+  disengage(w, out, units, f.wps[0], f.wps[1], busy);
+}
+
+/** How far troops in a fight walk without stopping to shoot when they are ordered elsewhere. */
+const BREAK_CONTACT = fx(70);
+
+/**
+ * New orders reach troops that are in a fight. On an attack-move they would stand and
+ * shoot it out first, which from the player's chair is a commander that does not answer.
+ * If any of them is shooting at an enemy that is not on the way to the new place, the line
+ * breaks contact: a plain move for the first stretch, after which the march picks it up
+ * as usual. Whoever has an enemy between himself and the place fights through, as before.
+ */
+function disengage(
+  w: World,
+  out: Command[],
+  units: readonly number[],
+  tx: number,
+  ty: number,
+  busy?: Set<number>,
+): void {
+  const go: number[] = [];
+  let sx = 0;
+  let sy = 0;
+  let behind = 0;
+  for (const i of units) {
+    if (!LINE[w.kind[i]] || busy?.has(i)) continue;
+    const e = w.attack[i];
+    const d = dist(w.posX[i], w.posY[i], tx, ty);
+    if (d < fx(50)) continue;
+    if (e !== NO_TARGET) {
+      if (dist(w.posX[e], w.posY[e], tx, ty) < d) continue;
+      behind++;
+    }
+    // Those not shooting this instant go the same way: left on an attack-move they
+    // would turn back for the first enemy that shows itself behind them.
+    go.push(i);
+    sx += w.posX[i];
+    sy += w.posY[i];
+  }
+  if (behind === 0) return;
+  if (go.length === 0) return;
+  sx = Math.trunc(sx / go.length);
+  sy = Math.trunc(sy / go.length);
+  const d = dist(sx, sy, tx, ty);
+  if (d <= BREAK_CONTACT) {
+    order(out, CMD_MOVE, go, tx, ty);
+    return;
+  }
+  const x = sx + Math.trunc(((tx - sx) * BREAK_CONTACT) / d);
+  const y = sy + Math.trunc(((ty - sy) * BREAK_CONTACT) / d);
+  order(out, CMD_MOVE, go, ...ground(w.map, x, y));
 }
 
 /** A point in or at the edge of a town means the town; anything else is just the point. */

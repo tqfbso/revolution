@@ -1680,3 +1680,54 @@ most of the new income comes from ground held, so territory is worth fighting fo
 **Checked:** the computer on normal still stands at 320 army points from minute 13 and
 attacks at minute 17 (city, seed 1): it was never short of supplies, the players were.
 Golden hash 1160432643 (the stockpiles of the test's map are larger).
+
+## 099. Commanders report every step of a mission, and obey a new order at once (2026-11-14)
+
+Fabio runs commanders by ear: "I like the voice feedback once the commander reached its
+objective, lets me manage without looking", but it came only some of the time; and
+commanders were "slow to respond to orders".
+
+**Why the voice was patchy.** Four causes, all on the client.
+
+- Only two events were ever reported: an attack taking its objective and a Move arriving.
+  Hold, Defend, Patrol and Screen never said they were in position.
+- A commander's line was a note like any other, and a note within 6 seconds of another in
+  the same 160 m square was thrown away, banner and all. "Building taken" during the
+  storming of a town did that to "Alpha has taken Northgate" as a rule.
+- The voice dropped any line within 3 seconds of the last one, so two commanders arriving
+  together, or one arriving during an attack warning, lost the second line.
+- The reports were one chain of else-ifs: one line per commander per snapshot.
+
+**Now.** `src/client/reports.ts` works every commander's lines out the same way from the
+snapshot: order received ("Alpha attacking Northgate, D4"), forming up outside, going in,
+in position (every mission), has taken, has held, in contact / under attack with the grid
+square, taking heavy losses (below 60% of its best strength), down to its last troops
+(30%), falling back, regrouping, needs reinforcements, back up to strength, resuming, no
+troops left. Each names the commander and the place with its grid square. A commander
+stays off the air for 4 seconds after a line unless the next is urgent, and repeats a
+kind of line only after 30 to 60 seconds. Commander lines bypass the note rationing
+(`AlertBook.add`). `src/client/voice.ts` is a queue for the browser's voice: lines wait
+their turn, urgent first, and go stale (25, 12, 6 seconds by level) instead of piling up;
+at most 2 acknowledgements or 4 normal lines wait; a voice stuck "speaking" for 12
+seconds is reset. Attack warnings are urgent but only worth saying within 4 seconds.
+
+Co-op: the game does not record who gave an order, so each client remembers the orders
+it sent; a change of orders it did not send within 6 seconds is somebody else's. A
+player hears their own commanders; of a partner's, only the urgent lines are shown, and
+silently. "Reinforcements arrived" is not reported as such: the staff counts troops in
+when they are assigned, so the line is "back up to strength".
+
+**Why orders were slow.** Measured with 50 units: quiet, nine in ten were under way 3.5 s
+after the order; in a fight with the enemy not on the way to the new place, 20 to 42 s,
+and some walked toward the enemy first. Causes in the staff: it thought once a second;
+the march is an attack-move, so troops in contact stood and shot it out before going;
+squads were sent to mount carriers under fire and both waited; troops still on their way
+to the body kept walking to the old place until they stopped.
+
+**Now** (`src/sim/staff.ts`): the staff thinks for a commander on the tick its order
+arrives (`Staff.heard`); if any of the line is shooting at an enemy that is not nearer
+the new place than itself, the line makes the first 70 m as a plain move (`disengage`),
+then the march picks it up; an enemy on the way is still fought through; nobody mounts
+under fire; joiners turn round at once (`Post.turn`). Same test: under 3 s in every case.
+Golden hash unchanged (the computer player does not use the staff); the two-page co-op
+run stays in sync.
