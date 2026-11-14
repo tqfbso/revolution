@@ -27,6 +27,7 @@ import {
   dist,
   expect,
   follow,
+  ceaseFire,
   ground,
   marchOrders,
   mount,
@@ -445,6 +446,8 @@ function begin(
   const ty = w.cY[k];
   p.seq = w.cSeq[k];
   p.turn = true;
+  // Guns still shelling a house for the last mission are not left at it.
+  ceaseFire(w, out, units, -1, true);
   p.regroup = false;
   p.gather = -1;
   f.launch = power;
@@ -899,6 +902,7 @@ function attack(
       pointD = d;
     }
   }
+  ceaseFire(w, out, units, point);
   const ours = obj.kind !== OBJ_TOWN || w.townOwner[obj.id] === ai.team;
   if (f.quiet >= 6 && points.length === 0 && ours) {
     // Taken. It stays and holds the place until told otherwise.
