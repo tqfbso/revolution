@@ -2229,3 +2229,31 @@ client's "my army" (`ME`, `UnitView.playerTeam`) is set from the seat instead of
 the worker creates no AI and a second staff. Nothing in the sim changed: golden hash
 unchanged. `tests/versus.test.ts`: equal starts, blue's commanders, lockstep with orders
 from both sides.
+
+## 115. Graphics polish 3: a city that is lit at night, and a river that reads as water (2026-11-14)
+
+Fabio asked for another layer of polish with the overnight run. What was already there
+(bloom, grade, ambient occlusion, cloud shadows, fire glow, rubble, baked materials) was
+left alone; this adds what the screenshots showed was missing.
+
+- **Lit windows at night.** One window in eight has a light on behind it, warm and each a
+  little different. It costs no geometry and no new vertex attribute: the mark is carried
+  in the window's gloss (0.9 instead of 1), and the building material adds an emissive
+  term at night. When a house is damaged or brought down its windows are rebuilt as holes,
+  so its lights go out with it.
+- **Street lamps at night.** Two lamps in three burn: a pool of warm light on the pavement
+  and a glow at the head. Two flat additive quads a lamp, one instanced mesh for the whole
+  map, no real lights, so the cost does not grow with what is being lit.
+- **Bloom at night on Normal as well as High**, and stronger: at night lamps, windows,
+  flares, tracers and fires are the picture. The frame governor can still switch the whole
+  post pipeline off if the frame rate needs it.
+- **Softer shadow edges** (PCF soft, a small radius by day and a larger one by moonlight).
+- **The river.** From the camera's height it was a dark ditch. The sky now lies on it,
+  more where the ripples tilt, so the surface moves and reads as water.
+
+Before and after: `/mnt/project-files/overnight-4/polish-*.png`. Client only: nothing in
+the sim changed. `?quality=low` gets none of it, as before.
+
+Left for a later pass, seen in the same screenshots: the river banks follow the map cells
+and so run in a zigzag; trees are still the simple low-poly crowns; large flat roofs are
+plain from above.

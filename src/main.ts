@@ -107,6 +107,8 @@ async function start(): Promise<void> {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = shadows;
+  // Shadow edges a little soft, as under a hazy sun (and softer still by moonlight).
+  if (quality !== 'low') renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   // `?time=night`: a night battle (decision 113). A moonlit night, not a black one: the
   // ground and the troops stay readable, and fire is what stands out.
@@ -134,12 +136,13 @@ async function start(): Promise<void> {
   sun.shadow.mapSize.set(shadowSize, shadowSize);
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
+  if (quality !== 'low') sun.shadow.radius = night ? 3 : 1.6;
   scene.add(sun, sun.target);
 
   // The same generator the sim worker runs: both derive the map from the seed.
   // You command the red army (team 0) and see what it sees. `?fog=0` lifts the fog,
   // `?control=all` lets you select and order every army.
-  const look = makeLook(quality, shadows);
+  const look = makeLook(quality, shadows, night);
   if (look.rich && params.get('bake') !== '0') {
     // The city's materials: drawn once by the graphics card, half a second at the most.
     const baked = await Promise.race([

@@ -374,7 +374,11 @@ export class Terrain {
     const m = new THREE.MeshStandardNodeMaterial({ metalness: 0, transparent: true });
     const deep = smoothstep(0, 2.2, depth);
     // Silt-laden in the shallows, dark green-brown in the channel, a pale line at the bank.
-    const body = mix(color(0x4a4d3a), color(0x18262a), deep);
+    // The sky lies on it: more of it where the ripples tilt toward the eye, so the surface
+    // moves, and the river reads as water from high above instead of as a dark ditch.
+    const sky = this.look.night ? color(0x1a2535) : color(0x8196a3);
+    const sheen = a.b.mul(b.b).mul(1.6).add(tilt.x.add(tilt.y).mul(0.35)).clamp(0, 1);
+    const body = mix(mix(color(0x4a4d3a), color(0x1c2f34), deep), sky, sheen.mul(0.34).add(0.08));
     const foam = float(1)
       .sub(smoothstep(0.02, 0.16, depth))
       .mul(a.b.add(b.b).mul(0.5).add(0.3));

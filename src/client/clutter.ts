@@ -3,7 +3,7 @@
 // off screen is culled. Cosmetic only: units walk through them, and they are taken away
 // where something is built.
 import * as THREE from 'three/webgpu';
-import { attribute, hash, instanceIndex } from 'three/tsl';
+import { attribute, hash, instanceIndex, smoothstep, uv, vec3 } from 'three/tsl';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MAP_SIZE } from '../sim/map';
 import type { Fog } from './fog';
@@ -250,6 +250,51 @@ export class Clutter {
       this.group.add(mesh);
       this.batches[Math.floor(key / P_KINDS)].push({ mesh, at, small: SMALL.has(kind) });
     }
+    if (look.night && look.rich) this.lightLamps(land.props, terrain, fog);
+  }
+
+  /**
+   * Night: two street lamps in three still burn. Each is a pool of light on the pavement
+   * and a glow at its head: two flat quads, additive, one instanced mesh for the whole map.
+   * No real lights, so a thousand lamps cost what a thousand quads cost.
+   */
+  private lightLamps(props: Prop[], terrain: Terrain, fog: Fog): void {
+    const lamps = props.filter(
+      (p, n) =>
+        p.kind === P_LAMP && n % 3 !== 0 && p.x > 0 && p.z > 0 && p.x < MAP_SIZE && p.z < MAP_SIZE,
+    );
+    if (lamps.length === 0) return;
+    const quad = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    const material = new THREE.MeshBasicNodeMaterial({ transparent: true });
+    const d = uv().sub(0.5).length().mul(2);
+    // Bright under the lamp, gone by the edge of the quad.
+    const fall = smoothstep(1, 0, d).pow(2);
+    const flicker = hash(instanceIndex).mul(0.25).add(0.85);
+    material.colorNode = vec3(1.0, 0.7, 0.36).mul(fall).mul(flicker).mul(0.42).mul(fog.shade());
+    material.opacityNode = fall;
+    material.blending = THREE.AdditiveBlending;
+    material.depthWrite = false;
+    material.fog = false;
+    const mesh = new THREE.InstancedMesh(quad, material, lamps.length * 2);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    lamps.forEach((p, n) => {
+      // The head hangs a metre out from the post, the way the post is turned.
+      const hx = p.x + Math.sin(p.rot) * 0.95 * p.scale;
+      const hz = p.z + Math.cos(p.rot) * 0.95 * p.scale;
+      const y = terrain.heightAt(p.x, p.z);
+      mesh.setMatrixAt(2 * n, m.compose(pos.set(hx, y + 0.12, hz), q, scale.set(13, 1, 13)));
+      mesh.setMatrixAt(
+        2 * n + 1,
+        m.compose(pos.set(hx, y + 4.62 * p.scale, hz), q, scale.set(1.5, 1, 1.5)),
+      );
+    });
+    mesh.computeBoundingSphere();
+    mesh.matrixAutoUpdate = false;
+    mesh.renderOrder = 1;
+    this.group.add(mesh);
   }
 
   /** Take away whatever stands within the rectangle (world units): something is built there. */
