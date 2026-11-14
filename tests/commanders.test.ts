@@ -29,7 +29,7 @@ import {
   staffThink,
   type Staff,
 } from '../src/sim/staff';
-import { KIND_IFV, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
+import { KIND_DRONE, KIND_IFV, KIND_INFANTRY, KIND_STRIKE, KIND_TANK } from '../src/sim/units';
 import {
   CF_AUTO,
   DEST_COMMANDER,
@@ -316,6 +316,34 @@ describe('sub-commanders: the staff', () => {
       hi = Math.max(hi, along);
     }
     expect((hi - lo) / 258 / fx(1)).toBeGreaterThan(100);
+  }, 60000);
+
+  // Fabio, 2026-11-14: drones given to a commander "keep moving weirdly, kind of back
+  // and forth". A body of nothing but drones was sent to the place by one rule and told
+  // to keep behind its own centre by another, for ever.
+  it('a commander of nothing but drones flies to the place and stays there', () => {
+    for (const kind of [KIND_STRIKE, KIND_DRONE]) {
+      for (const m of [M_ATTACK, M_HOLD, M_DEFEND]) {
+        const { w, st } = field();
+        const ids = add(w, [spawn(0, kind, 6, 300, 1024)]);
+        step(w, [{ type: CMD_ASSIGN, units: ids, slot: 0 }, mission(0, m, fx(550), fx(1024))]);
+        const i = ids[0];
+        let flown = 0;
+        let x = w.posX[i];
+        let y = w.posY[i];
+        play(w, st, 90, () => {
+          flown += Math.hypot(w.posX[i] - x, w.posY[i] - y);
+          x = w.posX[i];
+          y = w.posY[i];
+        });
+        expect(alive(w, ids)).toBe(6);
+        for (const j of ids) {
+          expect(Math.hypot(w.posX[j] - fx(550), w.posY[j] - fx(1024)) / fx(1)).toBeLessThan(40);
+        }
+        // 250 from where it started: it flew the distance about once, not seven times.
+        expect(flown / fx(1)).toBeLessThan(300);
+      }
+    }
   }, 60000);
 
   it('is deterministic: the same game twice gives the same world', () => {

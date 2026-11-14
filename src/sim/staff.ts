@@ -656,6 +656,7 @@ function attack(
   }
   p.status = ST_ATTACK;
   press(ai, w, out, f, units, cx, cy, points, point);
+  muster(w, out, units, obj.x, obj.y);
 }
 
 /** Hold a place: infantry into its houses, the rest of the line around it, guns behind. */
@@ -683,6 +684,23 @@ function station(
   );
   order(out, CMD_ATTACK_MOVE, rest, x, y);
   follow(ai, w, out, units, cx, cy);
+  muster(w, out, units, x, y);
+}
+
+/**
+ * A body with nothing that fights in the line (drones, guns, trucks) has no line to keep
+ * behind, so `follow` leaves it where it is: it is sent to the place itself, once, and
+ * stays there. Strike drones that are after a vehicle are left to it.
+ */
+function muster(w: World, out: Command[], units: readonly number[], x: number, y: number): void {
+  if (units.some((i) => LINE[w.kind[i]])) return;
+  const go = units.filter(
+    (i) =>
+      (w.flags[i] & (FLAG_MOVING | FLAG_BOMBARD)) === 0 &&
+      w.attack[i] === NO_TARGET &&
+      dist(w.posX[i], w.posY[i], x, y) > fx(30),
+  );
+  order(out, CMD_MOVE, go, x, y);
 }
 
 /**
@@ -731,6 +749,7 @@ function defend(
   );
   order(out, CMD_ATTACK_MOVE, mobile, Math.trunc(sx / n) << 4, Math.trunc(sy / n) << 4);
   follow(ai, w, out, units, cx, cy);
+  muster(w, out, units, obj.x, obj.y);
 }
 
 /** A screen: the troops strung out in a line through the point, across the way from home. */

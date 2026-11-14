@@ -2476,11 +2476,19 @@ export function follow(
   const mid: number[] = [];
   const rear: number[] = [];
   const strikes: number[] = [];
+  // With no line there is nothing to keep behind: `cx, cy` is then the centre of these
+  // very troops, and a place "behind" it moves away as fast as they close on it. They
+  // would creep off toward the staging area against whatever sent them forward (drones
+  // under a sub-commander flew back and forth). Whoever called places them; the strike
+  // drones still go for a vehicle worth one.
+  const led = units.some((i) => LINE[w.kind[i]]);
   for (const i of units) {
     const kind = w.kind[i];
     if (LINE[kind]) continue;
     if (kind === KIND_STRIKE) {
       if (w.attack[i] === NO_TARGET) strikes.push(i);
+    } else if (!led) {
+      continue;
     } else if (kind === KIND_ARTILLERY) {
       if ((w.flags[i] & (FLAG_BOMBARD | FLAG_SIEGE)) !== 0) continue;
       if (dist(w.posX[i], w.posY[i], bx, by) > fx(22)) rear.push(i);
@@ -2504,7 +2512,7 @@ export function follow(
     }
   }
   if (best >= 0) order(out, CMD_ATTACK_MOVE, strikes, w.posX[best], w.posY[best]);
-  else {
+  else if (led) {
     const far = strikes.filter((i) => dist(w.posX[i], w.posY[i], bx, by) > fx(22));
     order(out, CMD_MOVE, far, bx, by);
   }
