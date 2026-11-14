@@ -15,12 +15,14 @@ import { flatMap, generateMap } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import {
+  ST_ARRIVED,
   ST_ATTACK,
   ST_DEFEND,
   ST_FALLBACK,
   ST_GATHER,
   ST_HOLD,
   ST_MARCH,
+  ST_MOVE,
   ST_PATROL,
   ST_REGROUP,
   ST_SCREEN,
@@ -38,6 +40,7 @@ import {
   M_ATTACK,
   M_DEFEND,
   M_HOLD,
+  M_MOVE,
   M_PATROL,
   M_SCREEN,
   STATE_ALIVE,
@@ -212,6 +215,65 @@ describe('sub-commanders: the staff', () => {
     });
     expect(gathered).toBe(true);
     expect(up).toBeGreaterThanOrEqual(17);
+  }, 60000);
+
+  it('attack: closes up outside the town, out of sight of what is in it', () => {
+    const { w, st } = field();
+    const t = town(w, 'Westgate');
+    const ids = add(w, [spawn(0, KIND_IFV, 13, 300, 740), spawn(0, KIND_INFANTRY, 7, 215, 815)]);
+    step(w, [
+      { type: CMD_ASSIGN, units: ids, slot: 0 },
+      mission(0, M_ATTACK, w.map.townX[t], w.map.townY[t]),
+    ]);
+    let nearest = Infinity;
+    let waited = 0;
+    play(w, st, 300, () => {
+      const p = st.posts[0];
+      if (p.status !== ST_GATHER) return;
+      waited++;
+      for (const i of ids) {
+        if (w.carrier[i] >= 0 || (w.flags[i] & 1) !== 0) continue;
+        const d = Math.hypot(w.posX[i] - w.map.townX[t], w.posY[i] - w.map.townY[t]);
+        nearest = Math.min(nearest, d - w.map.townR[t]);
+      }
+    });
+    expect(waited).toBeGreaterThan(0);
+    // Nobody stands waiting within a tank's sight (44) of the edge of the town.
+    expect(nearest / fx(1)).toBeGreaterThan(44);
+    // And the wait is short: 20 seconds once half are up, not a minute.
+    expect(waited / TICK_RATE).toBeLessThan(45);
+  }, 60000);
+
+  it('move: goes to the place without stopping to fight, and stands there', () => {
+    const { w, st } = field();
+    const all = add(w, [
+      spawn(0, KIND_INFANTRY, 10, 250, 770),
+      spawn(0, KIND_TANK, 2, 262, 780),
+      // A picket beside the way: an attack would stop to deal with it.
+      spawn(1, KIND_INFANTRY, 2, 300, 700),
+    ]);
+    const ids = all.slice(0, 12);
+    step(w, [{ type: CMD_ASSIGN, units: ids, slot: 3 }, mission(3, M_MOVE, fx(360), fx(690))]);
+    const seen = new Set<number>();
+    let at = -1;
+    play(w, st, 150, () => {
+      const s = st.posts[3].status;
+      seen.add(s);
+      if (at < 0 && s === ST_ARRIVED) at = w.tick;
+    });
+    expect(seen.has(ST_MOVE)).toBe(true);
+    expect(st.posts[3].status).toBe(ST_ARRIVED);
+    expect(seen.has(ST_FALLBACK)).toBe(false);
+    // 135 away at a squad's pace: a march that stopped to fight would take far longer.
+    expect(at / TICK_RATE).toBeLessThan(100);
+    const there = ids.filter(
+      (i) =>
+        w.state[i] === STATE_ALIVE &&
+        w.inside[i] < 0 &&
+        Math.hypot(w.posX[i] - fx(360), w.posY[i] - fx(690)) < fx(60),
+    );
+    expect(there.length).toBeGreaterThanOrEqual(alive(w, ids) - 1);
+    expect(alive(w, ids)).toBeGreaterThanOrEqual(8);
   }, 60000);
 
   it('attack: breaks off against far too much, falls back and waits to be reinforced', () => {

@@ -74,7 +74,9 @@ export const M_HOLD = 2;
 export const M_DEFEND = 3;
 export const M_PATROL = 4;
 export const M_SCREEN = 5;
-export const MISSION_COUNT = 6;
+/** Go to a place and stand there: no fighting on the way, no houses, no falling back. */
+export const M_MOVE = 6;
+export const MISSION_COUNT = 7;
 /** Commander flag: losses are ordered again and sent to it by themselves. */
 export const CF_AUTO = 1;
 /** The most of one kind that can be on bulk order, or kept in the field, at once. */

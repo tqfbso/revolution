@@ -19,6 +19,7 @@ import { bakeSurfaces } from './client/surfaces';
 import { Clutter } from './client/clutter';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
+import { GridOverlay, gridRef } from './client/grid';
 import { Minimap } from './client/minimap';
 import { ProductionCentre } from './client/production';
 import { COMMANDER_NAMES, MissionBoard } from './client/missions';
@@ -294,6 +295,7 @@ async function start(): Promise<void> {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'KeyM') board.toggle();
     else if (e.code === 'KeyN') board.newFromSelection();
+    else if (e.code === 'KeyT' && !e.repeat) board.quickMove();
   });
   // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
   // default: the first playtest found normal hard to beat.
@@ -396,6 +398,32 @@ async function start(): Promise<void> {
       location.search = params.toString();
     });
   }
+  // The map grid on the battlefield (K, or the button): off until asked for, and it
+  // stays as you left it the next time you play.
+  const grid = new GridOverlay((x, z) => terrain.heightAt(x, z));
+  const gridBtn = document.getElementById('grid-toggle');
+  const showGrid = (on: boolean) => {
+    grid.show(on);
+    gridBtn?.classList.toggle('on', on);
+    try {
+      localStorage.setItem('revolution.grid', on ? '1' : '0');
+    } catch {
+      // Private browsing: it just is not remembered.
+    }
+  };
+  try {
+    if (localStorage.getItem('revolution.grid') === '1') showGrid(true);
+  } catch {
+    // As above.
+  }
+  gridBtn?.addEventListener('click', () => {
+    showGrid(!grid.shown);
+    gridBtn.blur();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyK' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey)
+      showGrid(!grid.shown);
+  });
   const minimap = new Minimap(
     document.getElementById('minimap') as HTMLCanvasElement,
     terrain.map,
@@ -450,6 +478,7 @@ async function start(): Promise<void> {
     effects.group,
     input.marker,
     card.group,
+    grid.group,
   );
   // Towns: who holds what, and what the held ones have paid so far.
   const townsEl = document.getElementById('towns');
@@ -655,14 +684,22 @@ async function start(): Promise<void> {
   if (coop) {
     // Z: point something out to your partner. It rings on their minimap and yours.
     const CYAN = [120, 225, 255];
-    coop.onMark = (x, z) => {
+    // With its grid square (and the town, if it is in one), so it can be said out loud.
+    const said = (x: number, z: number, who: string) => {
+      const place = board.place(x, z);
+      const text = `${who} ${gridRef(x, z)}${place.startsWith('grid ') ? '' : `, ${place}`}`;
+      alerts?.report(ALERT_NOTE, x, z, text, performance.now() / 1000);
+    };
+    coop.onMark = (x, z, from) => {
       minimap.ping(x, z, CYAN);
+      said(x, z, `Player ${from + 1} pings`);
     };
     window.addEventListener('keydown', (e) => {
       if (e.code !== 'KeyZ' || e.repeat || e.ctrlKey || e.metaKey) return;
       const g = input.pointerGround();
       if (!g) return;
       minimap.ping(g.x, g.z, CYAN);
+      said(g.x, g.z, 'You ping');
       coop.mark(g.x, g.z);
     });
   }
