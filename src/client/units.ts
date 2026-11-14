@@ -9,8 +9,13 @@ import {
   KIND_ATGM,
   KIND_COUNT,
   KIND_DRONE,
+  IS_DRONE,
   KIND_EW,
+  KIND_HELI,
   KIND_IFV,
+  KIND_LIFT,
+  KIND_PARA,
+  KIND_PLANE,
   KIND_INFANTRY,
   KIND_RECON,
   KIND_STRIKE,
@@ -69,6 +74,9 @@ import {
   buildTruck,
   buildReconDrone,
   buildStrikeDrone,
+  buildHelicopter,
+  buildTransportPlane,
+  box,
   buildInfantry,
   buildLauncher,
   buildTank,
@@ -130,6 +138,12 @@ interface SquadDraw {
 const IS_VEHICLE = KINDS.map((k) => k.turn > 0);
 const IS_AIR = KINDS.map((k) => k.cls === CLASS_AIR);
 const ALTITUDE = AIR_HEIGHT / 1024;
+/** The transport plane comes over well above the helicopters and the drones. */
+const PLANE_ALTITUDE = ALTITUDE + 9;
+const IS_HELI = KINDS.map((_, k) => k === KIND_HELI || k === KIND_LIFT);
+/** Seconds a paratroop squad hangs under its canopy, and how high it starts. */
+const CHUTE_SECONDS = 3.2;
+const CHUTE_HEIGHT = 15;
 /**
  * How far each type lifts the fog, in cells: its sight in the sim plus a little, negative
  * for drones, which look straight down past houses and hills.
@@ -201,6 +215,7 @@ export class UnitView {
   /** Latest per-unit type, hull heading and passengers from the sim. */
   readonly kind = new Uint8Array(MAX_UNITS);
   readonly load = new Uint8Array(MAX_UNITS);
+  private readonly shots = new Uint8Array(MAX_UNITS);
   /** Per unit: job | stance, see TASK_* in the protocol. */
   readonly task = new Uint8Array(MAX_UNITS);
   /** Per unit: the sub-commander it answers to, or -1. */
@@ -208,6 +223,9 @@ export class UnitView {
   private readonly vehicles: (VehicleDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
+  private readonly chutes: Batch;
+  /** When each paratroop squad left the plane. */
+  private readonly dropAt = new Float64Array(MAX_UNITS).fill(-1e9);
   private readonly jamRings: Batch;
   private readonly icons = new Icons(MAX_UNITS * 2);
   /** Draw a pennant over troops that answer to a sub-commander. */
@@ -275,6 +293,14 @@ export class UnitView {
     this.vehicles[KIND_TRUCK] = vehicle(buildTruck(), MAX_UNITS >> 4);
     this.vehicles[KIND_DRONE] = vehicle(buildReconDrone(), MAX_UNITS >> 2);
     this.vehicles[KIND_STRIKE] = vehicle(buildStrikeDrone(), MAX_UNITS >> 1);
+    this.vehicles[KIND_HELI] = vehicle(buildHelicopter(true), 128);
+    this.vehicles[KIND_LIFT] = vehicle(buildHelicopter(false), 128);
+    this.vehicles[KIND_PLANE] = vehicle(buildTransportPlane(), 32);
+    this.chutes = batch(
+      box(2.6, 0.9, 2.6, { at: [0, 0, 0], top: [0.45, 0.45], color: 0xa9ab98, team: 0.06 }),
+      256,
+      0,
+    );
     const infantry = buildInfantry();
     this.soldiers = new Soldiers((g, cap, lod) => batch(g, cap, lod, true));
     this.squads[KIND_INFANTRY] = {
@@ -365,6 +391,17 @@ export class UnitView {
         this.moving[i] = 0;
         continue;
       }
+      if (
+        s.kind[i] === KIND_PARA &&
+        (s.info[i] & INFO_CARRIED) === 0 &&
+        (this.info[i] & INFO_CARRIED) !== 0 &&
+        wasAlive
+      ) {
+        // Out of the plane: it comes down under a canopy from here.
+        this.dropAt[i] = now / 1000;
+        prev[2 * i] = curr[2 * i];
+        prev[2 * i + 1] = curr[2 * i + 1];
+      }
       if (!wasAlive) {
         // New unit (or a reused slot): do not interpolate from wherever the slot was before.
         this.gen[i]++;
@@ -405,7 +442,7 @@ export class UnitView {
         n,
         (id) => this.isMine(id),
         // A jammed drone sends nothing back.
-        (id) => (IS_AIR[this.kind[id]] && this.load[id] > 0 ? 0 : FOG_SIGHT[this.kind[id]]),
+        (id) => (IS_DRONE[this.kind[id]] && this.load[id] > 0 ? 0 : FOG_SIGHT[this.kind[id]]),
       );
     }
     // Vehicles wear the ground they drive over (where the player can see it happen): a
@@ -435,7 +472,7 @@ export class UnitView {
     const x = this.renderPos[3 * a];
     const z = this.renderPos[3 * a + 2];
     const snd =
-      kind === KIND_ATGM || kind === KIND_STRIKE
+      kind === KIND_ATGM || kind === KIND_STRIKE || kind === KIND_HELI
         ? SND_MISSILE
         : kind === KIND_IFV || kind === KIND_AD
           ? SND_AUTOCANNON
@@ -605,7 +642,8 @@ export class UnitView {
         this.shoot(a, ax, ay, az, pos[3 * b], by, pos[3 * b + 2]);
       } else if (ev[e] === EV_DEATH) {
         this.diedAt[a] = seconds;
-        const air = IS_AIR[this.kind[a]];
+        // A drone just drops; a helicopter or a plane goes up like any vehicle.
+        const air = IS_DRONE[this.kind[a]];
         if (veh && !air) {
           this.scars.add(ax, az, 2.3, true);
           this.terrain.stamp(ax, az, 2.6, 70);
@@ -635,6 +673,13 @@ export class UnitView {
     if (kind === KIND_STRIKE) {
       // The drone dives into its target.
       fx.missile(ax, ay, az, bx, by, bz);
+      return;
+    }
+    if (kind === KIND_HELI) {
+      // Rockets from the pods under the stub wings, one side then the other.
+      const d = Math.hypot(bx - ax, bz - az) || 1;
+      const side = (this.shots[a]++ & 1) === 0 ? 0.8 : -0.8;
+      fx.missile(ax + ((bz - az) / d) * side, ay - 0.3, az - ((bx - ax) / d) * side, bx, by, bz);
       return;
     }
     if (!veh) {
@@ -679,7 +724,8 @@ export class UnitView {
 
   /** A living unit of the player's army. */
   isMine(id: number): boolean {
-    return this.isAlive(id) && this.teamOf(id) === this.playerTeam;
+    // The transport plane flies itself: nobody selects it or gives it orders.
+    return this.isAlive(id) && this.teamOf(id) === this.playerTeam && this.kind[id] !== KIND_PLANE;
   }
 
   /** A living enemy unit that is drawn this frame (so the player can see it), outside buildings. */
@@ -775,8 +821,18 @@ export class UnitView {
       const x = prev[2 * i] + (curr[2 * i] - prev[2 * i]) * alpha;
       const z = prev[2 * i + 1] + (curr[2 * i + 1] - prev[2 * i + 1]) * alpha;
       const flying = IS_AIR[this.kind[i]];
+      const kindNow = this.kind[i];
+      // Coming down under a canopy.
+      const fall =
+        kindNow === KIND_PARA
+          ? Math.max(0, 1 - (seconds - this.dropAt[i]) / CHUTE_SECONDS) * CHUTE_HEIGHT
+          : 0;
       const y =
-        this.terrain.heightAt(x, z) + (flying ? ALTITUDE + Math.sin(seconds * 1.3 + i) * 0.3 : 0);
+        this.terrain.heightAt(x, z) +
+        fall +
+        (flying
+          ? (kindNow === KIND_PLANE ? PLANE_ALTITUDE : ALTITUDE) + Math.sin(seconds * 1.3 + i) * 0.3
+          : 0);
       pos[3 * i] = x;
       pos[3 * i + 1] = y;
       pos[3 * i + 2] = z;
@@ -828,6 +884,8 @@ export class UnitView {
         }
       }
 
+      // Rotors turn, whatever the helicopter is doing.
+      if (alive && IS_HELI[kindNow]) this.turret[i] = (seconds * 19 + i) % (Math.PI * 2);
       let visible = true;
       for (let p = 0; p < 6; p++) {
         const pl = planes[p];
@@ -903,7 +961,7 @@ export class UnitView {
       }
       if (veh) {
         // A jammed drone flickers: its link is gone.
-        const jammedNow = flying && alive && this.load[i] > 0;
+        const jammedNow = IS_DRONE[kindNow] && alive && this.load[i] > 0;
         const burn =
           (i % SEEDS) +
           BURN_BASE +
@@ -937,6 +995,9 @@ export class UnitView {
         if (lod === 2) {
           squad.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], (i % SEEDS) + BURN_BASE);
         } else {
+          if (fall > 0) {
+            this.chutes.put(x, y + 3.1, z, sin, cos, 1, team[0], team[1], team[2], BURN_BASE);
+          }
           // Men drop out of the squad as it loses health.
           const figures = squad.figures;
           const men = Math.ceil((this.hp[i] * figures.length) / 255);
@@ -961,7 +1022,7 @@ export class UnitView {
             const f = figures[k];
             const sx = x + f.x * cos + f.z * sin;
             const sz = z - f.x * sin + f.z * cos;
-            const sy = this.terrain.heightAt(sx, sz);
+            const sy = this.terrain.heightAt(sx, sz) + fall;
             const seed = ((i + k * 5) % SEEDS) + BURN_BASE;
             if (f.batch) {
               f.batch[lod].put(sx, sy, sz, fs, fc, 1, team[0], team[1], team[2], seed);

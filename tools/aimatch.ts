@@ -59,6 +59,14 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
     break;
   }
 }
+const air = [0, 1].map((t) => {
+  const n = [0, 0, 0, 0];
+  for (let i = 0; i < w.count; i++) {
+    if (w.state[i] === 1 && w.team[i] === t && w.kind[i] >= 12) n[w.kind[i] - 12]++;
+  }
+  return `t${t} helis ${n[0]}+${n[1]} of ${w.heliCap[t]}, paras ${n[2]} down ${w.paraReserve[t]} waiting`;
+});
+console.log(`air: ${air.join('; ')}`);
 console.log(
   `civilians ${w.civCount}: killed ${Array.from(w.civKilled).join('/')} escaped ${w.civEscaped} home ${w.civState.filter((s) => s === 1).length}`,
 );

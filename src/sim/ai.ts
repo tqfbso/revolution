@@ -25,6 +25,7 @@ import {
   CMD_LOAD,
   CMD_MOVE,
   CMD_OCCUPY,
+  CMD_PARADROP,
   CMD_RALLY,
   CMD_RESEARCH,
   CMD_TRAIN,
@@ -37,6 +38,7 @@ import {
   B_BARRACKS,
   B_DEPOT,
   B_DRONES,
+  B_HELIPAD,
   B_HQ,
   B_WORKS,
   MAX_TIER,
@@ -94,7 +96,12 @@ import {
   KIND_ENGINEER,
   KIND_EW,
   KIND_IFV,
+  KIND_HELI,
   KIND_INFANTRY,
+  KIND_LIFT,
+  KIND_PARA,
+  KIND_PLANE,
+  PARA_PLANE_LOAD,
   KIND_RECON,
   KIND_STRIKE,
   KIND_TANK,
@@ -196,6 +203,15 @@ interface Tuning {
   sulk: number;
   /** Trucks it sends along behind an attack, so the army is still in supply when it arrives. */
   wagons: number;
+  /**
+   * The air (decision 106): attack helicopters it keeps (it builds a helipad for them),
+   * paratroop squads it trains for one drop (0 = none), the first tick it drops them and
+   * the ticks between two drops.
+   */
+  helis: number;
+  paras: number;
+  dropFrom: number;
+  dropEvery: number;
 }
 
 export const MINUTE = 60 * TICK_RATE;
@@ -237,6 +253,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     focus: false,
     sulk: 60 * MINUTE,
     wagons: 0,
+    helis: 0,
+    paras: 0,
+    dropFrom: 0,
+    dropEvery: 0,
   },
   // Decision 070: Fabio found this level too hard. It now keeps a small army, holds only
   // its gate town and one more until it has attacked once, attacks late with what its
@@ -278,6 +298,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     focus: false,
     sulk: 20 * MINUTE,
     wagons: 1,
+    helis: 0,
+    paras: 0,
+    dropFrom: 0,
+    dropEvery: 0,
   },
   // Decision 096: Fabio's group found this level far too hard. It had been the computer at
   // full stretch (an army at the 800 point cap by minute 20, seven times easy's), which left
@@ -318,6 +342,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     focus: true,
     sulk: 6 * MINUTE,
     wagons: 2,
+    helis: 2,
+    paras: 4,
+    dropFrom: 15 * MINUTE,
+    dropEvery: 6 * MINUTE,
   },
   hard: {
     period: 20,
@@ -353,6 +381,10 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     focus: true,
     sulk: 0,
     wagons: 3,
+    helis: 3,
+    paras: 8,
+    dropFrom: 9 * MINUTE,
+    dropEvery: 4 * MINUTE,
   },
 };
 
@@ -362,12 +394,12 @@ const CD = MAP_SIZE >> 4;
 const CC = CD * CD;
 
 /** What a unit of each type is worth in a fight, roughly. Strength is this times health. */
-export const POWER = [30, 8, 12, 16, 20, 2, 1, 10, 4, 2, 0, 6];
+export const POWER = [30, 8, 12, 16, 20, 2, 1, 10, 4, 2, 0, 6, 24, 2, 11, 0];
 /** Units that form the line of an attack; the rest follow behind it. */
 export const LINE = KINDS.map(
   (k, i) => k.cls !== CLASS_AIR && !k.indirect && k.damage.some((d) => d > 0) && i !== KIND_TRUCK,
 );
-export const FOOT = (k: number) => k === KIND_INFANTRY || k === KIND_ATGM;
+export const FOOT = (k: number) => k === KIND_INFANTRY || k === KIND_ATGM || k === KIND_PARA;
 
 const R_NONE = -1;
 const R_RESERVE = 0;
@@ -380,6 +412,8 @@ const R_JOIN = 4;
 const R_SAPPER = 5;
 /** A truck that follows the army instead of hauling: its supply line. */
 const R_SUPPLY = 6;
+/** Paratroops: on the ground behind the enemy's lines, with an objective of their own. */
+const R_AIRBORNE = 7;
 /** Skirmishing party k: R_PROBE + k (see Tuning.probes). Above every town's garrison. */
 const R_PROBE = 100;
 /** The most skirmishing parties any level keeps. They are forces 2 and up. */
@@ -538,6 +572,11 @@ export interface Ai {
   /** Its carriers with squads aboard, and the strength riding with the army and the raid. */
   loaded: number[];
   aboard: number[];
+  /** Its paratroops on the ground, where they are to go, and the tick of its last drop. */
+  airborne: number[];
+  dropX: number;
+  dropY: number;
+  lastDrop: number;
   /** Attacks it has launched over the middle of the map. */
   attacks: number;
   /** One line on what it is up to, for tests and the debug overlay. */
@@ -627,6 +666,10 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     joining: [],
     scouts: [],
     sappers: [],
+    airborne: [],
+    dropX: 0,
+    dropY: 0,
+    lastDrop: 0,
     wagons: [],
     garr: [],
     forces: [
@@ -911,6 +954,7 @@ export function perceive(ai: Ai, w: World): void {
   ai.joining.length = 0;
   ai.scouts.length = 0;
   ai.sappers.length = 0;
+  ai.airborne.length = 0;
   for (const m of ai.members) m.length = 0;
   ai.loaded.length = 0;
   ai.aboard.fill(0);
@@ -923,6 +967,8 @@ export function perceive(ai: Ai, w: World): void {
     }
     const kind = w.kind[i];
     ai.have[kind]++;
+    // The transport plane flies itself.
+    if (kind === KIND_PLANE) continue;
     eyes[square(w.posX[i], w.posY[i])] = 1;
     if (kind === KIND_TRUCK) {
       if (ai.role[i] === R_SUPPLY) ai.wagons.push(i);
@@ -953,6 +999,7 @@ export function perceive(ai: Ai, w: World): void {
     else if (role === R_SCOUT) ai.scouts.push(i);
     else if (role === R_JOIN) ai.joining.push(i);
     else if (role === R_SAPPER) ai.sappers.push(i);
+    else if (role === R_AIRBORNE) ai.airborne.push(i);
     else if (role - R_TOWN < ai.garr.length) ai.garr[role - R_TOWN].push(i);
     else ai.role[i] = R_NONE;
   }
@@ -1146,7 +1193,8 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     }
     if (BUILDINGS[type].dropOff) drops.push(s);
     if (w.sHp[s] * 10 < map.sMaxHp[s] * 6) hurt.push(s);
-    if (type !== B_HQ && type !== B_DEPOT && w.sQueueLen[s] === 0) busy = false;
+    if (type !== B_HQ && type !== B_DEPOT && type !== B_HELIPAD && w.sQueueLen[s] === 0)
+      busy = false;
     for (let q = 0; q < w.sQueueLen[s]; q++) {
       const item = w.sQueue[s * QUEUE_MAX + q];
       if (item === TIER_ITEM) researching = true;
@@ -1341,6 +1389,8 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   } else if (count[B_WORKS] === 0 && ai.trucks.length >= 7) type = B_WORKS;
   else if (w.tier[team] >= 2 && count[B_DRONES] === 0) type = B_DRONES;
   else if (count[B_BARRACKS] < 2 && minute >= 4 && factories < tune.factories) type = B_BARRACKS;
+  else if (tune.helis > 0 && count[B_HELIPAD] === 0 && count[B_DRONES] > 0 && minute >= 10)
+    type = B_HELIPAD;
   else if (factories < tune.factories && busy && w.supplies[team] >= 500) {
     // More of whatever it can keep fed: a motor pool only where there is fuel for it.
     type = count[B_WORKS] <= count[B_BARRACKS] && w.fuel[team] >= 250 ? B_WORKS : B_BARRACKS;
@@ -1418,7 +1468,13 @@ function wantedMix(ai: Ai, w: World): void {
   const foe = ai.foeMix;
   const armour = 2 * foe[KIND_TANK] + foe[KIND_IFV] + foe[KIND_ARTILLERY] + foe[KIND_AD];
   const foot = foe[KIND_INFANTRY] + foe[KIND_ATGM];
-  const air = foe[KIND_DRONE] + foe[KIND_STRIKE];
+  // A helicopter is worth several drones to whoever has to shoot it down, and a transport
+  // plane seen once will come again.
+  const air =
+    foe[KIND_DRONE] +
+    foe[KIND_STRIKE] +
+    2 * (foe[KIND_HELI] + foe[KIND_LIFT]) +
+    3 * foe[KIND_PLANE];
   let dug = 0;
   for (let s = 0; s < w.map.structCount; s++) if (ai.occupied[s] > w.tick && w.sHp[s] > 0) dug++;
   if (armour > foot && armour >= 4) {
@@ -1476,6 +1532,9 @@ function production(ai: Ai, w: World, out: Command[]): void {
     }
     if (w.sType[s] !== B_HQ && w.sType[s] !== B_DEPOT) lines.push(s);
   }
+  // Paratroops count from the day they are trained to the day they are lost.
+  have[KIND_PARA] += w.paraReserve[team];
+  const paras = w.tick + 3 * MINUTE >= ai.tune.dropFrom ? ai.tune.paras : 0;
   wantedMix(ai, w);
   let sumWant = 0;
   let total = 0;
@@ -1511,6 +1570,10 @@ function production(ai: Ai, w: World, out: Command[]): void {
       } else if (k === KIND_ENGINEER && have[k] < sappers) {
         // So are the sappers, once there is a town to dig in at.
         score = 1 << 19;
+      } else if (k === KIND_HELI || k === KIND_PARA) {
+        // And what flies: as many helicopters as it keeps, one planeload of paratroops.
+        if (!calm || have[k] >= (k === KIND_HELI ? ai.tune.helis : paras)) continue;
+        score = 1 << 18;
       } else if (want[k] === 0) continue;
       if (best < 0 || score > bestScore) {
         best = k;
@@ -1559,6 +1622,7 @@ function military(ai: Ai, w: World, out: Command[]): void {
   scouting(ai, w, out);
   runReserve(ai, w, out);
   for (let which = 0; which < ai.forces.length; which++) runForce(ai, w, out, which);
+  airborne(ai, w, out);
   supplyLine(ai, w, out);
   dismount(ai, w, out);
 }
@@ -1806,7 +1870,10 @@ function enlist(ai: Ai, w: World): void {
   for (const i of ai.fresh) {
     const kind = w.kind[i];
     let role = R_RESERVE;
-    if (kind === KIND_RECON && recon < reconPosts) {
+    if (kind === KIND_PARA) {
+      role = R_AIRBORNE;
+      ai.airborne.push(i);
+    } else if (kind === KIND_RECON && recon < reconPosts) {
       role = R_SCOUT;
       recon++;
     } else if (kind === KIND_DRONE && drones < 3) {
@@ -2287,6 +2354,96 @@ function probeTarget(ai: Ai, w: World, power: number): Objective | null {
   return best;
 }
 
+/**
+ * Where paratroops go: a flag the enemy holds or a stockpile on his side, away from his
+ * base and from wherever his troops were seen, and for troops already down the nearer the
+ * better. They are there to take ground behind him and to make him turn round.
+ */
+function dropTarget(
+  ai: Ai,
+  w: World,
+  fromX: number,
+  fromY: number,
+  near: boolean,
+): Objective | null {
+  const map = w.map;
+  let best: Objective | null = null;
+  let bestCost = 0;
+  const consider = (x: number, y: number, bonus: number) => {
+    if (dist(x, y, ai.foeX, ai.foeY) < fx(80)) return;
+    const there = expect(ai, w, x, y, 1, 0);
+    if (there > 60) return;
+    let cost = 6 * there - bonus + nextInt(ai.rng, 80);
+    if (near) cost += dist(x, y, fromX, fromY) >> (FP_SHIFT + 1);
+    if (best === null || cost < bestCost) {
+      best = { kind: OBJ_POINT, id: -1, x, y };
+      bestCost = cost;
+    }
+  };
+  for (let t = 0; t < map.townCount; t++) {
+    if (w.townOwner[t] === ai.enemy) consider(map.townX[t], map.townY[t], 150);
+  }
+  for (let k = 0; k < map.siteCount; k++) {
+    if (bankOf(ai, map.siteX[k], map.siteY[k]) === ai.side) continue;
+    if (map.siteKind[k] !== SITE_FUEL && w.siteStock[k] <= 0) continue;
+    consider(map.siteX[k], map.siteY[k], 0);
+  }
+  return best;
+}
+
+/**
+ * The paratroops. With a planeload in reserve, the time come and a place worth it, the
+ * plane is sent. Those on the ground go for their objective and hold it; once it is
+ * theirs and quiet they pick the next one in reach.
+ */
+function airborne(ai: Ai, w: World, out: Command[]): void {
+  const tune = ai.tune;
+  const team = ai.team;
+  if (
+    tune.paras > 0 &&
+    w.tick >= tune.dropFrom &&
+    w.tick - ai.lastDrop >= tune.dropEvery &&
+    w.paraReserve[team] >= Math.min(tune.paras, PARA_PLANE_LOAD) &&
+    ai.airborne.length === 0 &&
+    ai.alarm === null
+  ) {
+    const obj = dropTarget(ai, w, 0, 0, false);
+    if (obj !== null) {
+      out.push({ type: CMD_PARADROP, team, x: obj.x, y: obj.y });
+      ai.dropX = obj.x;
+      ai.dropY = obj.y;
+      ai.lastDrop = w.tick;
+      ai.plan = 'paratroops';
+    }
+  }
+  const units = ai.airborne;
+  if (units.length === 0) return;
+  const [cx, cy] = centre(w, units);
+  if (dist(cx, cy, ai.dropX, ai.dropY) < fx(26) && expect(ai, w, ai.dropX, ai.dropY, 1, 0) === 0) {
+    // Nobody left here. If it is a flag, stay until it is taken.
+    let taking = false;
+    for (let t = 0; t < w.map.townCount; t++) {
+      if (dist(w.map.townX[t], w.map.townY[t], ai.dropX, ai.dropY) > fx(8)) continue;
+      taking = w.townOwner[t] !== team;
+    }
+    if (!taking) {
+      const next = dropTarget(ai, w, cx, cy, true);
+      if (next !== null && dist(next.x, next.y, ai.dropX, ai.dropY) > fx(20)) {
+        ai.dropX = next.x;
+        ai.dropY = next.y;
+      }
+    }
+  }
+  const idle = units.filter(
+    (i) =>
+      (w.flags[i] & FLAG_MOVING) === 0 &&
+      w.attack[i] === NO_TARGET &&
+      w.inside[i] < 0 &&
+      dist(w.posX[i], w.posY[i], ai.dropX, ai.dropY) > fx(14),
+  );
+  order(out, CMD_ATTACK_MOVE, idle, ai.dropX, ai.dropY);
+}
+
 function setOut(ai: Ai, w: World, f: Force, units: number[], obj: Objective): void {
   const [cx, cy] = centre(w, units);
   if (f.role === R_ARMY) {
@@ -2615,7 +2772,7 @@ export function follow(
   order(out, CMD_MOVE, mid, cx, cy);
   order(out, CMD_MOVE, rear, bx, by);
   if (strikes.length === 0) return;
-  const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2, 0];
+  const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2, 0, 0, 0, 0, 0];
   let best = -1;
   let bestKey = 0;
   for (const e of ai.seen) {

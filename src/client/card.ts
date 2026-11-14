@@ -21,6 +21,7 @@ import {
 } from '../sim/commands';
 import {
   BUILDINGS,
+  B_HELIPAD,
   B_HQ,
   MAX_TIER,
   TIER_ITEM,
@@ -33,7 +34,12 @@ import { MAP_CELLS, S_BUILDING, canPlace, type GameMap } from '../sim/map';
 import {
   CAMERA_COST,
   KINDS,
+  KIND_HELI,
+  KIND_LIFT,
+  KIND_PARA,
   KIND_TRUCK,
+  PARA_PLANE_LOAD,
+  PARA_RESERVE_MAX,
   POINTS,
   TOWN_FUEL,
   TOWN_INCOME,
@@ -69,6 +75,10 @@ const SHORT = [
   'Jammer',
   'Truck',
   'Engineer',
+  'Gunship',
+  'Lift',
+  'Paras',
+  'Plane',
 ];
 const HINT = [
   'Main battle tank. Kills vehicles and breaks walls; weak to missile teams, to infantry up close in streets, and to strike drones without air defence or a jammer near.',
@@ -83,6 +93,10 @@ const HINT = [
   'Jammer. Enemy drones in its ring crash; enemy cameras in it are blinded and revealed. Works by itself.',
   'Logistics truck. Hauls supplies and fuel, builds and repairs base buildings and field works.',
   "Engineer squad. Builds field works, blows up the enemy's, and leaves surveillance cameras (V).",
+  'Attack helicopter. Rockets from above the roofs: hunts vehicles and squads in the open. No armour: air defence takes it apart, massed rifles wear it down. Each helipad holds three helicopters.',
+  'Transport helicopter. Lifts four squads over rivers, walls and front lines (L to board, U to set down). Unarmed. Each helipad holds three helicopters.',
+  'Paratroopers. Trained into a reserve that waits off the map. Press J and click the map: a transport plane drops up to eight squads there. Air defence can shoot the plane down with everyone aboard.',
+  'Transport plane.',
 ];
 /** The tool after the kinds of field work: take works down. */
 export const TOOL_REMOVE = WORK_COUNT;
@@ -123,6 +137,12 @@ export class CommandCard {
   private pop = 0;
   private popCap = 0;
   private upkeep = 0;
+  /** Paratroop squads in reserve, helicopters flying and what the helipads hold. */
+  private reserve = 0;
+  private helis = 0;
+  private heliCap = 0;
+  /** Set by the client: asks for the place of a paratroop drop. */
+  paradrop: () => void = () => {};
   /** Flags the player holds: each pays supplies, fuel and credits every second. */
   private flags = 0;
   /** The player's units that are out of supply (set by whoever knows: the supply view). */
@@ -179,6 +199,7 @@ export class CommandCard {
       const button = (e.target as HTMLElement).closest('button');
       if (!button) return;
       if (button.dataset.act === 'hungry') this.selectHungry();
+      else if (button.dataset.act === 'paradrop') this.paradrop();
       else this.selectIdle();
     });
     setInterval(() => this.render(), 200);
@@ -191,6 +212,9 @@ export class CommandCard {
     this.tier = s.tier[ME] ?? 1;
     this.pop = s.pop[ME] ?? 0;
     this.popCap = s.popCap[ME] ?? 0;
+    this.reserve = s.reserve[ME] ?? 0;
+    this.helis = s.helis[ME] ?? 0;
+    this.heliCap = s.heliCap[ME] ?? 0;
     this.upkeep = s.upkeep[ME] ?? 0;
     let flags = 0;
     for (let t = 0; t < s.townOwner.length; t++) if (s.townOwner[t] === ME) flags++;
@@ -597,6 +621,8 @@ export class CommandCard {
     const hungry = this.hungry().length;
     if (hungry > 0)
       res += `<button data-act="hungry" class="warn" title="These units have been beyond your supply for two minutes: they fire at half rate and their vehicles crawl. Bring a truck, build a depot nearby, or take the town. Click to select them">Out of supply ${hungry}</button>`;
+    if (this.reserve > 0)
+      res += `<button data-act="paradrop" class="air" title="Paratroop squads waiting in reserve. Click (or press J), then click the map: a transport plane drops up to ${PARA_PLANE_LOAD} of them there. Enemy air defence can shoot the plane down">Paratroops ${this.reserve} (J)</button>`;
     if (res !== this.resHtml) this.resEl.innerHTML = this.resHtml = res;
 
     let html = '';
@@ -628,7 +654,12 @@ export class CommandCard {
         html += '</div>';
         const first = bases[rec + 8];
         const waiting = queued > 0 && first !== TIER_ITEM && this.pop + POINTS[first] > this.popCap;
-        html += `<div class="note">${waiting ? 'Army limit reached: build supply depots' : ''}</div>`;
+        const grounded =
+          queued > 0 && (first === KIND_HELI || first === KIND_LIFT) && this.helis >= this.heliCap;
+        const full = queued > 0 && first === KIND_PARA && this.reserve >= PARA_RESERVE_MAX;
+        const pads =
+          type === B_HELIPAD ? `Landing space: ${this.helis} of ${this.heliCap} helicopters` : '';
+        html += `<div class="note">${waiting ? 'Army limit reached: build supply depots' : grounded ? `No landing space (${this.helis} of ${this.heliCap}): build another helipad` : full ? 'Paratroop reserve is full: drop them (J)' : pads}</div>`;
         html += '<div class="row">';
         UNIT_PRICE.forEach((p, kind) => {
           if (p.from === type) {

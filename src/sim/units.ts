@@ -28,7 +28,22 @@ export const KIND_TRUCK = 10;
  * cutters from right next to them. A poor rifle squad otherwise.
  */
 export const KIND_ENGINEER = 11;
-export const KIND_COUNT = 12;
+/**
+ * Attack helicopter: rockets and a cannon from above the roofs, faster than anything on the
+ * ground. Rifles and autocannon wear it down, air defence takes it apart. Lands only on a
+ * helipad, so an army has as many as its pads hold (see HELIS_PER_PAD).
+ */
+export const KIND_HELI = 12;
+/** Transport helicopter: lifts four squads over rivers, walls and front lines. Unarmed. */
+export const KIND_LIFT = 13;
+/**
+ * Paratroopers: picked infantry that waits in reserve off the map and is dropped where the
+ * army asks, by a transport plane (see src/sim/air.ts).
+ */
+export const KIND_PARA = 14;
+/** The transport plane that drops them. Nobody orders it about; air defence shoots it down. */
+export const KIND_PLANE = 15;
+export const KIND_COUNT = 16;
 
 export interface UnitKind {
   name: string;
@@ -105,7 +120,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.3),
     range: fx(26),
     reload: 60,
-    damage: [60, 75, 75, 80, 90, 75, 0, 0, 90, 90, 90, 75],
+    damage: [60, 75, 75, 80, 90, 75, 0, 0, 90, 90, 90, 75, 0, 0, 75, 0],
     siege: 60,
     stray: 30,
     garrison: false,
@@ -128,7 +143,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.16),
     range: fx(15),
     reload: 24,
-    damage: [3, 9, 9, 5, 10, 9, 1, 1, 10, 10, 10, 9],
+    damage: [3, 9, 9, 5, 10, 9, 1, 1, 10, 10, 10, 9, 2, 2, 9, 0],
     siege: 2,
     stray: 5,
     garrison: true,
@@ -149,7 +164,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.15),
     range: fx(34),
     reload: 140,
-    damage: [134, 0, 0, 130, 130, 0, 0, 0, 130, 130, 130, 0],
+    damage: [134, 0, 0, 130, 130, 0, 0, 0, 130, 130, 130, 0, 0, 0, 0, 0],
     siege: 40,
     stray: 20,
     garrison: true,
@@ -168,7 +183,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.4),
     range: fx(20),
     reload: 8,
-    damage: [3, 11, 11, 7, 9, 11, 2, 2, 9, 9, 9, 11],
+    damage: [3, 11, 11, 7, 9, 11, 2, 2, 9, 9, 9, 11, 3, 3, 11, 0],
     siege: 4,
     stray: 4,
     garrison: false,
@@ -190,7 +205,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.22),
     range: fx(110),
     reload: 120,
-    damage: [50, 70, 70, 60, 80, 70, 0, 0, 80, 80, 80, 70],
+    damage: [50, 70, 70, 60, 80, 70, 0, 0, 80, 80, 80, 70, 0, 0, 70, 0],
     siege: 160,
     stray: 0,
     garrison: false,
@@ -213,7 +228,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.2),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: true,
@@ -234,7 +249,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.6),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -257,7 +272,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.8),
     range: fx(1.5),
     reload: 1,
-    damage: [75, 50, 60, 150, 120, 50, 0, 0, 130, 130, 130, 50],
+    damage: [75, 50, 60, 150, 120, 50, 0, 0, 130, 130, 130, 50, 0, 0, 50, 0],
     siege: 0,
     stray: 40,
     garrison: false,
@@ -278,7 +293,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.32),
     range: fx(40),
     reload: 12,
-    damage: [0, 0, 0, 0, 0, 0, 10, 12, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 10, 12, 0, 0, 0, 0, 11, 11, 0, 20],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -298,7 +313,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.3),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -320,7 +335,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.34),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -342,7 +357,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.16),
     range: fx(13),
     reload: 50,
-    damage: [2, 10, 10, 4, 8, 10, 0, 0, 8, 8, 8, 10],
+    damage: [2, 10, 10, 4, 8, 10, 0, 0, 8, 8, 8, 10, 1, 1, 10, 0],
     siege: 90,
     stray: 5,
     garrison: true,
@@ -354,6 +369,87 @@ const BASE_KINDS: readonly UnitKind[] = [
     ...PLAIN,
     engineer: true,
     sight: fx(34),
+  },
+  {
+    // Hovers out of rifle range of most things and works over what it finds: a tank in six
+    // salvos, a squad in four. No armour at all, so a pair of air-defence vehicles or a
+    // street full of rifles sends it home in pieces. It never needs supplying, only a pad.
+    name: 'Attack helicopter',
+    cls: CLASS_AIR,
+    hp: 150,
+    speed: fx(0.62),
+    range: fx(28),
+    reload: 40,
+    damage: [80, 40, 40, 70, 70, 40, 0, 0, 70, 70, 70, 40, 0, 0, 40, 0],
+    siege: 20,
+    stray: 20,
+    garrison: false,
+    wreckTicks: 1,
+    armour: null,
+    turn: 6,
+    carry: 0,
+    ...DIRECT,
+    ...PLAIN,
+    sight: fx(46),
+  },
+  {
+    name: 'Transport helicopter',
+    cls: CLASS_AIR,
+    hp: 170,
+    speed: fx(0.66),
+    range: 0,
+    reload: 1000,
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    siege: 0,
+    stray: 0,
+    garrison: false,
+    wreckTicks: 1,
+    armour: null,
+    turn: 6,
+    carry: 4,
+    ...DIRECT,
+    ...PLAIN,
+    sight: fx(40),
+  },
+  {
+    // A rifle squad and a half: more men, better shots, more rockets. They arrive with what
+    // they can carry, so behind the lines they are on their own until the army reaches them.
+    name: 'Paratroopers',
+    cls: CLASS_FOOT,
+    hp: 130,
+    speed: fx(0.17),
+    range: fx(16),
+    reload: 22,
+    damage: [5, 11, 11, 7, 12, 11, 1, 1, 12, 12, 12, 11, 2, 2, 11, 0],
+    siege: 3,
+    stray: 5,
+    garrison: true,
+    wreckTicks: 200,
+    armour: null,
+    turn: 0,
+    carry: 0,
+    ...DIRECT,
+    ...PLAIN,
+    sight: fx(36),
+  },
+  {
+    name: 'Transport plane',
+    cls: CLASS_AIR,
+    hp: 170,
+    speed: fx(1.1),
+    range: 0,
+    reload: 1000,
+    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    siege: 0,
+    stray: 0,
+    garrison: false,
+    wreckTicks: 1,
+    armour: null,
+    turn: 14,
+    carry: 8,
+    ...DIRECT,
+    ...PLAIN,
+    sight: fx(20),
   },
 ];
 
@@ -389,6 +485,10 @@ export const POINTS: readonly number[] = (() => {
   t[KIND_IFV] = 2;
   t[KIND_AD] = 2;
   t[KIND_EW] = 2;
+  t[KIND_HELI] = 4;
+  t[KIND_LIFT] = 3;
+  t[KIND_PARA] = 2;
+  t[KIND_PLANE] = 0;
   return t;
 })();
 
@@ -428,6 +528,33 @@ export const CAMERA_PULL = fx(5);
 export const CAMERA_HEIGHT = fx(2);
 /** A camera a jammer has found stays known to the enemy for this long after it drives off. */
 export const CAMERA_REVEAL_TICKS = 600;
+/** Helicopters an army can keep per finished helipad: landing space is what limits them. */
+export const HELIS_PER_PAD = 3;
+/** Paratroop squads that can wait in reserve, and the most one plane takes. */
+export const PARA_RESERVE_MAX = 16;
+export const PARA_PLANE_LOAD = 8;
+/** Squads land within this of the point asked for, and need this long to get out of the harness. */
+export const PARA_SCATTER = fx(9);
+export const PARA_LAND_TICKS = 60;
+/** Only drones have a radio link to jam: helicopters and planes have a crew aboard. */
+export const IS_DRONE: readonly boolean[] = [
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  true,
+  true,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+];
 /** How high drones fly, for sight and for drawing them. */
 export const AIR_HEIGHT = fx(12);
 

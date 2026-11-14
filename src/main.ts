@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { CMD_ASSIGN, CMD_SPAWN, type Command } from './sim/commands';
+import { CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS, M_NONE } from './sim/world';
@@ -281,6 +281,10 @@ async function start(): Promise<void> {
     else if (e.code === 'Escape' && production.open) production.toggle(false);
   });
   card.hungry = () => supply.hungry;
+  card.paradrop = () =>
+    input.ask('Click the map: where should the paratroops drop? (Esc cancels)', (x, z) => {
+      send({ type: CMD_PARADROP, team: 0, x: Math.round(x * 1024), y: Math.round(z * 1024) });
+    });
   const input = new Input(
     canvas,
     rts.camera,

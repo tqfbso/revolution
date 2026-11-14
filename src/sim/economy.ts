@@ -41,7 +41,13 @@ import {
   KIND_DRONE,
   KIND_ENGINEER,
   KIND_EW,
+  HELIS_PER_PAD,
+  KIND_HELI,
   KIND_IFV,
+  KIND_LIFT,
+  KIND_PARA,
+  KIND_PLANE,
+  PARA_RESERVE_MAX,
   KIND_INFANTRY,
   KIND_RECON,
   KIND_STRIKE,
@@ -57,6 +63,7 @@ import {
   KIND_SLOTS,
   ORDER_MAX,
   EV_BUILT,
+  EV_RESERVE,
   EV_TIER,
   EV_TRAINED,
   FLAG_AMOVE,
@@ -83,7 +90,9 @@ export const B_DEPOT = 1;
 export const B_BARRACKS = 2;
 export const B_WORKS = 3;
 export const B_DRONES = 4;
-export const B_COUNT = 5;
+/** Where helicopters are built and land: each holds HELIS_PER_PAD of them. */
+export const B_HELIPAD = 5;
+export const B_COUNT = 6;
 
 export interface Price {
   supplies: number;
@@ -179,6 +188,20 @@ export const BUILDINGS: readonly Building[] = [
     ticks: 600,
     tier: 1,
   },
+  {
+    name: 'Helipad',
+    w: 3,
+    h: 3,
+    hp: 700,
+    floors: 1,
+    dropOff: false,
+    cap: 0,
+    supplies: 250,
+    fuel: 150,
+    credits: 100,
+    ticks: 700,
+    tier: 2,
+  },
 ];
 
 export interface UnitPrice extends Price {
@@ -210,6 +233,13 @@ export const UNIT_PRICE: readonly UnitPrice[] = (() => {
   t[KIND_EW] = price(B_WORKS, 3, 150, 60, 200, 35);
   t[KIND_DRONE] = price(B_DRONES, 1, 30, 0, 30, 6);
   t[KIND_STRIKE] = price(B_DRONES, 2, 50, 0, 60, 8);
+  // Aircraft are the slowest things an army builds. A helicopter is not dear so much as
+  // rare: the pad it lands on is the limit. Paratroops are dear, in money above all.
+  t[KIND_HELI] = price(B_HELIPAD, 2, 220, 160, 80, 60);
+  t[KIND_LIFT] = price(B_HELIPAD, 2, 160, 120, 40, 45);
+  t[KIND_PARA] = price(B_BARRACKS, 2, 90, 0, 90, 14);
+  // Never built: the plane comes with the drop.
+  t[KIND_PLANE] = price(B_COUNT, 99, 0, 0, 0, 1);
   return t;
 })();
 
@@ -241,6 +271,7 @@ const DROP_REACH = fx(5);
 const SITE_SEARCH = fx(160);
 
 const builders = new Uint8Array(MAX_STRUCTS);
+const IS_HELI = KINDS.map((_, k) => k === KIND_HELI || k === KIND_LIFT);
 const priceOf = (item: number, tier: number): Price | null =>
   (item === TIER_ITEM ? TIER_PRICE[tier] : UNIT_PRICE[item]) ?? null;
 
@@ -668,6 +699,7 @@ function standingOrders(w: World): void {
   for (let i = 0; i < w.count; i++) {
     if (w.state[i] === STATE_ALIVE) fielded[w.team[i] * KIND_SLOTS + w.kind[i]]++;
   }
+  for (let t = 0; t < MAX_TEAMS; t++) fielded[t * KIND_SLOTS + KIND_PARA] += w.paraReserve[t];
   for (let s = 0; s < w.map.structCount; s++) {
     const team = w.sTeam[s];
     if (team === NO_TEAM || w.sHp[s] <= 0) continue;
@@ -706,15 +738,24 @@ function updateProduction(w: World): void {
     const unit = item !== TIER_ITEM;
     // An army at its limit builds nothing more until it has lost something or grown.
     if (unit && w.pop[team] + POINTS[item] > w.popCap[team]) continue;
+    // A helicopter needs somewhere to land, and the reserve has only so many places.
+    if (unit && IS_HELI[item] && w.helis[team] >= w.heliCap[team]) continue;
+    if (item === KIND_PARA && w.paraReserve[team] >= PARA_RESERVE_MAX) continue;
     if (w.sProgress[s] < p.ticks) w.sProgress[s]++;
     if (w.sProgress[s] < p.ticks) continue;
-    if (unit) {
+    if (item === KIND_PARA) {
+      // Paratroops do not walk out of the door: they wait off the map for the plane.
+      w.paraReserve[team]++;
+      w.pop[team] += POINTS[item];
+      w.events.push(EV_RESERVE, team, w.paraReserve[team]);
+    } else if (unit) {
       // Out of the south side, onto the strip of ground every building keeps free.
       const ox = ((2 * map.sX[s] + map.sW[s]) << CELL_SHIFT) >> 1;
       const oy = ((map.sY[s] + map.sH[s]) << CELL_SHIFT) + (CELL_FX >> 1);
       const id = spawnUnit(w, item, team, ox, oy);
       if (id < 0) continue;
       w.pop[team] += POINTS[item];
+      if (IS_HELI[item]) w.helis[team]++;
       w.events.push(EV_TRAINED, id, s);
       rally(w, id, s);
     } else {
@@ -761,13 +802,21 @@ function rally(w: World, id: number, s: number): void {
 function countForces(w: World): void {
   w.pop.fill(0);
   w.popCap.fill(0);
-  for (let i = 0; i < w.count; i++)
-    if (w.state[i] === STATE_ALIVE) w.pop[w.team[i]] += POINTS[w.kind[i]];
+  w.helis.fill(0);
+  w.heliCap.fill(0);
+  for (let i = 0; i < w.count; i++) {
+    if (w.state[i] !== STATE_ALIVE) continue;
+    w.pop[w.team[i]] += POINTS[w.kind[i]];
+    if (IS_HELI[w.kind[i]]) w.helis[w.team[i]]++;
+  }
+  for (let t = 0; t < MAX_TEAMS; t++) w.pop[t] += w.paraReserve[t] * POINTS[KIND_PARA];
   for (let s = 0; s < w.map.structCount; s++) {
     const team = w.sTeam[s];
     if (team === NO_TEAM || w.sHp[s] <= 0) continue;
     const b = BUILDINGS[w.sType[s]];
-    if (w.sBuild[s] >= b.ticks) w.popCap[team] += b.cap;
+    if (w.sBuild[s] < b.ticks) continue;
+    w.popCap[team] += b.cap;
+    if (w.sType[s] === B_HELIPAD) w.heliCap[team] += HELIS_PER_PAD;
   }
   for (let t = 0; t < MAX_TEAMS; t++) if (w.popCap[t] > POP_MAX) w.popCap[t] = POP_MAX;
 }
