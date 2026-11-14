@@ -44,15 +44,24 @@ import {
   type Force,
   type Objective,
 } from './ai';
-import { CMD_ATTACK_MOVE, CMD_BOMBARD, CMD_MOVE, CMD_UNLOAD, type Command } from './commands';
+import {
+  CMD_ATTACK_MOVE,
+  CMD_BOMBARD,
+  CMD_ENTRENCH,
+  CMD_MOVE,
+  CMD_UNLOAD,
+  type Command,
+} from './commands';
 import { B_HQ } from './economy';
 import { clampInt, fx } from './fixed';
-import { CLASS_AIR, S_BUILDING } from './map';
+import { CLASS_AIR, S_BUILDING, cellOfPos, wallMax } from './map';
 import { structDist2 } from './sim';
+import { fortified } from './urban';
 import { KINDS, KIND_ARTILLERY } from './units';
 import {
   FLAG_BOMBARD,
   FLAG_MOVING,
+  JOB_NONE,
   MAP_SIZE_FX,
   MAX_COMMANDERS,
   MAX_UNITS,
@@ -934,10 +943,12 @@ function station(
   const foot = units.filter((i) => FOOT(w.kind[i]));
   billetStart(w, [foot]);
   billet(ai, w, out, foot, p.houses, x, y, fx(28), -1);
+  dig(w, out, p, foot);
   const rest = units.filter(
     (i) =>
       LINE[w.kind[i]] &&
       !FOOT(w.kind[i]) &&
+      w.job[i] === JOB_NONE &&
       (w.flags[i] & FLAG_MOVING) === 0 &&
       w.attack[i] === NO_TARGET &&
       dist(w.posX[i], w.posY[i], x, y) > fx(30),
@@ -945,6 +956,43 @@ function station(
   order(out, CMD_ATTACK_MOVE, rest, x, y);
   follow(ai, w, out, units, cx, cy);
   muster(w, out, units, x, y);
+}
+
+/**
+ * A commander that holds a place has its engineers sandbag the houses its squads are in,
+ * and the ruins they are lying in, one after another (decision 110). Fortifying costs
+ * nothing but their time; they do not mend, which would spend the player's supplies.
+ */
+function dig(w: World, out: Command[], p: Post, foot: readonly number[]): void {
+  const map = w.map;
+  const free = p.units.filter(
+    (i) =>
+      KINDS[w.kind[i]].engineer &&
+      w.job[i] === JOB_NONE &&
+      w.attack[i] === NO_TARGET &&
+      (w.flags[i] & FLAG_MOVING) === 0,
+  );
+  if (free.length === 0) return;
+  const held = new Set<number>();
+  for (const i of foot) {
+    if (w.inside[i] >= 0) held.add(w.inside[i]);
+    else {
+      const s = map.structAt[cellOfPos(w.posX[i], w.posY[i])];
+      if (s >= 0 && map.sKind[s] === S_BUILDING && w.sHp[s] <= 0) held.add(s);
+    }
+  }
+  for (const s of p.houses) {
+    if (!held.has(s) || fortified(w, s)) continue;
+    // Whole, or flat: a damaged house would be mended first, and that is not free.
+    if (w.sHp[s] > 0 && w.sHp[s] < map.sMaxHp[s]) continue;
+    let holed = false;
+    for (let f = 0; f < 4 && w.sHp[s] > 0; f++) {
+      if (w.sWall[4 * s + f] < wallMax(map, s, f)) holed = true;
+    }
+    if (holed) continue;
+    out.push({ type: CMD_ENTRENCH, units: free.slice(0, 3), structure: s });
+    return;
+  }
 }
 
 /**

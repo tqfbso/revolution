@@ -249,7 +249,7 @@ Fabio, 2026-11-13. Decision 076.
   pulled down by any enemy ground unit that reaches it; jammed drones show through the fog
 - Not yet: the AI placing cameras of its own; cameras on the minimap
 
-## Urban warfare (U1 built; U2 storming and the U3 city map built, awaiting Fabio's test)
+## Urban warfare (U1 to U5 built in the main; awaiting Fabio's test)
 
 Fabio, 2026-11-12: buildings are too easy to destroy; wants ruins used as fortresses,
 something like building buildings, fighting through a city as it is destroyed, and a
@@ -275,8 +275,9 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   fortify, fortified ruins, varied roofs and fronts, materials and signs. Still open: far
   facades and the roof fade. The plan was: (heavy, Fable 5.2 with Sonnet 5.5 for props): block meshes per state,
   the prop kit, far facades, roof fade, against a stated budget
-- U5 Urban AI and urban units (heavy, Fable 5.2): an AI that holds, fortifies and storms
-  blocks; marksman team; top attack on tanks in streets; drone rules
+- U5 Urban AI. BUILT 2026-11-14 (decision 110): the computer holds, fortifies and storms
+  blocks and uses ruins. The urban units (marksman team, top attack on tanks in streets,
+  drone rules) move to the factions (M10)
 - U6 Tuning after play (light, Sonnet 5.5)
 
 Order agreed with Fabio on 2026-11-13 (morning): U1, then the soldiers and the cameras,
@@ -400,7 +401,9 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 7. European city map: BUILT (decision 107). `?map=euro` or Menu > Map: European city. One
    dense city on both banks of a river: four bridges that can be cut, three covered
    crossings that cannot, two parks, a motorway on an embankment, a station.
-8. The computer fighting in cities (U5): garrisoning, storming, using ruins
+8. The computer fighting in cities (U5): BUILT (decision 110). Its sappers fortify the
+   houses its garrisons hold, garrisons without houses lie up in the ruins, and the
+   player's commanders do both as well. Garrisoning and storming were already there.
 9. Night battles: flares, muzzle flashes, fog of war that matters more
 10. PvP for up to four players, free-for-all or 2v2, on the co-op netcode
 11. Factions (M10), then weather (R4)
