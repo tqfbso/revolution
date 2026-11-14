@@ -14,7 +14,11 @@ const levels = [process.argv[4] ?? 'normal', process.argv[5] ?? 'normal'];
 const layout =
   process.env.MAP === 'river' ? 'river' : process.env.MAP === 'ridge' ? 'ridge' : 'city';
 const w = createWorld(seed, generateMap(seed, layout));
-const ais = levels.map((l, t) => (l === 'off' ? null : createAi(t, l as AiLevel, seed)));
+// HUMANS=3 gives team 1 (the side the computer plays in a skirmish) its co-op tuning.
+const humans = Number(process.env.HUMANS ?? 1);
+const ais = levels.map((l, t) =>
+  l === 'off' ? null : createAi(t, l as AiLevel, seed, t === 1 ? humans : 1),
+);
 let cmds: Command[] = skirmishCommands(w.map);
 let worst = 0;
 let total = 0;
