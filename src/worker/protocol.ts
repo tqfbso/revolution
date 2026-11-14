@@ -147,6 +147,8 @@ export interface Snapshot {
   commanders: Int32Array;
   /** Per unit: job | stance | moving (see TASK_*). */
   task: Uint8Array;
+  /** The score so far (STAT_* in sim/world.ts). */
+  stats: Int32Array;
   /** Civilians in the open: three numbers each, its number and where it is (x, z). */
   civilians: Float32Array;
   /** Civilians: how many the map began with, still at home, got away, then killed by each army. */

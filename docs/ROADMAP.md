@@ -392,7 +392,8 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
    (decision 101)
 4. Civilians: about 400 a map, fleeing to the edges; each death costs the army that
    caused it resources. No gore. BUILT (decision 102)
-5. Victory screen: kills, losses, buildings and civilians lost, an MVP per player
+5. Victory screen: kills, losses, buildings and civilians lost, an MVP per player. BUILT
+   (decision 103)
 6. Helicopters (capped by helipads, about 3 a pad) and paratroopers (built into a
    reserve, dropped by a transport plane that air defence can shoot down)
 7. European city map: dense blocks, parks, an elevated highway, a river with bridges

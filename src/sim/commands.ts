@@ -358,7 +358,11 @@ export interface ReinforceCommand {
   on: boolean;
 }
 
-export type Command =
+/**
+ * Every order may carry who gave it: the player's place (0 to 3) in a shared army, 0 when
+ * he plays alone. Orders a staff or the computer gives carry none.
+ */
+export type Command = (
   | EntrenchCommand
   | AssignCommand
   | MissionCommand
@@ -392,4 +396,5 @@ export type Command =
   | UnloadCommand
   | BombardCommand
   | HoldCommand
-  | AttackCommand;
+  | AttackCommand
+) & { by?: number };

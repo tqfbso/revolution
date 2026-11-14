@@ -1842,3 +1842,32 @@ blocks; a player who shells a held block will pay far more. The knobs are
 
 **Golden hash** changes to 287657647: civilians are part of the world and of its hash
 (state, deaths, where the runners are), so that co-op machines agree on them.
+
+## 103. The end of a game shows what it cost, and names the best player of a shared army (2026-11-14)
+
+Until now a game ended with one line on a banner. Fabio asked for a victory screen with
+kills, losses, buildings destroyed, civilians lost, and an MVP for each co-op game.
+
+**The sim keeps the score** (`World.stats`, the `STAT_*` numbers in `sim/world.ts`), so
+every machine of a shared game shows the same one, and a player who rejoins has it too,
+since his sim plays the whole game through. For each army: units destroyed, units lost,
+and the army points of both. For the map: city buildings brought down. Civilians were
+already counted (decision 102). A strike drone that went in is spent, not lost.
+
+**Who gets a kill in a shared army.** Every order a player sends now carries his place
+(`by`, 0 to 3). A unit he orders himself fights on his account from then on, until
+another player orders it: its kills and its loss are his. Orders from a staff or from
+the computer carry no name and change nothing, so troops handed to a commander stay with
+the player who handed them over. Units nobody has ordered (fresh from the factory, a
+garrison left alone) count for the army only. The MVP is the player whose units destroyed
+the most army points; a tie goes to whoever lost less.
+
+**The screen** (`client/debrief.ts`) comes up when a headquarters falls: Victory or
+Defeat, how long the battle lasted, the two armies side by side (units destroyed, points
+destroyed, units lost, flags held, civilians killed), buildings and civilians in a
+sentence, and in co-op a line per player with his role. It stays up to date if the
+player keeps watching. "New game" starts again.
+
+**Not in the hash.** The score and the names on units decide nothing in the game, so
+they are left out of the world hash and the golden hash is unchanged (a test pins that a
+name on an order changes nothing).

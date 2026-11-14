@@ -136,6 +136,8 @@ export class CommandCard {
    */
   armed: '' | 'attack' | 'smoke' = '';
   private over = false;
+  /** The game is decided (true: won). Without it, a banner says so. */
+  onOver: ((won: boolean) => void) | null = null;
 
   constructor(
     private readonly el: HTMLElement,
@@ -203,6 +205,10 @@ export class CommandCard {
       if (standing[t]) this.hadHq[t] = true;
       else if (this.hadHq[t] && !this.over) {
         this.over = true;
+        if (this.onOver) {
+          this.onOver(t !== ME);
+          continue;
+        }
         this.bannerEl.textContent =
           t === ME
             ? 'Defeat: your headquarters has fallen'

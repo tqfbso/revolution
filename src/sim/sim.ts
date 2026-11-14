@@ -96,6 +96,7 @@ import {
   AIR_HEIGHT,
   BOARD_DIST,
   CAPTURE_POINTS,
+  POINTS,
   CONCEAL_RANGE,
   COUNTER_BATTERY_TICKS,
   DANGER_CLOSE,
@@ -154,6 +155,16 @@ import {
   EV_CAPTURE,
   EV_COLLAPSE,
   EV_DEATH,
+  NO_SEAT,
+  STAT_KILLS,
+  STAT_KILL_POINTS,
+  STAT_LOST,
+  STAT_LOST_POINTS,
+  STAT_RAZED,
+  STAT_SEAT0,
+  STAT_SEATS,
+  STAT_STRIDE,
+  STAT_TEAMS,
   EV_IMPACT,
   EV_LAUNCH,
   EV_REPAIR,
@@ -395,6 +406,11 @@ export function step(w: World, commands: readonly Command[]): void {
 }
 
 function applyCommand(w: World, cmd: Command): void {
+  // Who gave it: the units a player orders himself fight on his account (decision 103).
+  // Orders from a staff or from the computer carry no name and change nothing.
+  if (cmd.by !== undefined && cmd.by >= 0 && cmd.by < STAT_SEATS && 'units' in cmd) {
+    for (const id of cmd.units) if (id >= 0 && id < w.count) w.seat[id] = cmd.by;
+  }
   // Leaving a camera behind interrupts nothing the squad was doing.
   if (cmd.type === CMD_CAMERA) {
     placeCameras(w, cmd.units);
@@ -1291,6 +1307,7 @@ export function spawnUnit(w: World, kindId: number, teamId: number, x: number, y
   while (id < w.count && w.state[id] !== STATE_FREE) id++;
   if (id >= MAX_UNITS) return -1;
   if (id === w.count) w.count++;
+  w.seat[id] = NO_SEAT;
   const map = w.map;
   const to =
     map.snap[layerOf(teamId, KIND_CLASS[kindId])][
@@ -2222,6 +2239,34 @@ function resolveDamage(w: World): void {
   }
 }
 
+/** Unit `i` is destroyed by unit `by` (itself: by accident, or a drone that was the warhead). */
+function score(w: World, i: number, by: number): void {
+  const st = w.stats;
+  const team = w.team[i];
+  const points = POINTS[w.kind[i]];
+  // A strike drone that went in is spent, not lost.
+  if (!(by === i && KINDS[w.kind[i]].kamikaze)) {
+    if (team < STAT_TEAMS) {
+      st[STAT_STRIDE * team + STAT_LOST]++;
+      st[STAT_STRIDE * team + STAT_LOST_POINTS] += points;
+    }
+    if (w.seat[i] < STAT_SEATS) {
+      st[STAT_SEAT0 + STAT_STRIDE * w.seat[i] + STAT_LOST]++;
+      st[STAT_SEAT0 + STAT_STRIDE * w.seat[i] + STAT_LOST_POINTS] += points;
+    }
+  }
+  if (by < 0 || by === i || w.team[by] === team) return;
+  const victor = w.team[by];
+  if (victor < STAT_TEAMS) {
+    st[STAT_STRIDE * victor + STAT_KILLS]++;
+    st[STAT_STRIDE * victor + STAT_KILL_POINTS] += points;
+  }
+  if (w.seat[by] < STAT_SEATS) {
+    st[STAT_SEAT0 + STAT_STRIDE * w.seat[by] + STAT_KILLS]++;
+    st[STAT_SEAT0 + STAT_STRIDE * w.seat[by] + STAT_KILL_POINTS] += points;
+  }
+}
+
 function kill(w: World, i: number, by: number): void {
   if (w.inside[i] >= 0) {
     w.sOcc[w.inside[i]]--;
@@ -2241,6 +2286,7 @@ function kill(w: World, i: number, by: number): void {
     }
     w.load[i] = 0;
   }
+  score(w, i, by);
   w.hp[i] = 0;
   w.state[i] = STATE_WRECK;
   w.cooldown[i] = KINDS[w.kind[i]].wreckTicks;
@@ -2315,6 +2361,7 @@ function resolveStructures(w: World): void {
     w.sOcc[s] = 0;
     // What was built into the house goes down with it; the ruin can be dug in afresh.
     w.sFort[s] = 0;
+    if (map.sKind[s] === S_BUILDING) w.stats[STAT_RAZED]++;
     razeStructure(map, s);
     spillRubble(w, s);
     topologyChanged = true;
