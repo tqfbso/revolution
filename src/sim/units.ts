@@ -477,3 +477,9 @@ export const HEIGHT_RANGE_MIN = fx(-2);
 export const CAPTURE_POINTS = 60;
 /** Credits a held town pays per second. */
 export const TOWN_INCOME = 5;
+/**
+ * Supplies and fuel a held town pays per second (decision 098): a flag is worth about two
+ * trucks, never runs dry, and is lost with the ground.
+ */
+export const TOWN_SUPPLIES = 2;
+export const TOWN_FUEL = 1;
