@@ -405,6 +405,23 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 10. PvP for up to four players, free-for-all or 2v2, on the co-op netcode
 11. Factions (M10), then weather (R4)
 
+## Attack formations (piece 1 built; the rest measured and shelved)
+
+From the proposal in the "Design tactical attack formations" thread.
+
+- F1 Infantry does not walk at armour it cannot hurt. BUILT (decision 108)
+- F2 A staged attack for commanders (overwatch first, squads wait, tanks trail in towns).
+  BUILT, MEASURED AND REMOVED (decision 109): it lost more than the attack as it stands in
+  all 17 fights tried. `tests/assault.test.ts` holds the bar a new version has to clear.
+- F3 Drill presets per commander (combined, rush, armour leads, infantry leads). SHELVED
+  with F2: three of the four presets are the staged attack. Worth revisiting only as two
+  plain switches if Fabio asks for them: "hold the vehicles back" and "hold the infantry
+  back".
+- F4 The computer uses the drill. SHELVED with F2: there is no drill to use. The computer
+  already attacks the way the commanders do.
+- Still open from the proposal: halted infantry looking for the nearest house or wood
+  (belongs in U5), and a report from the commander of what its drones see at the objective.
+
 ## M10 Factions
 
 - Three asymmetric factions with distinct units and tech
