@@ -288,6 +288,18 @@ export interface EntrenchCommand {
   structure: number;
 }
 
+/**
+ * Drop the paratroops `team` has in reserve at a point: a transport plane comes in over
+ * the army's own edge of the map with up to PARA_PLANE_LOAD squads (see src/sim/air.ts).
+ */
+export const CMD_PARADROP = 35;
+export interface ParadropCommand {
+  type: typeof CMD_PARADROP;
+  team: number;
+  x: number;
+  y: number;
+}
+
 export const CMD_ORDER = 28;
 export const CMD_KEEP = 29;
 export const CMD_DEST = 30;
@@ -364,6 +376,7 @@ export interface ReinforceCommand {
  */
 export type Command = (
   | EntrenchCommand
+  | ParadropCommand
   | AssignCommand
   | MissionCommand
   | ReinforceCommand

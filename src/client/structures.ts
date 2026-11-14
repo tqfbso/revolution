@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import { attribute, float, mix, texture, uv } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fromFx } from '../sim/fixed';
-import { BUILDINGS, B_BARRACKS, B_DEPOT, B_DRONES, B_HQ, B_WORKS } from '../sim/economy';
+import { BUILDINGS, B_BARRACKS, B_DEPOT, B_DRONES, B_HELIPAD, B_HQ, B_WORKS } from '../sim/economy';
 import {
   FLOOR_HEIGHT,
   MAP_CELLS,
@@ -1169,6 +1169,51 @@ function baseParts(
       at: [cx + w * 0.26, base + 1.5, cz - d * 0.05],
       color: 0x8f918c,
       rot: [0.5, 0, 0.2],
+    });
+  } else if (type === B_HELIPAD) {
+    // A concrete pad with a painted H in a ring of the army's colour, lamps at the
+    // corners, and a hut and a windsock mast at the back.
+    const r = Math.min(w, d) * 0.3;
+    parts.push({
+      size: [r * 2.5, 0.1, r * 2.5],
+      at: [cx, base + 0.05, cz + d * 0.08],
+      color: 0x77786f,
+    });
+    for (const side of [-1, 1]) {
+      parts.push({
+        size: [0.34, 0.03, r * 1.1],
+        at: [cx + side * r * 0.42, base + 0.12, cz + d * 0.08],
+        color: 0xd8d6c8,
+      });
+      parts.push({
+        size: [r * 2.3, 0.03, 0.22],
+        at: [cx, base + 0.12, cz + d * 0.08 + side * r * 1.12],
+        color: paint,
+      });
+      parts.push({
+        size: [0.22, 0.03, r * 2.3],
+        at: [cx + side * r * 1.12, base + 0.12, cz + d * 0.08],
+        color: paint,
+      });
+      for (const end of [-1, 1]) {
+        parts.push({
+          size: [0.16, 0.3, 0.16],
+          at: [cx + side * r * 1.2, base + 0.15, cz + d * 0.08 + end * r * 1.2],
+          color: 0xc9b458,
+        });
+      }
+    }
+    parts.push({
+      size: [r * 0.84, 0.03, 0.3],
+      at: [cx, base + 0.12, cz + d * 0.08],
+      color: 0xd8d6c8,
+    });
+    shed(cx - w * 0.3, cz - d * 0.4, w * 0.3, d * 0.14, 1.2, DRAB);
+    mast(cx + w * 0.4, cz - d * 0.4, 3.6);
+    parts.push({
+      size: [0.9, 0.22, 0.22],
+      at: [cx + w * 0.4 + 0.5, base + 3.4, cz - d * 0.4],
+      color: 0xc8643c,
     });
   }
   if (stage === 1) {

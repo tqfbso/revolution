@@ -162,6 +162,12 @@ export const STATS = STAT_RAZED + 1;
 export const NO_SEAT = 255;
 
 export const EV_CIVILIAN = 26;
+/** a = team, b = paratroop squads now waiting in reserve. */
+export const EV_RESERVE = 27;
+/** a = the plane, b = squads aboard: it has come over the edge of the map. */
+export const EV_PLANE = 28;
+/** a = where (see packPoint), b = team | squads << 8: the paratroops are out. */
+export const EV_PARADROP = 29;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
@@ -292,6 +298,13 @@ export interface World {
   /** Units a team has and may have (recounted once a second, raised by each new unit). */
   pop: Int32Array;
   popCap: Int32Array;
+  /**
+   * Air (see src/sim/air.ts). Per team: paratroop squads waiting off the map, helicopters
+   * flying and what its helipads hold (both counted once a second, like `pop`).
+   */
+  paraReserve: Int32Array;
+  helis: Int32Array;
+  heliCap: Int32Array;
   /** What is left at each resource site. */
   siteStock: Int32Array;
   /**
@@ -480,6 +493,9 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     tier: new Uint8Array(MAX_TEAMS).fill(1),
     pop: new Int32Array(MAX_TEAMS),
     popCap: new Int32Array(MAX_TEAMS),
+    paraReserve: new Int32Array(MAX_TEAMS),
+    helis: new Int32Array(MAX_TEAMS),
+    heliCap: new Int32Array(MAX_TEAMS),
     siteStock: map.siteStock.slice(),
     sTeam: new Uint8Array(MAX_STRUCTS).fill(NO_TEAM),
     sType: new Uint8Array(MAX_STRUCTS),
@@ -601,6 +617,7 @@ export function hashWorld(w: World): number {
     mix(w.fuel[t]);
     mix(w.tier[t] | (w.pop[t] << 8));
     mix(w.popCap[t]);
+    mix(w.paraReserve[t] | (w.helis[t] << 8) | (w.heliCap[t] << 16));
   }
   for (let t = 0; t < w.map.townCount; t++) {
     mix(w.townOwner[t] | (w.townCapturer[t] << 8) | (w.townProgress[t] << 16));

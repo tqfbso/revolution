@@ -9,9 +9,20 @@ import {
   EV_STORM,
   EV_STORMED,
   EV_STRIKE,
+  EV_PLANE,
+  EV_PARADROP,
+  unpackX,
+  unpackY,
   MAX_UNITS,
 } from '../sim/world';
-import { BASE_STRIDE, INFO_CARRIED, INFO_INSIDE, type Snapshot } from '../worker/protocol';
+import {
+  BASE_STRIDE,
+  INFO_CARRIED,
+  INFO_INSIDE,
+  INFO_TEAM_MASK,
+  INFO_TEAM_SHIFT,
+  type Snapshot,
+} from '../worker/protocol';
 import type { GameMap } from '../sim/map';
 import type { Fog } from './fog';
 import type { Minimap } from './minimap';
@@ -212,6 +223,24 @@ export class Alerts {
         const z = u.renderPos[3 * a + 2];
         const what = KINDS[u.kindOf(a)].name.toLowerCase();
         this.show(this.book.raise(ALERT_DRONES, x, z, `Strike drones over our ${what}`, now));
+      } else if (type === EV_PLANE) {
+        // Radar has it from the moment it crosses the edge of the map.
+        const x = s.positions[2 * a];
+        const z = s.positions[2 * a + 1];
+        const mine = ((s.info[a] >> INFO_TEAM_SHIFT) & INFO_TEAM_MASK) === me;
+        if (mine) {
+          this.show(this.book.raise(ALERT_NOTE, x, z, `Transport plane inbound, ${b} squads`, now));
+        } else {
+          this.show(
+            this.book.raise(ALERT_DRONES, x, z, 'Enemy transport plane: air defence!', now),
+          );
+        }
+      } else if (type === EV_PARADROP) {
+        const x = unpackX(a);
+        const z = unpackY(a);
+        if ((b & 255) === me) {
+          this.show(this.book.raise(ALERT_NOTE, x, z, 'Paratroops on the ground', now));
+        } else this.attack(ALERT_ARMY, x, z, 'Enemy paratroops landing', now);
       } else if (type === EV_DEATH) {
         if (u.teamOf(a) === me && b >= 0 && b < s.count && u.teamOf(b) !== me) this.struck(a, now);
       } else if (type === EV_STORM) {

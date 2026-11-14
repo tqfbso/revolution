@@ -128,6 +128,10 @@ export interface Snapshot {
   tier: number[];
   pop: number[];
   popCap: number[];
+  /** Per team: paratroop squads in reserve, helicopters flying and what the helipads hold. */
+  reserve: number[];
+  helis: number[];
+  heliCap: number[];
   /** Per team: supplies a minute the army costs to keep. */
   upkeep: number[];
   /**

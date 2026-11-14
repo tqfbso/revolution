@@ -25,7 +25,7 @@ export type Role = 'host' | 'guest';
 export const DUTIES = ['Everything', 'Armour', 'Infantry', 'Air and drones', 'Economy'] as const;
 
 /** The kinds of unit each role looks after (KIND_* numbers), by index into DUTIES. */
-const DUTY_KINDS: number[][] = [[], [0, 3, 4, 8, 9], [1, 2, 5, 11], [6, 7], [10]];
+const DUTY_KINDS: number[][] = [[], [0, 3, 4, 8, 9], [1, 2, 5, 11], [6, 7, 12, 13, 14], [10]];
 
 /** The most players in one game, the host included. */
 export const MAX_PLAYERS = 4;

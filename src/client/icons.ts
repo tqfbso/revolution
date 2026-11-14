@@ -10,6 +10,10 @@ import {
   KIND_COUNT,
   KIND_DRONE,
   KIND_ENGINEER,
+  KIND_HELI,
+  KIND_LIFT,
+  KIND_PARA,
+  KIND_PLANE,
   KIND_EW,
   KIND_IFV,
   KIND_INFANTRY,
@@ -93,6 +97,31 @@ function glyphs(): Draw[] {
     dot(c, 42, 40, 4);
   };
   g[KIND_ENGINEER] = (c) => line(c, [16, 40, 16, 26, 48, 26, 48, 40, 32, 26, 32, 40]);
+  // Helicopters: a rotor bow tie; the gunship has a dot under it, the transport an oval.
+  const rotor = (c: CanvasRenderingContext2D) => line(c, [14, 20, 50, 34, 50, 20, 14, 34, 14, 20]);
+  g[KIND_HELI] = (c) => {
+    rotor(c);
+    dot(c, 32, 42, 4);
+  };
+  g[KIND_LIFT] = (c) => {
+    rotor(c);
+    c.beginPath();
+    c.ellipse(32, 42, 9, 4, 0, 0, Math.PI * 2);
+    c.stroke();
+  };
+  // Paratroops: infantry under a canopy.
+  g[KIND_PARA] = (c) => {
+    cross(c);
+    c.beginPath();
+    c.arc(32, 26, 15, Math.PI, 0);
+    c.stroke();
+  };
+  // The transport plane: wings and a tail.
+  g[KIND_PLANE] = (c) => {
+    line(c, [32, 14, 32, 50]);
+    line(c, [12, 30, 52, 30]);
+    line(c, [24, 46, 40, 46]);
+  };
   return g;
 }
 

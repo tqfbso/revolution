@@ -183,7 +183,7 @@ export class Input {
         send({ type: CMD_UNLOAD, units: units.selectedIds().filter((id) => units.load[id] > 0) });
       } else if (e.code === 'KeyL' && units.selectedCount > 0) {
         card.mount();
-      }
+      } else if (e.code === 'KeyJ') card.paradrop();
     });
   }
 

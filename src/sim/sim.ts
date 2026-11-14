@@ -24,6 +24,7 @@ import {
 } from './commands';
 import { applyEconomyCommand, updateEconomy } from './economy';
 import { applyCommanderCommand } from './commanders';
+import { applyAirCommand, updateAir } from './air';
 import { applyUrbanCommand, fortified, spillRubble, updateEntrench } from './urban';
 import {
   HIT_CHARGE,
@@ -121,7 +122,10 @@ import {
   BLAST_STRAY,
   KINDS,
   KIND_COUNT,
+  IS_DRONE,
   KIND_INFANTRY,
+  KIND_PARA,
+  KIND_PLANE,
   KIND_TANK,
   REVEAL_TICKS,
   type UnitKind,
@@ -367,6 +371,7 @@ export function step(w: World, commands: readonly Command[]): void {
   acquireTargets(w);
   armStrikes(w);
   updateCivilians(w);
+  updateAir(w);
   steer(w);
   separate(w);
   fire(w);
@@ -418,6 +423,7 @@ function applyCommand(w: World, cmd: Command): void {
   }
   if (applyEconomyCommand(w, cmd) || applyWorkCommand(w, cmd)) return;
   if (applyUrbanCommand(w, cmd)) return;
+  if (applyAirCommand(w, cmd)) return;
   if (applyCommanderCommand(w, cmd)) return;
   // Any other order takes a truck off its job.
   if ('units' in cmd) {
@@ -1094,7 +1100,8 @@ export function validUnits(w: World, ids: readonly number[]): number[] {
       id >= 0 &&
       id < w.count &&
       w.state[id] === STATE_ALIVE &&
-      w.carrier[id] < 0
+      w.carrier[id] < 0 &&
+      w.kind[id] !== KIND_PLANE
     ) {
       out.push(id);
     }
@@ -1659,7 +1666,7 @@ function updateJamming(w: World): void {
   }
   jammerCount = count;
   for (let i = 0; i < n; i++) {
-    if (!IS_AIR[w.kind[i]] || w.state[i] !== STATE_ALIVE) continue;
+    if (!IS_DRONE[w.kind[i]] || w.state[i] !== STATE_ALIVE) continue;
     let hit = 0;
     for (let k = 0; k < count; k++) {
       const e = jammers[k];
@@ -2165,7 +2172,7 @@ function fire(w: World): void {
     if (kind.kamikaze && (w.tick - w.strikeAt[t]) >>> 0 >= STRIKE_WINDOW_TICKS) continue;
     let dmg = kind.damage[w.kind[t]];
     if (
-      w.kind[i] === KIND_INFANTRY &&
+      (w.kind[i] === KIND_INFANTRY || w.kind[i] === KIND_PARA) &&
       KIND_CLASS[w.kind[t]] === CLASS_VEHICLE &&
       d2 <= CLOSE_ROCKET_SQ
     ) {
@@ -2277,14 +2284,18 @@ function kill(w: World, i: number, by: number): void {
     w.carrier[i] = -1;
   }
   if (w.load[i] > 0) {
-    // The vehicle is hit with its squads aboard: half of each gets out.
+    // The vehicle is hit with its squads aboard: half of each gets out. Out of a helicopter
+    // that comes down, a quarter; out of a transport plane, nobody.
+    const plane = w.kind[i] === KIND_PLANE;
+    const air = IS_AIR[w.kind[i]];
+    w.load[i] = 0;
     for (let j = 0; j < w.count; j++) {
       if (w.carrier[j] !== i) continue;
       w.carrier[j] = -1;
-      w.hp[j] -= w.hp[j] >> 1;
       w.flags[j] = 0;
+      if (plane) kill(w, j, by);
+      else w.hp[j] -= air ? w.hp[j] - (w.hp[j] >> 2) : w.hp[j] >> 1;
     }
-    w.load[i] = 0;
   }
   score(w, i, by);
   w.hp[i] = 0;
@@ -2472,6 +2483,7 @@ function steer(w: World): void {
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
     if (w.inside[i] >= 0 || w.carrier[i] >= 0) continue; // garrisons and passengers stay put
+    if (w.kind[i] === KIND_PLANE) continue; // flown by updateAir
     let flags = w.flags[i];
     const cls = layerOf(w.team[i], KIND_CLASS[w.kind[i]]);
     const x = w.posX[i];
