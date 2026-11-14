@@ -291,9 +291,9 @@ before co-op and before U2.
 Decision 092. Host-clock lockstep over WebRTC, invite link, build check, hash check every
 two seconds, shared pause and speed, either side plays on alone after a drop. Roles, first
 layer: picked in the lobby, shown to both, marked on the production screen; ping (Z) and
-the partner's view on the minimap. Next, in this order: rejoining a game in progress (send
-the world), orders that know who gave them (unit handover, "my units", soft budgets per
-role), role-first screens, more than two players.
+the partner's view on the minimap. Rejoining a game in progress is built (decision 100,
+by replaying the orders, not by sending the world). Next: orders that know who gave them
+(unit handover, "my units", soft budgets per role), role-first screens.
 
 ## Strategic command (built; a deliberate change of order)
 
@@ -387,7 +387,7 @@ tokens, where only a few enemies may fire at once, as a way to pace `easy`.
 In this order, ahead of M10. Items 6 to 11 are planned only.
 
 1. More resources, and income from held flags. BUILT (decision 098)
-2. Co-op rejoin: a dropped player comes back into the running game
+2. Co-op rejoin: a dropped player comes back into the running game. BUILT (decision 100)
 3. Raiding AI: small squads that probe, harass and pull back; big attacks rarer
 4. Civilians: about 400 a map, fleeing to the edges; each death costs the army that
    caused it resources. No gore

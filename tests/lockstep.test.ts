@@ -8,6 +8,7 @@ import { step } from '../src/sim/sim';
 import { createStaff, staffThink } from '../src/sim/staff';
 import { createWorld, hashWorld } from '../src/sim/world';
 import type { Frame } from '../src/worker/protocol';
+import { GameLog, PIECE_CHARS, expand } from '../src/client/replay';
 
 // Co-op (decision 092): the guest's sim is sent nothing but the players' orders, tick by
 // tick, and must arrive at the host's world. This plays the worker's loop on both sides.
@@ -129,4 +130,65 @@ describe('co-op lockstep', () => {
       expect(tuningFor(level, 9)).toEqual(four);
     }
   });
+});
+
+describe('co-op rejoin (decision 100)', () => {
+  it('the record, cut into pieces and put together again, is the game tick for tick', () => {
+    const log = new GameLog();
+    const all: Frame[] = [];
+    for (let t = 0; t < 9000; t++) {
+      const f: Frame = [t, orders(t, 400)];
+      all.push(f);
+      // As the worker reports them: a few ticks at a time.
+      if (t % 3 === 2) log.add(all.slice(t - 2));
+    }
+    expect(log.through).toBe(9000);
+    const back: Frame[] = [];
+    let from = 0;
+    let at = 0;
+    let pieces = 0;
+    for (;;) {
+      const next = log.piece(from, at);
+      if (!next) break;
+      expect(JSON.stringify(next.piece.f).length).toBeLessThan(PIECE_CHARS + 2000);
+      for (const f of expand(JSON.parse(JSON.stringify(next.piece)) as typeof next.piece))
+        back.push(f);
+      from = next.piece.to;
+      at = next.at;
+      pieces++;
+    }
+    expect(pieces).toBeGreaterThan(3);
+    expect(back).toEqual(all);
+  });
+
+  it('a player who comes back late plays the record through and stands where the host stands', () => {
+    const host = side(5, 3);
+    const log = new GameLog();
+    const run = (n: number) => {
+      for (let k = 0; k < n; k++) {
+        const f: Frame = [host.w.tick, orders(host.w.tick, host.w.count)];
+        log.add([f]);
+        host.tick(f[1]);
+      }
+    };
+    run(900);
+    // He opens the link now; the host plays on while the record travels.
+    const late = side(5, 3);
+    let from = 0;
+    let at = 0;
+    for (;;) {
+      const next = log.piece(from, at);
+      if (!next) break;
+      const wire = JSON.parse(JSON.stringify(next.piece)) as typeof next.piece;
+      for (const f of expand(wire)) {
+        expect(f[0]).toBe(late.w.tick);
+        late.tick(f[1]);
+      }
+      from = next.piece.to;
+      at = next.at;
+      if (host.w.tick < 1100) run(50);
+    }
+    expect(late.w.tick).toBe(host.w.tick);
+    expect(hashWorld(late.w)).toBe(hashWorld(host.w));
+  }, 120000);
 });
