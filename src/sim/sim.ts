@@ -1,3 +1,4 @@
+import { civiliansShelled, civiliansShot, updateCivilians } from './civilians';
 import {
   HUNGRY_RELOAD,
   HUNGRY_SPEED,
@@ -354,6 +355,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateCameras(w);
   acquireTargets(w);
   armStrikes(w);
+  updateCivilians(w);
   steer(w);
   separate(w);
   fire(w);
@@ -1985,6 +1987,7 @@ function resolveShells(w: World): void {
     w.events.push(EV_IMPACT, packPoint(x, y), 0);
     blastStructures(w, x, y, kind.siege, kind.blast);
     blastWorks(w, x, y, kind.siege, kind.blast);
+    civiliansShelled(w, x, y, kind.blast, w.team[owner]);
     const R = kind.blast;
     const r = (R >> CELL_SHIFT) + 1;
     const cx = x >> CELL_SHIFT;
@@ -2185,6 +2188,7 @@ function fire(w: World): void {
     w.cooldown[i] = reloadOf(w, i, kind);
     if (w.inside[i] >= 0) w.reveal[i] = w.tick + REVEAL_TICKS;
     w.events.push(EV_SHOT, i, t);
+    civiliansShot(w, i, t);
     if (kind.kamikaze) {
       // The drone is the warhead, and the next one waits.
       damage[i] += 30000;

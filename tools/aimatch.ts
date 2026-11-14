@@ -60,6 +60,9 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
   }
 }
 console.log(
+  `civilians ${w.civCount}: killed ${Array.from(w.civKilled).join('/')} escaped ${w.civEscaped} home ${w.civState.filter((s) => s === 1).length}`,
+);
+console.log(
   `step: worst ${stepWorst.toFixed(1)} ms, mean ${(stepTotal / w.tick).toFixed(2)} ms/tick`,
 );
 console.log(
