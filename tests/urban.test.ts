@@ -23,11 +23,13 @@ import {
   wallMax,
 } from '../src/sim/map';
 import { faceToward, stageOf, step } from '../src/sim/sim';
-import { KINDS, KIND_ENGINEER, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
+import { FORT_TICKS } from '../src/sim/urban';
+import { KINDS, KIND_ARTILLERY, KIND_ENGINEER, KIND_INFANTRY, KIND_TANK } from '../src/sim/units';
 import {
   EV_COLLAPSE,
   EV_GUTTED,
   EV_STORMED,
+  EV_STRAY,
   EV_WALL,
   STATE_ALIVE,
   createWorld,
@@ -56,13 +58,15 @@ function events(w: World, type: number): number[][] {
 }
 
 describe('buildings that die slowly (U1)', () => {
-  it('come in three classes, each far tougher than the old 220 a cell', () => {
+  it('come in three classes, by what they are built of', () => {
     expect(buildClass(2, 2, 3)).toBe(BUILD_HOUSE);
     expect(buildClass(2, 3, 5)).toBe(BUILD_BLOCK);
     expect(buildClass(3, 3, 2)).toBe(BUILD_HALL);
-    expect(withHouse(2, 2, 3).sMaxHp[0]).toBe(450 * 4);
-    expect(withHouse(2, 2, 4).sMaxHp[0]).toBe(900 * 4);
-    expect(withHouse(3, 3, 2).sMaxHp[0]).toBe(1300 * 9);
+    // Decision 095 brought these down from 450, 900 and 1300: the houses of the city map
+    // cover nine cells, not the four those were set for.
+    expect(withHouse(2, 2, 3).sMaxHp[0]).toBe(200 * 4);
+    expect(withHouse(2, 2, 4).sMaxHp[0]).toBe(400 * 4);
+    expect(withHouse(3, 3, 2).sMaxHp[0]).toBe(600 * 9);
   });
 
   it('a shot meets the face it comes from', () => {
@@ -72,7 +76,7 @@ describe('buildings that die slowly (U1)', () => {
     expect(faceToward(m, 0, fx(509), fx(470))).toBe(FACE_NORTH);
   });
 
-  it('a lone tank breaches the wall in seconds but needs minutes to gut the house', () => {
+  it('a lone tank breaches the wall in seconds and guts a small house in about a minute', () => {
     const w = createWorld(1, withHouse());
     step(w, [spawnAt(1, KIND_TANK, 1, 535, 500)]);
     step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [0], structure: 0 }]);
@@ -92,9 +96,9 @@ describe('buildings that die slowly (U1)', () => {
     expect(breached).toBeLessThan(600);
     expect(w.sWall[FACE_EAST]).toBe(0);
     expect(w.sWall[FACE_WEST]).toBe(wallMax(w.map, 0, FACE_WEST));
-    // About four minutes to gut it, and it is still not a ruin.
-    expect(gutted).toBeGreaterThan(3 * 1200);
-    expect(gutted).toBeLessThan(5 * 1200);
+    // About a minute to gut it (four before decision 095), and it is not a ruin.
+    expect(gutted).toBeGreaterThan(700);
+    expect(gutted).toBeLessThan(1500);
     expect(stageOf(w, 0)).toBe(STAGE_GUTTED);
     expect(events(w, EV_COLLAPSE).length).toBe(0);
   });
@@ -182,6 +186,112 @@ describe('buildings that die slowly (U1)', () => {
     for (let t = 0; t < 600; t++) step(w, []);
     expect(w.map.type[cell]).toBe(T_RUBBLE);
     expect(w.sHp[0]).toBe(0);
+  });
+});
+
+describe('collateral damage (decision 095)', () => {
+  /** A squad of army 0 that will not die, in the open just east of the house. */
+  function bystander(w: World): void {
+    step(w, [spawnAt(0, KIND_INFANTRY, 1, 516, 500)]);
+    w.posX[0] = fx(516);
+    w.posY[0] = fx(500);
+    w.stance[0] = 1;
+  }
+
+  it('a tank firing at men in front of a house opens its wall and wears it down', () => {
+    const w = createWorld(1, withHouse());
+    bystander(w);
+    step(w, [spawnAt(1, KIND_TANK, 1, 535, 500)]);
+    w.events.length = 0;
+    let hits = 0;
+    for (let t = 0; t < 900; t++) {
+      w.hp[0] = 30000;
+      w.posX[0] = fx(516);
+      w.posY[0] = fx(500);
+      step(w, []);
+      hits += events(w, EV_STRAY).length;
+      w.events.length = 0;
+    }
+    // Nobody ordered it: the rounds that go past the squad land on the house behind it.
+    expect(hits).toBeGreaterThan(7);
+    expect(w.sWall[FACE_EAST]).toBe(0);
+    expect(w.sWall[FACE_WEST]).toBe(wallMax(w.map, 0, FACE_WEST));
+    expect(stageOf(w, 0)).toBeGreaterThanOrEqual(STAGE_DAMAGED);
+    expect(w.sHp[0]).toBeGreaterThan(0);
+  });
+
+  it('rifle fire shoots up the house behind its target but cannot gut it', () => {
+    const w = createWorld(1, withHouse());
+    bystander(w);
+    step(w, [spawnAt(1, KIND_INFANTRY, 6, 526, 500)]);
+    let shotUp = -1;
+    for (let t = 0; t < 4800; t++) {
+      w.hp[0] = 30000;
+      w.posX[0] = fx(516);
+      w.posY[0] = fx(500);
+      step(w, []);
+      if (shotUp < 0 && stageOf(w, 0) === STAGE_DAMAGED) shotUp = t;
+    }
+    // Six squads need most of a minute to leave their mark on a small house.
+    expect(shotUp).toBeGreaterThan(200);
+    expect(shotUp).toBeLessThan(1200);
+    expect(w.sWall[FACE_EAST]).toBeLessThan(wallMax(w.map, 0, FACE_EAST));
+    // Four minutes of it and the house still stands, with its floors.
+    expect(stageOf(w, 0)).toBe(STAGE_DAMAGED);
+    expect(w.sHp[0] * 100).toBeGreaterThanOrEqual(w.map.sMaxHp[0] * 35);
+  });
+
+  it('a fight in the open, away from any house, harms none', () => {
+    const w = createWorld(1, withHouse());
+    step(w, [spawnAt(0, KIND_INFANTRY, 4, 560, 560), spawnAt(1, KIND_TANK, 2, 580, 560)]);
+    for (let t = 0; t < 600; t++) step(w, []);
+    expect(w.sHp[0]).toBe(w.map.sMaxHp[0]);
+    for (let f = 0; f < 4; f++) expect(w.sWall[f]).toBe(wallMax(w.map, 0, f));
+  });
+
+  it('a shell that lands in the street hurts the houses beside it, less with distance', () => {
+    const burst = (x: number) => {
+      const w = createWorld(1, withHouse());
+      step(w, [spawnAt(1, KIND_ARTILLERY, 1, 700, 500)]);
+      w.shX[0] = fx(x);
+      w.shY[0] = fx(500);
+      w.shTick[0] = w.tick + 1;
+      w.shOwner[0] = 0;
+      w.shKind[0] = KIND_ARTILLERY;
+      w.shSmoke[0] = 0;
+      w.shellCount = 1;
+      for (let t = 0; t < 3; t++) step(w, []);
+      return w.map.sMaxHp[0] - w.sHp[0];
+    };
+    const siege = KINDS[KIND_ARTILLERY].siege;
+    expect(burst(508)).toBe(siege);
+    const near = burst(513);
+    const far = burst(516);
+    expect(near).toBeLessThan(siege);
+    expect(near).toBeGreaterThan(far);
+    expect(far).toBeGreaterThan(siege / 2);
+    expect(burst(520)).toBe(0);
+  });
+
+  it('a fortified house loses a quarter less to it', () => {
+    const run = (fort: boolean) => {
+      const w = createWorld(1, withHouse());
+      if (fort) w.sFort[0] = FORT_TICKS;
+      bystander(w);
+      step(w, [spawnAt(1, KIND_TANK, 1, 535, 500)]);
+      for (let t = 0; t < 400; t++) {
+        w.hp[0] = 30000;
+        w.posX[0] = fx(516);
+        w.posY[0] = fx(500);
+        step(w, []);
+      }
+      return w.map.sMaxHp[0] - w.sHp[0];
+    };
+    const plain = run(false);
+    const braced = run(true);
+    expect(plain).toBeGreaterThan(0);
+    expect(braced).toBeLessThan(plain);
+    expect(braced).toBeGreaterThan(plain / 2);
   });
 });
 

@@ -114,6 +114,10 @@ when it becomes a ruin, instead of half at once.
 
 ### 4.2 Much tougher, and two kinds of damage
 
+_Retuned on 2026-11-14 (decision 095): 200, 400 and 600 per cell, direct fire does half
+its damage to the structure, and battles nearby do collateral damage. The numbers below
+are the plan as first written._
+
 - Three building classes with their own structure: house (brick or timber, 2 to 3 floors,
   450 per cell), apartment or office block (concrete, 4 to 8 floors, 900 per cell),
   industrial and public (hall, station, town hall, 1,300 per cell). Today everything is 220.

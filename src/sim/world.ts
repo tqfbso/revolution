@@ -139,6 +139,7 @@ export const EV_STORM = 21; // a = structure, b = the army storming it: a second
 export const EV_STORMED = 22; // a = structure, b = the army that took it from its garrison
 export const EV_STRIKE = 23; // a = target, b = drone: strike drones are lining up on it
 export const EV_FORTIFIED = 24; // a = structure, b = 1 fortified, 0 mended back to whole
+export const EV_STRAY = 25; // a = structure, b = shooter: a round meant for someone else hit it
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */

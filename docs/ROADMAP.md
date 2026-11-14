@@ -260,6 +260,9 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   damaged, gutted, ruin), each still a position; building classes two to six times
   tougher; tank guns break walls, artillery brings structures down; a ruin cannot be
   destroyed further; the garrison's losses come in two steps
+  Retuned 2026-11-14 (decision 095) after Fabio found the city too hard to destroy:
+  buildings about half as tough, and collateral damage (stray rounds, shell bursts,
+  vehicles that blow up, the fight inside)
 - U2 Hold and take a block. BUILT 2026-11-13 (decision 086): storming an enemy-held
   building, with breaches and smoke taking away the defender's edge; the AI storms too.
   Still to do (Fable 5.2 with Sonnet 5.5 for the interface): fortify, repair, barricades,
