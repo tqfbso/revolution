@@ -295,7 +295,7 @@ const structDamage = new Int32Array(MAX_STRUCTS);
 const wallDamage = new Int32Array(MAX_STRUCTS * 4);
 /**
  * Damage of the tick from stray bullets and light cannon. It shoots a building up (windows,
- * plaster, a wall in the end) but cannot gut it: it stops at the gutted mark.
+ * plaster, a wall, in the end the floors) but cannot level it: it stops at LIGHT_FLOOR_PCT.
  */
 const lightDamage = new Int32Array(MAX_STRUCTS);
 /** Set for a structure with wall or light damage waiting this tick. */
@@ -819,12 +819,14 @@ function buildingAt(w: World, x: number, y: number): number {
 }
 
 /** How far past its target, in cells, a round that misses still does harm. */
-const STRAY_CELLS = 5;
+const STRAY_CELLS = 8;
+/** Bullets and light cannon can gut a building but not level it: they stop at this percent. */
+const LIGHT_FLOOR_PCT = 10;
 /** What a vehicle that blows up does to the buildings beside it, and how far. */
-const WRECK_SIEGE = 60;
-const WRECK_BLAST = fx(6);
+const WRECK_SIEGE = 100;
+const WRECK_BLAST = fx(9);
 /** What a fight inside a building does to it every STORM_PERIOD: grenades from room to room. */
-const STORM_WRECK = 8;
+const STORM_WRECK = 4;
 
 /**
  * Collateral damage (decision 095). Unit `i` has just fired at `t`, who is in the open;
@@ -2002,7 +2004,8 @@ function resolveShells(w: World): void {
     }
     w.shSmoke[k] = w.shSmoke[last];
     w.events.push(EV_IMPACT, packPoint(x, y), 0);
-    blastStructures(w, x, y, kind.siege, kind.blast);
+    // Masonry cracks further out than splinters kill (decision 104).
+    blastStructures(w, x, y, kind.siege, (kind.blast * 3) >> 1);
     blastWorks(w, x, y, kind.siege, kind.blast);
     civiliansShelled(w, x, y, kind.blast, w.team[owner]);
     const R = kind.blast;
@@ -2307,7 +2310,7 @@ function resolveStructures(w: World): void {
     if (d === 0 && wallTouched[s] === 0) continue;
     structDamage[s] = 0;
     if (lightDamage[s] !== 0) {
-      const room = w.sHp[s] - Math.ceil((map.sMaxHp[s] * GUTTED_PCT) / 100);
+      const room = w.sHp[s] - Math.ceil((map.sMaxHp[s] * LIGHT_FLOOR_PCT) / 100);
       if (room > 0) d += lightDamage[s] < room ? lightDamage[s] : room;
       lightDamage[s] = 0;
     }
