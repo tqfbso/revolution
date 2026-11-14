@@ -297,7 +297,7 @@ export class UnitView {
     this.vehicles[KIND_LIFT] = vehicle(buildHelicopter(false), 128);
     this.vehicles[KIND_PLANE] = vehicle(buildTransportPlane(), 32);
     this.chutes = batch(
-      box(2.6, 0.9, 2.6, { at: [0, 0, 0], top: [0.45, 0.45], color: 0x8d9180, team: 0.25 }),
+      box(2.6, 0.9, 2.6, { at: [0, 0, 0], top: [0.45, 0.45], color: 0xa9ab98, team: 0.06 }),
       256,
       0,
     );

@@ -467,7 +467,7 @@ export function buildHelicopter(gunship: boolean): VehicleModel {
   const tall = gunship ? 0.8 : 1.0;
   const parts = [
     // Cabin, nose and the boom to the tail.
-    box(wid, tall, 2.3, { at: [0, 0, 0.2], top: [0.8, 0.86], color: AIRFRAME, team: 0.25 }),
+    box(wid, tall, 2.3, { at: [0, 0, 0.2], top: [0.8, 0.86], color: AIRFRAME, team: 0.1 }),
     box(wid * 0.8, tall * 0.6, 0.8, { at: [0, -0.12, 1.6], top: [0.6, 0.5], color: AIRFRAME }),
     box(wid * 0.74, tall * 0.4, 0.75, { at: [0, 0.14, 1.28], top: [0.8, 0.6], color: GLASS }),
     box(0.2, 0.24, 2.5, { at: [0, 0.14, -2.1], top: [0.7, 0.6], color: AIRFRAME }),
@@ -485,7 +485,7 @@ export function buildHelicopter(gunship: boolean): VehicleModel {
   ];
   if (gunship) {
     parts.push(
-      box(2.2, 0.07, 0.5, { at: [0, -0.12, 0.1], color: AIRFRAME, team: 0.5 }),
+      box(2.2, 0.07, 0.5, { at: [0, -0.12, 0.1], color: AIRFRAME, team: 0.3 }),
       cyl(0.16, 0.9, 'z', { at: [-0.8, -0.28, 0.2], color: 0x3a3d33 }, 8),
       cyl(0.16, 0.9, 'z', { at: [0.8, -0.28, 0.2], color: 0x3a3d33 }, 8),
       cyl(0.035, 0.6, 'z', { at: [0, -0.42, 1.9], color: STEEL }, 6), // chin gun

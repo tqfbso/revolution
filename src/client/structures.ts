@@ -1175,37 +1175,37 @@ function baseParts(
     // corners, and a hut and a windsock mast at the back.
     const r = Math.min(w, d) * 0.3;
     parts.push({
-      size: [r * 2.5, 0.1, r * 2.5],
-      at: [cx, base + 0.05, cz + d * 0.08],
+      size: [r * 2.5, 1.2, r * 2.5],
+      at: [cx, base - 0.2, cz + d * 0.08],
       color: 0x77786f,
     });
     for (const side of [-1, 1]) {
       parts.push({
         size: [0.34, 0.03, r * 1.1],
-        at: [cx + side * r * 0.42, base + 0.12, cz + d * 0.08],
+        at: [cx + side * r * 0.42, base + 0.42, cz + d * 0.08],
         color: 0xd8d6c8,
       });
       parts.push({
         size: [r * 2.3, 0.03, 0.22],
-        at: [cx, base + 0.12, cz + d * 0.08 + side * r * 1.12],
+        at: [cx, base + 0.42, cz + d * 0.08 + side * r * 1.12],
         color: paint,
       });
       parts.push({
         size: [0.22, 0.03, r * 2.3],
-        at: [cx + side * r * 1.12, base + 0.12, cz + d * 0.08],
+        at: [cx + side * r * 1.12, base + 0.42, cz + d * 0.08],
         color: paint,
       });
       for (const end of [-1, 1]) {
         parts.push({
           size: [0.16, 0.3, 0.16],
-          at: [cx + side * r * 1.2, base + 0.15, cz + d * 0.08 + end * r * 1.2],
+          at: [cx + side * r * 1.2, base + 0.5, cz + d * 0.08 + end * r * 1.2],
           color: 0xc9b458,
         });
       }
     }
     parts.push({
       size: [r * 0.84, 0.03, 0.3],
-      at: [cx, base + 0.12, cz + d * 0.08],
+      at: [cx, base + 0.42, cz + d * 0.08],
       color: 0xd8d6c8,
     });
     shed(cx - w * 0.3, cz - d * 0.4, w * 0.3, d * 0.14, 1.2, DRAB);

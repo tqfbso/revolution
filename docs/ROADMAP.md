@@ -395,7 +395,8 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 5. Victory screen: kills, losses, buildings and civilians lost, an MVP per player. BUILT
    (decision 103)
 6. Helicopters (capped by helipads, about 3 a pad) and paratroopers (built into a
-   reserve, dropped by a transport plane that air defence can shoot down)
+   reserve, dropped by a transport plane that air defence can shoot down). BUILT
+   (decision 105)
 7. European city map: dense blocks, parks, an elevated highway, a river with bridges
    balanced by tunnels and underpasses, a central station
 8. The computer fighting in cities (U5): garrisoning, storming, using ruins

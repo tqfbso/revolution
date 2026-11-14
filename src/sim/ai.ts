@@ -204,7 +204,7 @@ interface Tuning {
   /** Trucks it sends along behind an attack, so the army is still in supply when it arrives. */
   wagons: number;
   /**
-   * The air (decision 104): attack helicopters it keeps (it builds a helipad for them),
+   * The air (decision 105): attack helicopters it keeps (it builds a helipad for them),
    * paratroop squads it trains for one drop (0 = none), the first tick it drops them and
    * the ticks between two drops.
    */

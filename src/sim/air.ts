@@ -1,4 +1,4 @@
-// Paratroops (decision 104). They are trained into a reserve that waits off the map, and a
+// Paratroops (decision 105). They are trained into a reserve that waits off the map, and a
 // second order drops them: a transport plane comes in over the army's own edge of the map
 // with up to PARA_PLANE_LOAD squads aboard, flies straight at the point asked for, puts them
 // out over it and turns for home. Nobody steers the plane and nothing but air defence can

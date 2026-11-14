@@ -83,7 +83,7 @@ function run(w: World, ticks: number, each?: () => void): void {
   }
 }
 
-describe('helicopters (decision 104)', () => {
+describe('helicopters (decision 105)', () => {
   it('a helipad holds three: the fourth waits for landing space', () => {
     const { w, pad } = base();
     const train: Command = { type: CMD_TRAIN, structure: pad, kind: KIND_HELI };
@@ -142,7 +142,7 @@ describe('helicopters (decision 104)', () => {
   });
 });
 
-describe('paratroops (decision 104)', () => {
+describe('paratroops (decision 105)', () => {
   it('are trained into a reserve, not onto the map', () => {
     const { w, barracks } = base();
     const train: Command = { type: CMD_TRAIN, structure: barracks, kind: KIND_PARA };

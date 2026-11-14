@@ -1897,3 +1897,65 @@ Ruins and gutted shells are still positions, and fortifying still takes a quarte
 **Measured.** Hard against hard on the city: after 45 minutes on seed 1, 85 of 444
 buildings are marked or worse and 21 levelled (19 and 5 after 095); on seed 2, 117 of 552
 after 30 minutes. Golden hash 476858902.
+
+## 105. Helicopters limited by their pads, paratroops dropped from a reserve (2026-11-14)
+
+Roadmap item 6. Fabio's brief: helicopters capped by helipads at about three a pad, "not
+necessarily expensive but limited by landing space", in a transport and an attack role;
+paratroopers built into a waiting reserve and dropped as a second step by a plane that
+air defence can shoot down, and dear. All of it has to fit the army-mix pillar: aircraft
+are the slowest and scarcest things an army has.
+
+**Four new kinds** (`sim/units.ts`, 12 to 15; `KIND_COUNT` is now 16, all the slots there
+are). The attack helicopter flies at twice a tank's speed, outranges a tank gun and kills
+a tank in six salvos, with no armour at all: two air-defence vehicles shoot it down in
+about four seconds, a street full of rifles or an autocannon wears it down. The transport
+helicopter carries four squads with the load and unload orders carriers already have.
+Paratroopers are a rifle squad and a half. The transport plane is not a unit anyone
+orders: `validUnits` drops it from every order, the client never selects it.
+
+**Landing space is the limit** (`sim/economy.ts`). The new Helipad (tier 2, 3 by 3) both
+builds helicopters and holds `HELIS_PER_PAD` = 3. A helicopter at the head of a pad's
+queue waits while the army has as many as its finished pads hold, the same way a unit
+waits at the army limit. They cost a tank's fuel and about a minute each, 4 and 3 army
+points. Lose a pad and the helicopters stay up, but no more are built until there is room.
+
+**Paratroops** (`sim/air.ts`). Trained at the Barracks from tier 2 (90 supplies, 90
+credits, 14 seconds, 2 army points), they do not walk out of the door: `World.paraReserve`
+counts them, up to 16, and they count against the army limit while they wait. The drop is
+one new order, `CMD_PARADROP` (team, x, y): a plane appears on the edge of the map nearest
+the army's start with up to eight squads aboard as real units riding in it, flies straight
+at the point at 22 m a second, puts them out scattered within 9 m (each on ground it can
+stand on, unable to fire for three seconds), turns and leaves by the edge it came from.
+Only air defence can hurt the plane; shot down on the way in, everyone aboard dies with
+it. On the ground paratroops are ordinary infantry with two minutes of rations, so a drop
+far from the army is a raid, and a drop the army reaches in time is a bridgehead.
+
+**Smaller rules.** Jamming is now for drones only (`IS_DRONE`): a helicopter has a crew
+aboard. Out of a helicopter that is shot down a quarter of each squad gets out (half out
+of a ground carrier). Rifles, autocannon and engineers can now hit helicopters; nothing
+on the ground but air defence reaches the plane.
+
+**The computer** (`sim/ai.ts`). Normal keeps 2 attack helicopters and hard 3: it builds
+one helipad after its drone workshop from minute 10, buys the helicopters by the head, and
+they go out with the field army behind its line. Normal trains 4 paratroop squads for one
+drop from minute 15 and every 6 minutes after, hard 8 from minute 9 every 4; easy and
+recruit have no air at all. A drop goes to a flag the enemy holds or a stockpile on his
+side, away from his base and from wherever his troops were seen; the squads take the
+place, hold it, and move to the next one in reach when it is quiet. And it counters: a
+helicopter seen counts as two drones and a transport plane as three when it decides how
+much air defence to build.
+
+**The player.** J, or the "Paratroops N (J)" button that appears in the top bar while
+there is a reserve, then a click on the map or the minimap. A banner and a spoken line
+say when a plane comes in ("Enemy transport plane: air defence!") and when paratroops
+land. The helipad's card shows the landing space used. In co-op the "Air and drones" role
+covers the three new kinds.
+
+**Determinism.** The drop is a command, the reserve and the helicopter counts are world
+state and in the hash, the scatter comes from the world's generator. The golden hash
+changes (476858902 to 1084769414) because the hash now includes those fields.
+
+**Not done.** The computer does not use transport helicopters. Helicopters do not have to
+return to a pad to rearm. There is no fighter cover: the plane's only enemy is air
+defence.
