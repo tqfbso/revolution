@@ -2066,9 +2066,9 @@ until the town was secured ("lost" = the commander broke off beaten):
 | City centre, 4 tanks + 3 fighting vehicles + 8 squads              | 16 of 60, 117 s | 25 of 60, lost  |
 
 Seventeen fights were run; the staged attack lost more in every one. Tanks trailing the
-squads in a town made each of them worse again (the first row: 5 lost becomes 5, the second
-9 becomes 11, the no-armour row 1 becomes 3). Recon sent ahead on its own cost the drone, and
-about one point more, in 15 of 17.
+squads in a town made it worse again wherever the body had tanks (second row: 9 lost becomes
+11; the no-armour row: 1 becomes 3). Recon sent ahead on its own, with nothing else changed,
+cost one or two points more in 15 of the 17, the drone being the first of them.
 
 Why, in this game's rules:
 
