@@ -262,35 +262,40 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     sulk: 20 * MINUTE,
     wagons: 1,
   },
+  // Decision 096: Fabio's group found this level far too hard. It had been the computer at
+  // full stretch (an army at the 800 point cap by minute 20, seven times easy's), which left
+  // no step between easy and hard. It is now the middle: an army about three times easy's,
+  // a first attack at minute 16, a pause between attacks, and a short delay before it
+  // answers an intrusion. It still plays properly: counters, raids, focus fire, field works.
   normal: {
-    period: 20,
-    trucks: 26,
-    factories: 10,
-    size: 800,
+    period: 30,
+    trucks: 14,
+    factories: 5,
+    size: 320,
     queue: 2,
     builders: 2,
-    garrison: 4,
-    ratio: 170,
-    firstAttack: 12 * MINUTE,
+    garrison: 3,
+    ratio: 200,
+    firstAttack: 16 * MINUTE,
     minArmy: 240,
-    breakOff: 45,
-    odds: 14,
-    raids: 14 * MINUTE,
+    breakOff: 50,
+    odds: 17,
+    raids: 18 * MINUTE,
     raidParty: 4,
     counter: true,
     smoke: false,
     sappers: 2,
     traps: true,
-    rest: 45 * TICK_RATE,
-    reach: 99,
+    rest: 150 * TICK_RATE,
+    reach: 3,
     carriers: true,
-    slow: 1,
-    react: 0,
-    eyes: 3,
+    slow: 2,
+    react: 8 * TICK_RATE,
+    eyes: 2,
     drones: 2,
-    patrol: 30 * TICK_RATE,
+    patrol: 45 * TICK_RATE,
     focus: true,
-    sulk: 0,
+    sulk: 6 * MINUTE,
     wagons: 2,
   },
   hard: {
@@ -530,25 +535,21 @@ export function newForce(role: number): Force {
 }
 
 /**
- * Co-op with three or four players (decision 093): the players share one army and one
- * economy, so what they gain is attention, not material. The computer is given about a
- * third more per extra player to answer it: a bigger economy and army, sooner and more
- * often on the attack, more men in its towns. One or two players: the level as it stands.
+ * Co-op with three or four players (decision 093, softened by 096): the players share one
+ * army and one economy, so what they gain is attention, not material. The first amount
+ * (35% per extra player on economy, army and tempo) turned normal into hard. Now the
+ * computer gets 12% more trucks and army per extra player and nothing else: it attacks
+ * no sooner and no more often. One or two players: the level as it stands.
  */
 export function tuningFor(level: AiLevel, humans: number): Tuning {
   const base = AI_TUNING[level];
   const extra = Math.min(Math.max(humans | 0, 2), 4) - 2;
   if (extra === 0) return base;
-  const pct = 100 + 35 * extra;
+  const pct = 100 + 12 * extra;
   return {
     ...base,
     trucks: Math.trunc((base.trucks * pct) / 100),
-    factories: Math.trunc((base.factories * pct) / 100),
     size: Math.trunc((base.size * pct) / 100),
-    firstAttack: Math.trunc((base.firstAttack * 100) / pct),
-    rest: Math.trunc((base.rest * 100) / pct),
-    slow: Math.max(1, base.slow - extra),
-    garrison: base.garrison + extra,
   };
 }
 
