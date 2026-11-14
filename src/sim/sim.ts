@@ -280,11 +280,28 @@ const CLOSE_ROCKET_MULT = 4;
  * and a strike drone picks vehicles and guns before men.
  */
 const LOW_PRIORITY = ACQUIRE_RANGE * ACQUIRE_RANGE;
-const PRIORITY = KINDS.flatMap((a) =>
-  KINDS.map((b) => {
+/**
+ * Can a unit of kind `a` hurt one of kind `b` enough to be worth closing with it: does it
+ * kill it in EFFECTIVE_SHOTS shots or fewer? A rifle squad against a tank cannot (decision
+ * 108). A unit still shoots at whatever is in range, but it neither walks at such a target
+ * on its own nor stops a march for it, and it picks a target it can hurt before one it
+ * cannot unless that one is much nearer (POOR_PRIORITY).
+ */
+const EFFECTIVE_SHOTS = 45;
+export const EFFECTIVE = KINDS.flatMap((a) =>
+  KINDS.map((b, k) => (a.damage[k] * EFFECTIVE_SHOTS >= b.hp ? 1 : 0)),
+);
+const POOR_PRIORITY = fx(24) * fx(24);
+/** Men with shoulder-fired rockets, how near a vehicle must come for them to rush it, and how near they get. */
+const ROCKETS = KINDS.map((_, k) => k === KIND_INFANTRY || k === KIND_PARA);
+const ROCKET_RUSH_SQ = fx(18) * fx(18);
+const ROCKET_CLOSE_SQ = fx(6) * fx(6);
+const PRIORITY = KINDS.flatMap((a, ka) =>
+  KINDS.map((b, kb) => {
     const air = b.cls === CLASS_AIR && a.damage.some((d, k) => d > 0 && KINDS[k].cls !== CLASS_AIR);
     const soft = a.kamikaze && b.cls === CLASS_FOOT;
-    return air || soft ? LOW_PRIORITY : 0;
+    if (air || soft) return LOW_PRIORITY;
+    return EFFECTIVE[ka * KIND_COUNT + kb] === 0 ? POOR_PRIORITY : 0;
   }),
 );
 const DETECT_RANGE_SQ = DETECT_RANGE * DETECT_RANGE;
@@ -2568,6 +2585,27 @@ function steer(w: World): void {
           vy = Math.trunc((dy * radial + dx * round) / dist);
         }
         busy = true;
+      } else if (
+        EFFECTIVE[w.kind[i] * KIND_COUNT + w.kind[t]] === 0 &&
+        (flags & (FLAG_FOCUS | FLAG_HOLD)) === 0
+      ) {
+        // Nothing it carries can do much to that: it shoots if it is in range (see `fire`)
+        // but does not walk at it, and a march goes on. Standing, it stays where it is.
+        // (Told to attack it, it does.) The one exception is a vehicle that has come close
+        // to men with rockets: they rush it, because point blank the rockets count.
+        if (
+          ROCKETS[w.kind[i]] &&
+          KIND_CLASS[w.kind[t]] === CLASS_VEHICLE &&
+          d2 <= ROCKET_RUSH_SQ &&
+          w.los[i] !== 0
+        ) {
+          if (d2 > ROCKET_CLOSE_SQ && clearLine(map, cls, x, y, w.posX[t], w.posY[t])) {
+            const dist = isqrt(d2);
+            vx = Math.trunc((dx * s) / dist);
+            vy = Math.trunc((dy * s) / dist);
+          }
+          busy = true;
+        } else busy = (flags & FLAG_MOVING) === 0;
       } else if ((d2 <= range * range && w.los[i] !== 0) || (flags & FLAG_HOLD) !== 0) {
         busy = true;
       } else if (clearLine(map, cls, x, y, w.posX[t], w.posY[t])) {

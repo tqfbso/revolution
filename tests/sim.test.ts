@@ -204,7 +204,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 1084769414;
+const GOLDEN = 1843229346;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -317,6 +317,8 @@ describe('combat', () => {
   it('tanks outrange infantry: the first shot comes from the tank', () => {
     const w = createWorld(9, flatMap());
     step(w, [spawnAt(0, KIND_TANK, 1, 500, 500), spawnAt(1, KIND_INFANTRY, 1, 522, 500)]);
+    // The squad is marched at the tank: on its own it would not go (decision 108).
+    step(w, [{ type: CMD_ATTACK_MOVE, units: [1], x: fx(500), y: fx(500) }]);
     let first = -1;
     for (let t = 0; t < 600 && first < 0; t++) {
       step(w, []);
@@ -415,7 +417,9 @@ describe('terrain and pathfinding', () => {
     for (let t = 0; t < 40; t++) step(w, []);
     expect(w.attack[1]).toBe(-1);
     expect(w.attack[0]).toBe(1);
-    // The squad closes to its own range (15) before the tank can spot it (13).
+    // The squad does not go after a tank that far off (decision 108). The tank drives on
+    // past: it comes into the squad's range (15) before it can spot the squad (13).
+    step(w, [{ type: CMD_MOVE, units: [1], x: fx(470), y: fx(500) }]);
     for (let t = 0; t < 400 && w.events.length === 0; t++) step(w, []);
     const first = w.events.indexOf(EV_SHOT);
     expect(w.events[first + 1]).toBe(0);

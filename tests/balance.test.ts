@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CMD_SPAWN, CMD_STANCE } from '../src/sim/commands';
+import { CMD_HOLD, CMD_SPAWN, CMD_STANCE } from '../src/sim/commands';
 import { UNIT_PRICE } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
 import { flatMap } from '../src/sim/map';
@@ -36,7 +36,11 @@ function tankLoss(gap: number, ticks: number): number {
   w.posY[squad] = fx(200);
   w.posX[tank] = fx(200 + gap);
   w.posY[tank] = fx(200);
-  step(w, [{ type: CMD_STANCE, units: [tank], stance: STANCE_HOLD_FIRE }]);
+  // The squad holds its ground: left to itself it would rush a tank this near (decision 108).
+  step(w, [
+    { type: CMD_STANCE, units: [tank], stance: STANCE_HOLD_FIRE },
+    { type: CMD_HOLD, units: [squad] },
+  ]);
   const before = w.hp[tank];
   for (let t = 0; t < ticks; t++) step(w, []);
   return before - w.hp[tank];
