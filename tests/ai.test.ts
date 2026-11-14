@@ -335,3 +335,45 @@ describe('the easy opponent plays worse, not only smaller', () => {
     expect(normal.rest).toBeGreaterThan(hard.rest);
   });
 });
+
+describe('skirmishing (decision 101)', () => {
+  it('normal sends small parties out before its first attack, and they come home', () => {
+    const w = createWorld(1, generateMap(1, 'city'));
+    const ai = createAi(1, 'normal', 1);
+    step(w, skirmishCommands(w.map));
+    let outings = 0;
+    let largest = 0;
+    let last = 0;
+    let home = 0;
+    const out = [0, 0, 0, 0];
+    while (w.tick < AI_TUNING.normal.firstAttack - MINUTE) {
+      const cmds: Command[] = [];
+      aiThink(ai, w, cmds);
+      step(w, cmds);
+      w.events.length = 0;
+      if (ai.lastProbe !== last) outings++;
+      last = ai.lastProbe;
+      if (w.tick % 100 !== 0) continue;
+      ai.members.slice(2).forEach((m, k) => {
+        largest = Math.max(largest, m.length);
+        if (m.length === 0 && out[k] > 0) home++;
+        out[k] = m.length;
+      });
+    }
+    expect(ai.attacks).toBe(0);
+    expect(outings).toBeGreaterThan(3);
+    expect(home).toBeGreaterThan(0);
+    // A party, not an army.
+    expect(largest).toBeLessThanOrEqual(AI_TUNING.normal.probeSize + 1);
+  }, 120000);
+
+  it('the levels differ: none for a recruit, one small party on easy, more on hard', () => {
+    expect(AI_TUNING.recruit.probes).toBe(0);
+    expect(AI_TUNING.easy.probes).toBe(1);
+    expect(AI_TUNING.normal.probes).toBeGreaterThan(AI_TUNING.easy.probes);
+    expect(AI_TUNING.hard.probes).toBeGreaterThan(AI_TUNING.normal.probes);
+    // Big attacks are rarer than they were: the pause between them is long on every level.
+    expect(AI_TUNING.normal.rest).toBeGreaterThanOrEqual(5 * MINUTE);
+    expect(AI_TUNING.hard.rest).toBeGreaterThanOrEqual(2 * MINUTE);
+  });
+});
