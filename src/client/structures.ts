@@ -1,6 +1,17 @@
 import { ME } from './me';
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix, texture, uv } from 'three/tsl';
+import {
+  attribute,
+  float,
+  hash,
+  mix,
+  positionWorld,
+  step,
+  texture,
+  uv,
+  vec2,
+  vec3,
+} from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fromFx } from '../sim/fixed';
 import { BUILDINGS, B_BARRACKS, B_DEPOT, B_DRONES, B_HELIPAD, B_HQ, B_WORKS } from '../sim/economy';
@@ -70,6 +81,8 @@ const SACK = 0x9c8c69;
 const PLANK = 0x54432f;
 const SHEET_RUST = 0x5f4a3c;
 const GLASS = 0x1b2126;
+/** The gloss of a window with a light on behind it: glass like any other by day. */
+const LIT_GLOSS = 0.9;
 const SOOT = 0x0d0c0b;
 const CONCRETE = 0x77756e;
 const ASPHALT = 0x39393a;
@@ -186,7 +199,14 @@ export function build(parts: Part[]): THREE.BufferGeometry {
     c.set(p.color).multiplyScalar(p.shade ?? 1);
     for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    g.setAttribute('gloss', new THREE.BufferAttribute(new Float32Array(n).fill(p.gloss ?? 0), 1));
+    // One window in eight has a light on behind it (seen at night only). It is marked in
+    // the gloss itself, which costs no extra attribute: LIT_GLOSS instead of 1.
+    let gloss = p.gloss ?? 0;
+    if (gloss === 1 && Math.max(p.size[0], p.size[1], p.size[2]) < 0.7) {
+      const h = Math.sin(p.at[0] * 12.9898 + p.at[1] * 78.233 + p.at[2] * 37.719) * 43758.5453;
+      if (h - Math.floor(h) < 0.125) gloss = LIT_GLOSS;
+    }
+    g.setAttribute('gloss', new THREE.BufferAttribute(new Float32Array(n).fill(gloss), 1));
     return g;
   });
   const merged = mergeGeometries(geometries);
@@ -1532,6 +1552,17 @@ export class StructureView {
       this.material.colorNode = painted(tint.mul(mix(wall.tone, float(1), gloss))).mul(fog.shade());
       this.material.roughnessNode = mix(wall.roughness, float(0.3), gloss);
       this.material.normalNode = wall.normal;
+      if (look.night) {
+        // Lamplight behind the lit windows, each a little different, dimmed by the fog
+        // of war like the wall it is in.
+        const lit = step(LIT_GLOSS - 0.05, gloss).mul(step(gloss, LIT_GLOSS + 0.05));
+        const warm = mix(
+          vec3(1.0, 0.66, 0.32),
+          vec3(0.95, 0.86, 0.66),
+          hash(positionWorld.xz.floor().dot(vec2(7, 13))),
+        );
+        this.material.emissiveNode = warm.mul(lit).mul(1.5).mul(fog.shade());
+      }
     } else this.material.colorNode = painted(tint).mul(fog.shade());
     const ui = new THREE.MeshBasicNodeMaterial();
     ui.colorNode = attribute('aTint', 'vec4').xyz;

@@ -77,7 +77,10 @@ export function makePost(
     lit = lit.mul(mix(float(1), occlusion.getTextureNode().r, 0.9));
   }
   // High detail: fire, flashes and sun glints bleed light into what is around them.
-  if (high) lit = lit.add(bloom(vec4(lit, 1), 0.14, 0.3, 1.5).rgb);
+  // By night on every level that has a pipeline, and stronger: lamps, windows, flares and
+  // gunfire are the picture.
+  if (look.night) lit = lit.add(bloom(vec4(lit, 1), high ? 0.34 : 0.26, 0.45, 0.72).rgb);
+  else if (high) lit = lit.add(bloom(vec4(lit, 1), 0.14, 0.3, 1.5).rgb);
   let out: V3 = renderOutput(vec4(lit, 1)).rgb;
   // Sharpen before the grain goes on, or it sharpens the grain.
   if (high) out = sharpen(vec4(out, 1), 0.16).rgb;

@@ -15,6 +15,8 @@ export interface Look {
   /** Surface detail, cloud shadows, reflections: everything but `low`. */
   rich: boolean;
   shadows: boolean;
+  /** A night battle: windows and street lamps are lit, fire glows further. */
+  night: boolean;
   tex: Textures;
   /** The city's materials, one a layer (surfaces.ts). */
   surf: THREE.DataArrayTexture;
@@ -32,9 +34,16 @@ export function readQuality(params: URLSearchParams): Quality {
   return q === 'low' || q === 'high' ? q : 'normal';
 }
 
-export function makeLook(quality: Quality, shadows: boolean): Look {
+export function makeLook(quality: Quality, shadows: boolean, night = false): Look {
   const tex = makeTextures(quality === 'low' ? 256 : 512);
-  return { quality, rich: quality !== 'low', shadows, tex, surf: makeSurfaces(tex.wall) };
+  return {
+    quality,
+    rich: quality !== 'low',
+    shadows,
+    night,
+    tex,
+    surf: makeSurfaces(tex.wall),
+  };
 }
 
 /** A tiny sky (gradient, haze at the horizon, a soft sun) for the reflections to read. */
