@@ -2198,3 +2198,34 @@ every 4 ticks only at night; flares are part of the state hash only at night. By
 one instruction differs, so the golden hash is unchanged. Co-op carries the choice in the
 host's game settings. A 30 minute Hard against Hard game on the city map runs at the same
 cost by night as by day (1.6 ms a tick).
+
+## 114. Versus: red against blue, sides in the lobby (2026-11-14)
+
+Roadmap item 10, on the co-op netcode unchanged: the host's sim is the clock, only orders
+travel, hashes are compared every two seconds, a player who drops can come back.
+
+- **The lobby has a mode.** The host chooses "Together against the computer" (co-op, as
+  before) or "Versus". In a versus game every player picks a side, red or blue. A newcomer
+  is put on the side that is short of a player; the game starts once each side has one.
+- **A side is a shared army.** Players on the same side command the same army exactly as
+  in co-op (roles, pings and each other's view on the minimap, all within the side). So two
+  a side is 2 v 2, one a side is a duel, and 2 v 1 or 3 v 1 are allowed.
+- **No computer.** Both armies start alike (same troops, stores and headquarters on the
+  mirrored start plots). Both have their sub-commanders: every sim runs the staff of both
+  armies, and each player's screen shows his own side's.
+- **Each side sees only its own fog of war.** `?fog=0` is dropped in a versus game; pings
+  and camera positions from the other side are not shown.
+- **Night, the map and the seed** are the host's, as in co-op.
+
+**Not built: a free-for-all of three or four armies.** Every map is laid out for two
+sides: mirrored terrain, two start plots, two sets of base resource sites, towns placed
+to be equally far from both. Four armies need maps drawn for four corners and a victory
+rule for several survivors; putting two more bases on a two-sided map would hand the
+middle seats a worse game. With two players a versus game is already the free-for-all.
+A four-corner map is the piece to build next for this.
+
+In the code: `Config.versus` and a team per seat travel with the game settings; the
+client's "my army" (`ME`, `UnitView.playerTeam`) is set from the seat instead of being 0;
+the worker creates no AI and a second staff. Nothing in the sim changed: golden hash
+unchanged. `tests/versus.test.ts`: equal starts, blue's commanders, lockstep with orders
+from both sides.

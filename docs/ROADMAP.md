@@ -408,7 +408,9 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 9. Night battles: BUILT (decision 113). Menu > Time: night, or `?time=night`. Sight is six
    tenths of the day's except for scouts; whatever is lit (a muzzle flash, a burning
    vehicle, a flare) is seen at daytime range; guns fire flares (I).
-10. PvP for up to four players, free-for-all or 2v2, on the co-op netcode
+10. PvP: versus BUILT (decision 114): red against blue for 2 to 4 players, sides picked in
+    the lobby, a side shares its army (2 v 2, duel, uneven sides). NOT built: a
+    free-for-all of three or four armies, which needs a map drawn for four corners.
 11. Factions (M10), then weather (R4)
 
 ## Attack formations (done: pieces 1 and 3 built, 2 measured and removed, 4 not needed)
