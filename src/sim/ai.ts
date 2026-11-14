@@ -29,6 +29,7 @@ import {
   CMD_RALLY,
   CMD_RESEARCH,
   CMD_TRAIN,
+  CMD_ENTRENCH,
   CMD_STOP,
   CMD_UNLOAD,
   type Command,
@@ -85,6 +86,7 @@ import {
   workStands,
 } from './works';
 import { concealed, stageOf, structDist2 } from './sim';
+import { fortified } from './urban';
 import {
   GARRISON_MAX,
   KINDS,
@@ -176,6 +178,8 @@ interface Tuning {
   sappers: number;
   /** Its belts get tank obstacles behind the wire. */
   traps: boolean;
+  /** Houses a town it holds gets sandbagged and loopholed by its sappers (0 = none). */
+  forts: number;
   /** Ticks it lets pass after an attack has come home before it sets out again. */
   rest: number;
   /** Towns beyond the one at its gate it puts a garrison in before its first attack. */
@@ -242,6 +246,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     smoke: false,
     sappers: 0,
     traps: false,
+    forts: 0,
     rest: 8 * MINUTE,
     reach: 0,
     carriers: false,
@@ -287,6 +292,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     smoke: false,
     sappers: 1,
     traps: false,
+    forts: 0,
     rest: 5 * MINUTE,
     reach: 1,
     carriers: true,
@@ -331,6 +337,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     smoke: false,
     sappers: 2,
     traps: true,
+    forts: 2,
     rest: 5 * MINUTE,
     reach: 3,
     carriers: true,
@@ -370,6 +377,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     smoke: true,
     sappers: 3,
     traps: true,
+    forts: 5,
     rest: 2 * MINUTE,
     reach: 99,
     carriers: true,
@@ -1782,6 +1790,8 @@ function fortify(ai: Ai, w: World, out: Command[]): void {
     (i) => w.job[i] === JOB_NONE && (w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET,
   );
   if (free.length === 0) return;
+  // The houses first: there are few of them, and sandbags cost nothing but time.
+  if (strongHouses(ai, w, out, free)) return;
   let purse = w.supplies[ai.team] - ai.resS - 120;
   if (purse < 60) return;
   const sites = map.townCount + ai.crossings.length;
@@ -1839,6 +1849,41 @@ function fortify(ai: Ai, w: World, out: Command[]): void {
   // Nothing to do: wait at the staging area.
   const back = free.filter((i) => dist(w.posX[i], w.posY[i], ai.stageX, ai.stageY) > fx(34));
   order(out, CMD_MOVE, back, ai.stageX, ai.stageY);
+}
+
+/**
+ * The houses its garrisons hold (U5, decision 110): sappers sandbag and loophole them, the
+ * ones facing the enemy first, up to `forts` in a town; where the houses are gone, the ruin
+ * its men are lying in. One house at a time, by all the sappers that are free. True if
+ * there was one to do.
+ */
+function strongHouses(ai: Ai, w: World, out: Command[], free: number[]): boolean {
+  const map = w.map;
+  if (ai.tune.forts === 0) return false;
+  for (let t = 0; t < map.townCount; t++) {
+    if (w.townOwner[t] !== ai.team || ai.garr[t].length === 0) continue;
+    if (expect(ai, w, map.townX[t], map.townY[t], 1, 0) > 12) continue;
+    // Ruins with its men in them count as held.
+    const lying = new Set<number>();
+    for (const i of ai.garr[t]) {
+      if (w.inside[i] >= 0) continue;
+      const s = map.structAt[cellAt(w.posX[i], w.posY[i])];
+      if (s >= 0 && map.sKind[s] === S_BUILDING && w.sHp[s] <= 0) lying.add(s);
+    }
+    let done = 0;
+    for (const s of ai.houses[t]) {
+      if (done >= ai.tune.forts) break;
+      if (fortified(w, s)) {
+        done++;
+        continue;
+      }
+      const held = w.sHp[s] > 0 ? w.sOcc[s] > 0 && w.sOccTeam[s] === ai.team : lying.has(s);
+      if (!held) continue;
+      out.push({ type: CMD_ENTRENCH, units: free.slice(0, 3), structure: s });
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Give every new unit a job. */
@@ -1930,6 +1975,9 @@ function garrisons(ai: Ai, w: World, out: Command[]): void {
   }
 }
 
+/** Squads to a ruin: more than this and one shell finds them all. */
+const RUIN_ROOM = 3;
+
 /** Before a round of `billet`: count who, of the troops in `lists`, is on the way into which house. */
 export function billetStart(w: World, lists: readonly number[][]): void {
   pendingIn.fill(0, 0, w.map.structCount);
@@ -1985,7 +2033,33 @@ export function billet(
     else batches.set(best, [i]);
   }
   for (const [structure, list] of batches) out.push({ type: CMD_GARRISON, units: list, structure });
-  // No house left to hold: the rubble of the town is cover too.
+  // No house left to hold: the rubble of the town is cover too. A ruin halves what reaches
+  // the men lying in it, and a ruin that has been dug in does better than that.
+  if (loose.length > 0) {
+    const room = new Map<number, number>();
+    for (const i of units) {
+      const s = map.structAt[cellAt(w.posX[i], w.posY[i])];
+      if (w.inside[i] < 0 && s >= 0 && w.sHp[s] <= 0) room.set(s, (room.get(s) ?? 0) + 1);
+    }
+    const ruins = houses.filter((s) => w.sHp[s] <= 0);
+    ruins.sort((a, b) => Number(fortified(w, b)) - Number(fortified(w, a)));
+    let k = 0;
+    for (let n = loose.length - 1; n >= 0 && k < ruins.length; n--) {
+      const i = loose[n];
+      const at = map.structAt[cellAt(w.posX[i], w.posY[i])];
+      if (at >= 0 && w.sHp[at] <= 0) {
+        // In one already.
+        loose.splice(n, 1);
+        continue;
+      }
+      while (k < ruins.length && (room.get(ruins[k]) ?? 0) >= RUIN_ROOM) k++;
+      if (k >= ruins.length) break;
+      const s = ruins[k];
+      room.set(s, (room.get(s) ?? 0) + 1);
+      out.push({ type: CMD_MOVE, units: [i], x: structX(map, s), y: structY(map, s) });
+      loose.splice(n, 1);
+    }
+  }
   if (nest >= 0 && map.type[nest] === T_SANDBAG && loose.length > 0) {
     // Unless it has dug positions at the edge: those face the enemy.
     const idle = loose.filter((i) => !isCoverCell(map, cellAt(w.posX[i], w.posY[i])));
@@ -3052,10 +3126,15 @@ export function aiReport(ai: Ai, w: World): string {
   for (let k = 0; k < w.map.townCount; k++) if (w.townOwner[k] === t) towns++;
   let garrison = 0;
   for (const g of ai.garr) garrison += g.length;
+  let forts = 0;
+  for (let k = 0; k < ai.houses.length; k++) {
+    if (w.townOwner[k] !== t) continue;
+    for (const s of ai.houses[k]) if (fortified(w, s)) forts++;
+  }
   return (
     `t${t} ${ai.level} tier ${w.tier[t]} pop ${w.pop[t]}/${w.popCap[t]} ` +
     `S ${w.supplies[t]} F ${w.fuel[t]} C ${w.credits[t]} trucks ${ai.trucks.length} towns ${towns} ` +
-    `garrison ${garrison} reserve ${ai.reserve.length} army ${ai.members[0].length} ${states[f.state]} ` +
+    `garrison ${garrison} forts ${forts} reserve ${ai.reserve.length} army ${ai.members[0].length} ${states[f.state]} ` +
     `raid ${ai.members[1].length} probes ${ai.members
       .slice(2)
       .map((m) => m.length)

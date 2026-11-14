@@ -33,7 +33,15 @@ import {
   staffThink,
   type Staff,
 } from '../src/sim/staff';
-import { KIND_DRONE, KIND_IFV, KIND_INFANTRY, KIND_STRIKE, KIND_TANK } from '../src/sim/units';
+import { fortified } from '../src/sim/urban';
+import {
+  KIND_DRONE,
+  KIND_ENGINEER,
+  KIND_IFV,
+  KIND_INFANTRY,
+  KIND_STRIKE,
+  KIND_TANK,
+} from '../src/sim/units';
 import {
   CF_AUTO,
   DEST_COMMANDER,
@@ -322,6 +330,26 @@ describe('sub-commanders: the staff', () => {
     const seen = new Set<number>();
     play(w, st, 60, () => seen.add(st.posts[1].status));
     expect(seen.has(ST_FALLBACK)).toBe(false);
+  }, 60000);
+
+  it('hold: its engineers sandbag the houses its squads are in, one after another', () => {
+    const { w, st } = field();
+    const t = town(w, 'Westgate');
+    const ids = add(w, [
+      spawn(0, KIND_INFANTRY, 8, 330, 700),
+      spawn(0, KIND_ENGINEER, 2, 336, 706),
+    ]);
+    step(w, [
+      { type: CMD_ASSIGN, units: ids, slot: 1 },
+      mission(1, M_HOLD, w.map.townX[t], w.map.townY[t]),
+    ]);
+    const supplies = w.supplies[0];
+    play(w, st, 120);
+    const held = new Set(ids.filter((i) => w.inside[i] >= 0).map((i) => w.inside[i]));
+    const done = [...held].filter((s) => fortified(w, s));
+    expect(done.length).toBeGreaterThanOrEqual(2);
+    // Sandbags cost time, not supplies.
+    expect(w.supplies[0]).toBeGreaterThanOrEqual(supplies);
   }, 60000);
 
   it('defend: goes out to meet a raid, gives ground to an army and comes back after', () => {

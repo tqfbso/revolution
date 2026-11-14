@@ -2092,3 +2092,35 @@ Decision 108 was the fix for infantry dying first. `tests/assault.test.ts` pins 
 fights above with room to spare, so that a later change to the attack has to do at least as
 well. Pieces 3 (drill presets per commander) and 4 (the computer uses the drill) are shelved
 with it; what is still worth having from them is noted in the roadmap.
+
+## 110. The computer in a city: sandbagged houses and held ruins (U5) (2026-11-14)
+
+Roadmap item 8. Before this the computer already put its garrisons into houses a few squads
+to a house, moved them out of a house about to fall, stormed houses the enemy held (with a
+breach and smoke where it had them) and left a garrison in a town it took. What it could not
+do was use what decision 091 gave the player: fortified houses and ruins.
+
+- **Its sappers fortify the houses its garrisons hold.** When they have no wire or
+  obstacles to lay, they sandbag and loophole the houses its own men are in, the ones facing
+  the enemy first, one house at a time: 15 seconds for one squad. A fortified house holds
+  half as many men again, lets a quarter less fire through and takes a quarter less damage
+  (decision 091). Hard does up to five houses a town, Normal two, Easy and Recruit none.
+- **A garrison that has lost its houses lies up in the ruins**, three squads to a ruin, a
+  dug-in ruin first, instead of standing in the street. A ruin halves what reaches the men
+  in it. The sappers then dig that ruin in (35% reaches them instead of 50%).
+- **The player's commanders do the same.** On Hold, Defend and after taking a place, a
+  commander's squads use the ruins the same way, and its engineers sandbag the houses and
+  ruins its squads are in, one after another. They only fortify: mending a damaged house
+  costs supplies, and a commander does not spend the player's supplies unasked.
+
+Not built, and why:
+
+- **Armour kept behind the infantry in streets, and attacks routed by street.** Decision 109
+  measured tanks trailing the squads in a town: the body lost more every time. In this
+  game's rules a tank among squads is cover for them.
+- **Marksman teams and top attack on tanks in streets** (the "urban units" half of U5).
+  New units belong with the factions (M10), where each roster gets its own answer to a held
+  block.
+
+Three computer games ran to a finish (European city, the city, the ridge). Golden hash
+unchanged: the sim's rules did not change, only who gives which orders.
