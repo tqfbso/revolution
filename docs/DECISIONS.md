@@ -1620,7 +1620,35 @@ unchanged (2.7 ms a tick mean; the lookups are a handful of cells per shot). New
 **Not built:** fire that spreads, damage to street furniture and trees, an AI that shells
 a held block on purpose (U5).
 
-## 096. Troops given to a commander from all over the map go to the objective (2026-11-14)
+## 096. Normal becomes the middle level, and co-op adds far less to the computer (2026-11-14)
+
+**What Fabio said:** after a three-player co-op session on normal: "normal was way too hard... needs some calibration".
+
+**What was measured** (headless, city map, seed 1, the computer against an idle opponent):
+
+| Level                    | Army points at minute 12 | at minute 15 | at minute 20 | First attack |
+| ------------------------ | ------------------------ | ------------ | ------------ | ------------ |
+| Easy                     | 108                      | 110          | 110          | minute 24    |
+| Normal, before           | 325                      | 548          | 786          | minute 13    |
+| Normal, 3 players before | 339                      | 606          | (won at 17)  | minute 9     |
+| Hard                     | 419                      | 702          | (won at 15)  | minute 7     |
+| Normal, now              | 248                      | 320          | 322          | minute 17    |
+| Normal, 3 players now    | 246                      | 356          | 360          | minute 17    |
+| Normal, 4 players now    | 248                      | 368          | 398          | minute 17    |
+
+Two things were wrong. Normal was the computer at full stretch: seven times easy's army, at the 800 point cap that the players share. And decision 093's 35% per extra player (trucks, factories, army, sooner and more frequent attacks) made normal with three players play like hard, although three players have no more material than one.
+
+**Decided:**
+
+- Normal is the middle of the ladder: 320 army points (easy 110, hard 800), 14 trucks, 5 factories, first attack at minute 16, 2.5 minutes between attacks, raids from minute 18, 8 seconds before it answers an intrusion, 6 minutes away from a place where it was beaten, production on every second think. It keeps counters, raids, focus fire and its full field works.
+- Co-op: 12% more trucks and army per player beyond two, nothing else. No sooner, no more often, no extra factories or garrison.
+- Easy, recruit and hard are untouched. With one or two players easy, recruit and hard play exactly as before.
+
+**Checked:** new normal against easy, six games of 45 minutes (three seeds, both sides): normal wins five in 27 to 44 minutes and is far ahead in the sixth (303 points and 6 towns against 56 and 3). New normal against hard, three seeds: hard wins two in 23 minutes and is far ahead in the third (660 points and 7 towns against 86 and 2).
+
+**Not known:** whether a human team finds the new normal right; this is set from Fabio's one report and the computer playing itself. The step from normal to hard is now large (320 to 800 points); a level between them is the obvious next thing if normal becomes too easy.
+
+## 097. Troops given to a commander from all over the map go to the objective (2026-11-14)
 
 Fabio: troops in different parts of the map put under one commander walked back to one
 spot and then moved oddly. Two causes in the staff. A new mission for scattered troops

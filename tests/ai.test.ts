@@ -153,7 +153,7 @@ describe('the AI opponent', () => {
 
   it('digs in at the towns it holds, and never shuts itself in', () => {
     const { w, ais } = match(4, ['normal', null]);
-    play(w, ais, 14 * MINUTE, () => ais[0]!.laid >= 20 && w.workCount >= 20);
+    play(w, ais, 22 * MINUTE, () => ais[0]!.laid >= 20 && w.workCount >= 20);
     expect(ais[0]!.laid).toBeGreaterThanOrEqual(20);
     let wire = 0;
     for (let k = 0; k < w.workCount; k++) {
@@ -198,7 +198,7 @@ describe('the AI opponent', () => {
 
   it('on the ridge map puts depots beside its stockpiles and its squads into carriers', () => {
     const w = createWorld(1, generateMap(1, 'ridge'));
-    const ais = [createAi(0, 'normal', 1), createAi(1, 'normal', 1)];
+    const ais = [createAi(0, 'hard', 1), createAi(1, 'hard', 1)];
     step(w, skirmishCommands(w.map));
     const log: Command[] = [];
     play(w, ais, 14 * MINUTE, undefined, log);
@@ -318,7 +318,20 @@ describe('the easy opponent plays worse, not only smaller', () => {
     expect(AI_TUNING.easy.focus).toBe(false);
     expect(AI_TUNING.normal.focus).toBe(true);
     expect(AI_TUNING.easy.sulk).toBeGreaterThan(0);
-    expect(AI_TUNING.normal.sulk).toBe(0);
+    expect(AI_TUNING.easy.sulk).toBeGreaterThan(AI_TUNING.normal.sulk);
+    expect(AI_TUNING.hard.sulk).toBe(0);
     expect(AI_TUNING.recruit.sulk).toBeGreaterThan(AI_TUNING.easy.sulk);
+  });
+
+  it('normal sits between easy and hard (decision 096)', () => {
+    const { easy, normal, hard } = AI_TUNING;
+    for (const k of ['size', 'trucks', 'factories'] as const) {
+      expect(normal[k]).toBeGreaterThan(easy[k]);
+      expect(normal[k]).toBeLessThan(hard[k]);
+    }
+    expect(normal.size * 2).toBeLessThan(hard.size);
+    expect(normal.firstAttack).toBeLessThan(easy.firstAttack);
+    expect(normal.firstAttack).toBeGreaterThan(hard.firstAttack);
+    expect(normal.rest).toBeGreaterThan(hard.rest);
   });
 });

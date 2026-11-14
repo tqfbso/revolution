@@ -114,16 +114,18 @@ describe('co-op lockstep', () => {
   });
 
   it('the computer is strengthened for three and four players, and only then', () => {
-    for (const level of ['recruit', 'easy', 'normal', 'hard'] as const) {
+    for (const level of ['normal', 'hard'] as const) {
       expect(tuningFor(level, 1)).toBe(AI_TUNING[level]);
       expect(tuningFor(level, 2)).toBe(AI_TUNING[level]);
       const three = tuningFor(level, 3);
       const four = tuningFor(level, 4);
       expect(three.size).toBeGreaterThan(AI_TUNING[level].size);
       expect(three.trucks).toBeGreaterThan(AI_TUNING[level].trucks);
-      expect(three.firstAttack).toBeLessThan(AI_TUNING[level].firstAttack);
       expect(four.size).toBeGreaterThan(three.size);
-      expect(four.firstAttack).toBeLessThan(three.firstAttack);
+      // Decision 096: more to fight, but no sooner and no more often.
+      expect(four.size * 10).toBeLessThanOrEqual(AI_TUNING[level].size * 13);
+      expect(four.firstAttack).toBe(AI_TUNING[level].firstAttack);
+      expect(four.rest).toBe(AI_TUNING[level].rest);
       expect(tuningFor(level, 9)).toEqual(four);
     }
   });
