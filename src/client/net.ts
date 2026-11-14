@@ -29,6 +29,8 @@ const DUTY_KINDS: number[][] = [[], [0, 3, 4, 8, 9], [1, 2, 5, 11], [6, 7, 12, 1
 
 /** The most players in one game, the host included. */
 export const MAX_PLAYERS = 4;
+/** The two armies of a versus game, as the lobby names them. */
+export const SIDES = ['Red', 'Blue'] as const;
 
 /** For each kind of unit: 1 if it falls under `mine`, 2 if under another player's, else 0. */
 export function dutyOf(mine: number, theirs: number[], kinds: number): number[] {
@@ -46,16 +48,33 @@ interface Config {
   time?: string;
   /** Players in the game: the computer is given more to fight three or four with. */
   humans: number;
+  /** Versus (decision 114): the players fight each other, no computer. */
+  versus?: boolean;
 }
 
 type Msg =
   | { t: 'hello'; build: string; duty: number }
   /** Guest, in the lobby: I have changed my role. */
   | { t: 'duty'; duty: number }
-  /** Host, in the lobby: you are in, with this many players so far. */
-  | { t: 'wait'; n: number }
-  /** Host: the game starts. Every player's role by seat (0 = the host), and your seat. */
-  | { t: 'cfg'; cfg: Config; duties: number[]; you: number; resume?: boolean }
+  /** Guest, in the lobby of a versus game: I have changed sides. */
+  | { t: 'side'; side: number }
+  /**
+   * Host, in the lobby: you are in, with this many players so far. In a versus game also
+   * every player's side by seat, and which seat is yours.
+   */
+  | { t: 'wait'; n: number; versus?: boolean; sides?: number[]; you?: number }
+  /**
+   * Host: the game starts. Every player's role by seat (0 = the host), your seat, and in
+   * a versus game the army each seat plays (all 0 otherwise).
+   */
+  | {
+      t: 'cfg';
+      cfg: Config;
+      duties: number[];
+      you: number;
+      resume?: boolean;
+      teams?: number[];
+    }
   /** Host, to a player coming back: a stretch of the game so far (see replay.ts). */
   | ({ t: 'r' } & Piece)
   /** Host: the seat is taken again, by a player with this role. */
@@ -277,6 +296,18 @@ function watchDuty(onPick: (d: number) => void): void {
   });
 }
 
+const sideTag = (side: number): string =>
+  `<span style="color:${side === 1 ? '#7fa8e8' : '#e8857a'}">${SIDES[side === 1 ? 1 : 0]}</span>`;
+
+const sidePicker = (side: number): string =>
+  `<label style="display:block;margin-top:14px">Your side: ` +
+  `<select id="coop-side">${SIDES.map((d, k) => `<option value="${k}"${k === side ? ' selected' : ''}>${d}</option>`).join('')}</select></label>`;
+
+function watchSide(onPick: (side: number) => void): void {
+  const sel = document.getElementById('coop-side') as HTMLSelectElement | null;
+  sel?.addEventListener('change', () => onPick(Number(sel.value) === 1 ? 1 : 0));
+}
+
 const wait = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 interface Peer {
@@ -337,6 +368,12 @@ export class Coop {
 
   /** The players this game was started with: fixed, the computer's strength hangs on it. */
   readonly humans: number;
+  /** The army each seat plays: all 0 unless this is a versus game. */
+  readonly teams: number[];
+  /** Our army. */
+  readonly team: number;
+  /** Players against players, no computer. */
+  readonly versus: boolean;
 
   constructor(
     readonly role: Role,
@@ -350,8 +387,12 @@ export class Coop {
     private readonly cfg: Config | null = null,
     /** Guest: we are coming back into a game in progress. */
     resumed = false,
+    teams: number[] | null = null,
   ) {
     this.humans = duties.length;
+    this.teams = duties.map((_, k) => (teams?.[k] === 1 ? 1 : 0));
+    this.versus = teams !== null;
+    this.team = this.teams[seat] ?? 0;
     for (let k = 0; k < duties.length; k++) {
       this.present.add(k);
       this.partners.push({ x: -1, z: -1, at: 0 });
@@ -444,7 +485,14 @@ export class Coop {
     this.joining.add(seat);
     const duties = this.duties.slice();
     duties[seat] = duty;
-    link.send({ t: 'cfg', cfg: this.cfg, duties, you: seat, resume: true });
+    link.send({
+      t: 'cfg',
+      cfg: this.cfg,
+      duties,
+      you: seat,
+      resume: true,
+      teams: this.versus ? this.teams : undefined,
+    });
     this.say(`Player ${seat + 1} is coming back into the game…`);
     let open = true;
     link.onMessage = () => {};
@@ -565,6 +613,8 @@ export class Coop {
       // The host passes these on, saying whose they are.
       const from = this.role === 'host' ? seat : (m.from ?? 0);
       if (this.role === 'host') this.send({ ...m, from }, seat);
+      // Where the other side looks and what it points at is its own business.
+      if (this.teams[from] !== this.team) return;
       if (m.t === 'mark') this.onMark(m.x, m.z, from);
       else if (this.partners[from]) this.partners[from] = { x: m.x, z: m.z, at: performance.now() };
     } else if (m.t === 'gone') {
@@ -656,7 +706,9 @@ export class Coop {
 
   /** The roles of the players still in the game, ours left out. */
   otherDuties(): number[] {
-    return this.duties.filter((_, seat) => seat !== this.seat && this.present.has(seat));
+    return this.duties.filter(
+      (_, seat) => seat !== this.seat && this.present.has(seat) && this.teams[seat] === this.team,
+    );
   }
 
   private paint(): void {
@@ -675,11 +727,13 @@ export class Coop {
       let duties = '';
       if (this.duties.some((d) => d > 0)) {
         for (const seat of [...this.present].sort()) {
+          if (this.teams[seat] !== this.team) continue;
           duties += ` · ${seat === this.seat ? 'you' : `P${seat + 1}`}: ${DUTIES[this.duties[seat]]}`;
         }
       }
       const count = this.present.size > 2 ? ` · ${this.present.size} players` : '';
-      html = `Co-op ${this.role}${count} · ${this.ping.toFixed(0)} ms${lag}${duties}`;
+      const what = this.versus ? `Versus (you are ${SIDES[this.team].toLowerCase()})` : 'Co-op';
+      html = `${what} ${this.role}${count} · ${this.ping.toFixed(0)} ms${lag}${duties}`;
     }
     if (html !== this.statusEl.innerHTML) this.statusEl.innerHTML = html;
   }
@@ -749,8 +803,10 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         `<p><button id="coop-copy" style="padding:6px 14px">Copy link</button> <span id="coop-copied" style="color:#8fbf8f"></span></p>` +
         `<div id="coop-roster" style="margin:12px 0;padding:8px 12px;background:#101214;border:1px solid #3a4046;border-radius:5px"></div>` +
         `<p><button id="coop-start" disabled style="padding:8px 20px;font-weight:600">Start the game</button></p>` +
+        `<label style="display:block;margin-top:14px">Game: <select id="coop-mode"><option value="coop">Together against the computer</option><option value="versus">Versus: players against players</option></select></label>` +
+        `<div id="coop-side-box"></div>` +
         dutyPicker(duty) +
-        `<p style="color:#a9a79f;margin-top:14px">You all play the same army against the computer: any of you can order any unit. With three or four players the computer gets a bigger economy and attacks sooner. Keep this tab open; you are the host, and the map and opponent are the ones you had chosen. Use the same browser version if you can.</p>${alone}`,
+        `<p id="coop-blurb" style="color:#a9a79f;margin-top:14px"></p>${alone}`,
     );
     document.getElementById('coop-copy')?.addEventListener('click', () => {
       const done = document.getElementById('coop-copied');
@@ -761,25 +817,67 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
     });
     const listening = listener;
     return new Promise<Coop>((resolve) => {
-      const guests: { link: Link; duty: number }[] = [];
+      const guests: { link: Link; duty: number; side: number }[] = [];
       const startBtn = document.getElementById('coop-start') as HTMLButtonElement;
+      const modeEl = document.getElementById('coop-mode') as HTMLSelectElement;
+      let versus = false;
+      let side = 0;
+      try {
+        versus = sessionStorage.getItem('revolution.coop.mode') === 'versus';
+      } catch {
+        // co-op, then
+      }
+      modeEl.value = versus ? 'versus' : 'coop';
+      const sides = () => [side, ...guests.map((g) => g.side)];
       const roster = () => {
+        const all = sides();
         const el = document.getElementById('coop-roster');
         if (el) {
+          const tag = (k: number) => (versus ? ` · ${sideTag(all[k])}` : '');
           el.innerHTML =
-            `<div>Player 1 (you, host): ${DUTIES[duty]}</div>` +
-            guests.map((g, k) => `<div>Player ${k + 2}: ${DUTIES[g.duty]}</div>`).join('') +
+            `<div>Player 1 (you, host): ${DUTIES[duty]}${tag(0)}</div>` +
+            guests
+              .map((g, k) => `<div>Player ${k + 2}: ${DUTIES[g.duty]}${tag(k + 1)}</div>`)
+              .join('') +
             (guests.length === 0
               ? `<div style="color:#a9a79f">Waiting for someone to open the link…</div>`
               : '');
         }
-        startBtn.disabled = guests.length === 0;
+        const box = document.getElementById('coop-side-box');
+        if (box) {
+          box.innerHTML = versus ? sidePicker(side) : '';
+          watchSide((v) => {
+            side = v;
+            roster();
+          });
+        }
+        const blurb = document.getElementById('coop-blurb');
+        if (blurb) {
+          blurb.textContent = versus
+            ? 'Red against blue, no computer. Players on the same side share one army, like co-op: two a side is 2 v 2, one a side is a duel, and uneven sides are allowed. Each side sees only what its own troops see. Keep this tab open; you are the host, and the map and the time of day are the ones you had chosen.'
+            : 'You all play the same army against the computer: any of you can order any unit. With three or four players the computer gets a bigger economy and attacks sooner. Keep this tab open; you are the host, and the map and opponent are the ones you had chosen. Use the same browser version if you can.';
+        }
+        const both = all.includes(0) && all.includes(1);
+        startBtn.disabled = guests.length === 0 || (versus && !both);
         startBtn.textContent =
           guests.length === 0
             ? 'Start the game'
-            : `Start the game with ${guests.length + 1} players`;
-        for (const g of guests) g.link.send({ t: 'wait', n: guests.length + 1 });
+            : versus && !both
+              ? 'Each side needs a player'
+              : `Start the game with ${guests.length + 1} players`;
+        guests.forEach((g, k) =>
+          g.link.send({ t: 'wait', n: guests.length + 1, versus, sides: all, you: k + 1 }),
+        );
       };
+      modeEl.addEventListener('change', () => {
+        versus = modeEl.value === 'versus';
+        try {
+          sessionStorage.setItem('revolution.coop.mode', modeEl.value);
+        } catch {
+          // not remembered
+        }
+        roster();
+      });
       watchDuty((d) => {
         duty = d;
         roster();
@@ -796,11 +894,15 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
             link.send({ t: 'full' });
             return;
           }
-          const guest = { link, duty: m.duty | 0 };
+          // A newcomer goes to the side that is short of a player.
+          const all = sides();
+          const reds = all.filter((v) => v === 0).length;
+          const guest = { link, duty: m.duty | 0, side: reds > all.length - reds ? 1 : 0 };
           guests.push(guest);
           link.onMessage = (n) => {
-            if (n.t !== 'duty') return;
-            guest.duty = n.duty | 0;
+            if (n.t === 'duty') guest.duty = n.duty | 0;
+            else if (n.t === 'side') guest.side = n.side === 1 ? 1 : 0;
+            else return;
             roster();
           };
           link.onClose = () => {
@@ -819,9 +921,11 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           ai: params.get('ai') ?? '',
           time: params.get('time') ?? '',
           humans: guests.length + 1,
+          versus,
         };
         const duties = [duty, ...guests.map((g) => g.duty)];
-        guests.forEach((g, k) => g.link.send({ t: 'cfg', cfg, duties, you: k + 1 }));
+        const teams = versus ? sides() : undefined;
+        guests.forEach((g, k) => g.link.send({ t: 'cfg', cfg, duties, you: k + 1, teams }));
         ui.hide();
         resolve(
           new Coop(
@@ -831,6 +935,8 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
             duties,
             listening,
             cfg,
+            false,
+            teams ?? null,
           ),
         );
       });
@@ -839,7 +945,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
 
   // The guest.
   ui.set(
-    `<h2 style="margin:0 0 8px">Co-op</h2><p id="coop-say">Looking for the host…</p>${dutyPicker(duty)}${alone}`,
+    `<h2 style="margin:0 0 8px">Co-op</h2><p id="coop-say">Looking for the host…</p><div id="coop-side-box"></div>${dutyPicker(duty)}${alone}`,
   );
   let lobby: Link | null = null;
   watchDuty((d) => {
@@ -873,6 +979,17 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           clearTimeout(timer);
           lobby = link;
           say(`You are in: ${m.n} players so far. The game starts when the host presses Start.`);
+          const box = document.getElementById('coop-side-box');
+          if (box) {
+            const all = m.sides ?? [];
+            const mine = all[m.you ?? -1] ?? 0;
+            box.innerHTML = m.versus
+              ? `<p style="margin:10px 0 0">A versus game: red against blue. ${all
+                  .map((v, k) => `${k === m.you ? 'You' : `Player ${k + 1}`}: ${sideTag(v)}`)
+                  .join(' · ')}</p>${sidePicker(mine)}`
+              : '';
+            watchSide((v) => link.send({ t: 'side', side: v }));
+          }
         } else if (m.t === 'cfg' || m.t === 'busy' || m.t === 'bad' || m.t === 'full') {
           clearTimeout(timer);
           done(m);
@@ -889,6 +1006,8 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       else params.delete('ai');
       if (answer.cfg.time) params.set('time', answer.cfg.time);
       else params.delete('time');
+      // Nobody lifts the fog on the other side.
+      if (answer.teams) params.delete('fog');
       ui.hide();
       // Our role as the host has it, unless we changed it in the last instant.
       return new Coop(
@@ -899,6 +1018,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         null,
         null,
         answer.resume === true,
+        answer.teams ?? null,
       );
     }
     link.close();

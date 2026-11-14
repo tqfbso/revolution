@@ -1,3 +1,4 @@
+import { ME } from './me';
 import * as THREE from 'three/webgpu';
 import {
   CMD_ASSIST,
@@ -100,7 +101,6 @@ const HINT = [
 ];
 /** The tool after the kinds of field work: take works down. */
 export const TOOL_REMOVE = WORK_COUNT;
-const ME = 0;
 
 /**
  * The command card: what the selection can do, as buttons. Three cases: a base building

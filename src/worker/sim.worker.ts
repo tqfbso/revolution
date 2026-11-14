@@ -86,6 +86,10 @@ let inbox: Command[] = [];
 let ais: Ai[] = [];
 /** The staff of the player's sub-commanders: it hands its commands in the same way. */
 let staff: Staff | null = null;
+/** Versus: the other army's commanders. Every sim runs both staffs; each shows its own. */
+let rival: Staff | null = null;
+/** The army this player commands (the snapshot's commanders are that army's). */
+let me = 0;
 let lastTime = 0;
 let accumulator = 0;
 /** Game speed: simulated ticks per real tick interval (`?speed=`). */
@@ -111,12 +115,15 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
             : skirmishCommands(world.map);
     if (msg.night) pending.unshift({ type: CMD_NIGHT, on: true });
     ais = [];
-    if (msg.scenario === 'skirmish' && msg.ai !== 'off') {
+    const versus = msg.versus === true && msg.scenario === 'skirmish';
+    me = versus && msg.team === 1 ? 1 : 0;
+    if (msg.scenario === 'skirmish' && msg.ai !== 'off' && !versus) {
       ais.push(createAi(1, msg.ai, msg.seed, msg.humans ?? 1));
       // `?demo=1`: the AI plays red as well, to watch it at work.
       if (msg.demo) ais.push(createAi(0, msg.ai, msg.seed));
     }
     staff = msg.demo ? null : createStaff(0, msg.seed);
+    rival = versus ? createStaff(1, msg.seed) : null;
     speed = Math.min(Math.max(msg.speed, 0.5), 16);
     paused = false;
     mode = msg.net ?? 'solo';
@@ -158,6 +165,7 @@ function tick(w: World, orders: Command[], quiet = false): number {
   for (const c of orders) pending.push(c);
   for (const ai of ais) aiThink(ai, w, pending);
   if (staff) staffThink(staff, w, pending);
+  if (rival) staffThink(rival, w, pending);
   step(w, pending);
   pending = [];
   if (!quiet && mode !== 'solo' && w.tick % HASH_EVERY === 0) hashes.push(w.tick, hashWorld(w));
@@ -320,13 +328,14 @@ function postSnapshot(w: World, simMs: number): void {
   const commanders = new Int32Array(MAX_COMMANDERS * COMMANDER_STRIDE);
   for (let c = 0; c < MAX_COMMANDERS; c++) {
     const o = c * COMMANDER_STRIDE;
-    const p = staff?.posts[c];
-    commanders[o] = w.cMission[c];
-    commanders[o + 1] = Math.round(fromFx(w.cX[c]));
-    commanders[o + 2] = Math.round(fromFx(w.cY[c]));
+    const p = (me === 1 ? rival : staff)?.posts[c];
+    const k = me * MAX_COMMANDERS + c;
+    commanders[o] = w.cMission[k];
+    commanders[o + 1] = Math.round(fromFx(w.cX[k]));
+    commanders[o + 2] = Math.round(fromFx(w.cY[k]));
     commanders[o + 9] =
-      ((w.cFlags[c] & CF_AUTO) !== 0 ? COMMANDER_AUTO : 0) |
-      (((w.cFlags[c] >> CF_STYLE_SHIFT) & CF_STYLE_MASK) << COMMANDER_STYLE_SHIFT);
+      ((w.cFlags[k] & CF_AUTO) !== 0 ? COMMANDER_AUTO : 0) |
+      (((w.cFlags[k] >> CF_STYLE_SHIFT) & CF_STYLE_MASK) << COMMANDER_STYLE_SHIFT);
     if (!p) continue;
     commanders[o + 3] = p.status;
     commanders[o + 4] = p.power;

@@ -1,3 +1,4 @@
+import { ME } from './me';
 import type { Clutter } from './clutter';
 import * as THREE from 'three/webgpu';
 import { attribute, float, mix } from 'three/tsl';
@@ -287,7 +288,7 @@ export class WorksView {
 
   /** May the player be shown this work? His own always; the enemy's once seen, if finished. */
   private known(cell: number, rec: number): boolean {
-    if (((rec >> 4) & 7) === 0 || this.revealAll) return true;
+    if (((rec >> 4) & 7) === ME || this.revealAll) return true;
     return (rec & DONE) !== 0 && this.seen[cell] === 1;
   }
 

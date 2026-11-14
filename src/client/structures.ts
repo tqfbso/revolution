@@ -1,3 +1,4 @@
+import { ME } from './me';
 import * as THREE from 'three/webgpu';
 import { attribute, float, mix, texture, uv } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -1720,7 +1721,7 @@ export class StructureView {
     const posts: number[] = [];
     for (let o = 0; o < s.bases.length; o += BASE_STRIDE) {
       const id = s.bases[o];
-      if (s.bases[o + 2] !== 0 || s.structHp[id] === 0) continue;
+      if (s.bases[o + 2] !== ME || s.structHp[id] === 0) continue;
       posts.push(map.sX[id] + (map.sW[id] >> 1), map.sY[id] + (map.sH[id] >> 1), BASE_SIGHT);
     }
     this.fog.posts = posts;
@@ -1767,7 +1768,8 @@ export class StructureView {
 
   /** An enemy base building the player has not seen yet: not drawn, not on the minimap. */
   hidden(s: number): boolean {
-    return this.baseTeam[s] > 0 && this.found[s] === 0 && !this.revealAll;
+    const team = this.baseTeam[s];
+    return team >= 0 && team !== ME && this.found[s] === 0 && !this.revealAll;
   }
 
   /** Has the player a unit looking at any part of this building right now? */

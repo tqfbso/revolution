@@ -1,6 +1,7 @@
 // The player's supply area, worked out on the client from what the snapshot already
 // carries (base buildings, towns, trucks) with the same stamp the simulation uses, so the
 // minimap can show where the army is fed without the worker sending a map every second.
+import { ME } from './me';
 import { BUILDINGS } from '../sim/economy';
 import { fx } from '../sim/fixed';
 import {
@@ -17,8 +18,6 @@ import { KIND_TRUCK } from '../sim/units';
 import { TICK_RATE } from '../sim/world';
 import { BASE_STRIDE, TASK_HUNGRY, type Snapshot } from '../worker/protocol';
 import type { UnitView } from './units';
-
-const ME = 0;
 
 export class SupplyView {
   /** 1 per 16 m square of the map where the player's army is in supply. */

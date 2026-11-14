@@ -34,6 +34,7 @@ import { StructureView } from './client/structures';
 import { SupplyView } from './client/supply';
 import { WorksView } from './client/works';
 import { UnitView, flareHeight } from './client/units';
+import { setMe } from './client/me';
 import { TASK_HUNGRY, type Scenario, type Snapshot, type ToWorker } from './worker/protocol';
 import {
   KINDS,
@@ -82,6 +83,11 @@ async function start(): Promise<void> {
   // seed and opponent; a shared game is always the plain skirmish.
   const coop = await openCoop(params);
   if (coop) for (const k of ['scenario', 'demo', 'units', 'control', 'speed']) params.delete(k);
+  // Versus (decision 114): red against blue, each seeing only its own side.
+  const versus = coop?.versus === true;
+  const myTeam = coop ? coop.team : 0;
+  setMe(myTeam);
+  if (versus) params.delete('fog');
   const unitCount = Math.min(Math.max(Number(params.get('units') ?? 3000) | 0, 0), MAX_UNITS);
   const seed = Number(params.get('seed') ?? 1) | 0;
   const wanted = params.get('scenario');
@@ -175,6 +181,7 @@ async function start(): Promise<void> {
   works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
   units.night = effects.night = night;
+  units.playerTeam = myTeam;
   // Night: the two flares nearest the camera light the ground under them for real.
   const flareLights: THREE.PointLight[] = [];
   if (night && quality !== 'low') {
@@ -315,7 +322,7 @@ async function start(): Promise<void> {
   card.hungry = () => supply.hungry;
   card.paradrop = () =>
     input.ask('Click the map: where should the paratroops drop? (Esc cancels)', (x, z) => {
-      send({ type: CMD_PARADROP, team: 0, x: Math.round(x * 1024), y: Math.round(z * 1024) });
+      send({ type: CMD_PARADROP, team: myTeam, x: Math.round(x * 1024), y: Math.round(z * 1024) });
     });
   const input = new Input(
     canvas,
@@ -392,6 +399,8 @@ async function start(): Promise<void> {
     speed,
     net: coop ? coop.role : 'solo',
     humans: coop ? coop.humans : 1,
+    versus,
+    team: myTeam,
     night,
   });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
@@ -444,8 +453,8 @@ async function start(): Promise<void> {
     setPaused(!paused);
   });
   // The skirmish opens on your headquarters.
-  if (scenario === 'skirmish' && map.startX[0] >= 0) {
-    rts.look(map.startX[0] * 4 + 14, map.startY[0] * 4 + 10, 95);
+  if (scenario === 'skirmish' && map.startX[myTeam] >= 0) {
+    rts.look(map.startX[myTeam] * 4 + 14, map.startY[myTeam] * 4 + 10, 95);
   }
   input.controlAll = params.get('control') === 'all';
   structures.revealAll = input.controlAll || demo;

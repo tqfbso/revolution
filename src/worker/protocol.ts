@@ -71,6 +71,10 @@ export type ToWorker =
       net?: NetMode;
       /** Co-op: players sharing the army. The computer is strengthened for three or four. */
       humans?: number;
+      /** Versus (decision 114): no computer, and commanders for both armies. */
+      versus?: boolean;
+      /** The army this player commands: 0, or 1 for a blue player in a versus game. */
+      team?: number;
       /** A night battle (CMD_NIGHT on the first tick): short sight, flares, fires that show. */
       night?: boolean;
     }

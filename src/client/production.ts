@@ -2,6 +2,7 @@
 // to the army, not to a building: "20 more rifle squads", "keep 6 tanks in the field",
 // "send the new ones to Ridgetop". The simulation hands them out to whichever factory
 // has room (see dispatchOrders in the economy).
+import { ME } from './me';
 import { CMD_DEST, CMD_KEEP, CMD_ORDER, type Command } from '../sim/commands';
 import { BUILDINGS, TIER_ITEM, UNIT_PRICE } from '../sim/economy';
 import type { GameMap } from '../sim/map';
@@ -9,8 +10,6 @@ import { KINDS, KIND_COUNT, POINTS } from '../sim/units';
 import { DEST_COMMANDER, DEST_RALLY, DEST_TOWN, KIND_SLOTS, TICK_RATE } from '../sim/world';
 import { BASE_STRIDE, type Snapshot } from '../worker/protocol';
 import type { UnitView } from './units';
-
-const ME = 0;
 
 /** A commander new units can be sent to (filled in by the mission board). */
 export interface Posting {

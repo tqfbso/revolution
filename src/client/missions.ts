@@ -2,6 +2,7 @@
 // troops (the selection, a control group, new units from the factories) and a mission at
 // a place; from then on its staff runs them (src/sim/staff.ts) and the board shows how it
 // is going: what each is doing, how strong it still is, who is asking for more.
+import { ME } from './me';
 import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, CMD_STYLE, type Command } from '../sim/commands';
 import type { GameMap } from '../sim/map';
 import {
@@ -45,8 +46,6 @@ import { COMMANDER_RGB } from './icons';
 import type { Posting } from './production';
 import { CommanderReports, type Report } from './reports';
 import type { UnitView } from './units';
-
-const ME = 0;
 
 export const COMMANDER_NAMES = [
   'Alpha',
