@@ -466,6 +466,64 @@
         font-size: 10px;
         color: #d8c27a;
       }
+      #debrief {
+        top: 12%;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        pointer-events: auto;
+        z-index: 20;
+        min-width: 420px;
+        max-width: 92vw;
+        max-height: 80vh;
+        overflow: auto;
+        padding: 18px 26px;
+        font-size: 13px;
+        background: rgba(12, 16, 20, 0.94);
+        border: 1px solid #3a4652;
+      }
+      #debrief h2 {
+        margin: 0 0 4px;
+        font-size: 26px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      #debrief h2.won {
+        color: #dcc48c;
+      }
+      #debrief h2.lost {
+        color: #ff9d90;
+      }
+      #debrief table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 10px 0;
+      }
+      #debrief th,
+      #debrief td {
+        text-align: right;
+        padding: 3px 10px;
+        border-bottom: 1px solid #26303a;
+      }
+      #debrief th:first-child,
+      #debrief td:first-child {
+        text-align: left;
+      }
+      #debrief tr.mvp td {
+        color: #dcc48c;
+      }
+      #debrief .note {
+        color: #8b98a5;
+        font-size: 11px;
+      }
+      #debrief .buttons {
+        text-align: right;
+        margin-top: 12px;
+      }
+      #debrief button {
+        margin-left: 8px;
+        padding: 4px 12px;
+      }
       #banner {
         position: fixed;
         top: 30%;
@@ -771,6 +829,7 @@ starting…</pre>
     <div id="missions" class="panel"></div>
     <div id="prompt" class="panel"></div>
     <div id="banner" class="panel"></div>
+    <div id="debrief" class="panel"></div>
     <div id="paused" class="panel"></div>
     <pre id="perf-test-result" class="panel"></pre>
     <div id="help" class="panel">

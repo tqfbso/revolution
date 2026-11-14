@@ -142,6 +142,25 @@ export const EV_STRIKE = 23; // a = target, b = drone: strike drones are lining 
 export const EV_FORTIFIED = 24; // a = structure, b = 1 fortified, 0 mended back to whole
 export const EV_STRAY = 25; // a = structure, b = shooter: a round meant for someone else hit it
 /** a = where (see packPoint), b = the army whose fire killed a civilian there. */
+/**
+ * The score (decision 103), kept by the sim so that every machine of a shared game shows
+ * the same one: four numbers for each army, then four for each player of a shared army
+ * (units destroyed, units lost, and the army points of each), then city buildings brought
+ * down. It decides nothing in the game and is not part of the hash.
+ */
+export const STAT_STRIDE = 4;
+export const STAT_KILLS = 0;
+export const STAT_LOST = 1;
+export const STAT_KILL_POINTS = 2;
+export const STAT_LOST_POINTS = 3;
+export const STAT_TEAMS = 3;
+export const STAT_SEATS = 4;
+export const STAT_SEAT0 = STAT_STRIDE * STAT_TEAMS;
+export const STAT_RAZED = STAT_SEAT0 + STAT_STRIDE * STAT_SEATS;
+export const STATS = STAT_RAZED + 1;
+/** A unit no player has given an order to himself. */
+export const NO_SEAT = 255;
+
 export const EV_CIVILIAN = 26;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
@@ -366,6 +385,10 @@ export interface World {
   civHome: Int16Array;
   civKilled: Int32Array;
   civEscaped: number;
+  /** The score: see STAT_*. */
+  stats: Int32Array;
+  /** Per unit: the player of a shared army who last gave it an order himself, or NO_SEAT. */
+  seat: Uint8Array;
   danger: Int32Array;
   civField: Uint16Array | null;
   civFieldAt: number;
@@ -508,6 +531,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     civHome: new Int16Array(MAX_CIVILIANS),
     civKilled: new Int32Array(MAX_TEAMS),
     civEscaped: 0,
+    stats: new Int32Array(STATS),
+    seat: new Uint8Array(MAX_UNITS).fill(NO_SEAT),
     danger: new Int32Array(DANGER_DIM * DANGER_DIM),
     civField: null,
     civFieldAt: 0,

@@ -370,6 +370,7 @@ function postSnapshot(w: World, simMs: number): void {
     cmdr: w.cmdr.slice(0, n),
     commanders,
     task,
+    stats: w.stats.slice(),
     civilians: Float32Array.from(civs),
     civStats: Int32Array.from([w.civCount, civHome, w.civEscaped, ...w.civKilled]),
     siteStock: w.siteStock.slice(0, map.siteCount),

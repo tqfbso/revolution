@@ -7,6 +7,7 @@ import { ALERT_NOTE, Alerts } from './client/alerts';
 import { SAY_URGENT } from './client/voice';
 import { Cameras } from './client/cameras';
 import { Civilians } from './client/civilians';
+import { Debrief } from './client/debrief';
 import { CIVILIAN_SUPPLIES } from './sim/civilians';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
@@ -17,7 +18,7 @@ import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
 import { makeLook, readQuality, skyScene } from './client/look';
-import { dutyOf, openCoop } from './client/net';
+import { DUTIES, dutyOf, openCoop } from './client/net';
 import { bakeSurfaces } from './client/surfaces';
 import { Clutter } from './client/clutter';
 import { Effects } from './client/effects';
@@ -203,6 +204,8 @@ async function start(): Promise<void> {
     coop?.state(paused, speedNow);
   };
   const deliver = (command: Command) => {
+    // Signed, so that the score knows whose units did what (decision 103).
+    command.by = coop ? coop.seat : 0;
     if (guest()) coop?.sendCommand(command);
     else post({ type: 'command', command });
   };
@@ -224,6 +227,7 @@ async function start(): Promise<void> {
     works.applySnapshot(e.data);
     cameras.applySnapshot(e.data, performance.now() / 1000);
     civilians.applySnapshot(e.data, performance.now() / 1000);
+    debrief?.applySnapshot(e.data);
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
     production.applySnapshot(e.data);
@@ -249,6 +253,18 @@ async function start(): Promise<void> {
     lookAt,
     works,
   );
+  const debriefEl = document.getElementById('debrief');
+  const debrief = debriefEl
+    ? new Debrief(debriefEl, units.playerTeam, () =>
+        coop
+          ? coop.duties.map((d, k) => ({
+              name: k === coop.seat ? 'You' : `Player ${k + 1}`,
+              role: DUTIES[d] ?? DUTIES[0],
+            }))
+          : [{ name: 'You', role: DUTIES[0] }],
+      )
+    : null;
+  if (debrief) card.onOver = (won) => debrief.show(won);
   const production = new ProductionCentre(
     document.getElementById('production') as HTMLElement,
     map,
@@ -809,6 +825,7 @@ async function start(): Promise<void> {
   // Read by automated performance checks.
   (window as unknown as { __revolution: unknown }).__revolution = {
     stats: hud.stats,
+    debrief,
     civilians,
     governor,
     perfTest,
