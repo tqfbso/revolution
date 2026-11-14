@@ -529,13 +529,36 @@ export function newForce(role: number): Force {
   };
 }
 
-export function createAi(team: number, level: AiLevel = 'normal', seed = 1): Ai {
+/**
+ * Co-op with three or four players (decision 093): the players share one army and one
+ * economy, so what they gain is attention, not material. The computer is given about a
+ * third more per extra player to answer it: a bigger economy and army, sooner and more
+ * often on the attack, more men in its towns. One or two players: the level as it stands.
+ */
+export function tuningFor(level: AiLevel, humans: number): Tuning {
+  const base = AI_TUNING[level];
+  const extra = Math.min(Math.max(humans | 0, 2), 4) - 2;
+  if (extra === 0) return base;
+  const pct = 100 + 35 * extra;
+  return {
+    ...base,
+    trucks: Math.trunc((base.trucks * pct) / 100),
+    factories: Math.trunc((base.factories * pct) / 100),
+    size: Math.trunc((base.size * pct) / 100),
+    firstAttack: Math.trunc((base.firstAttack * 100) / pct),
+    rest: Math.trunc((base.rest * 100) / pct),
+    slow: Math.max(1, base.slow - extra),
+    garrison: base.garrison + extra,
+  };
+}
+
+export function createAi(team: number, level: AiLevel = 'normal', seed = 1, humans = 1): Ai {
   const force = newForce;
   const ai: Ai = {
     team,
     enemy: team === 0 ? 1 : 0,
     level,
-    tune: AI_TUNING[level],
+    tune: tuningFor(level, humans),
     rng: new Uint32Array(1),
     ready: false,
     side: 0,

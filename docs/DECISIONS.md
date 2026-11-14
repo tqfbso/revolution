@@ -1518,3 +1518,34 @@ arithmetic we have not hit; the hash check will say so at once), and play over a
 Also in this change, asked for after the drone rebalance (088): on Normal and above the
 computer adds one air-defence vehicle for every four tanks it means to field, and one
 more jammer from tier 3, so its armour does not go out without cover against drones.
+
+## 093. Co-op for three and four: a lobby, a star of links, a stronger computer (2026-11-14)
+
+Fabio's two-player test over a real network worked, and three people wanted to play.
+
+**The star.** The host's sim stays the only clock (092). Every guest holds one link, to the
+host; the host sends each tick's frame to all of them, takes orders from any of them, and
+passes on where each one looks and what each one points at, with the seat it came from.
+Seat 0 is the host, guests sit in 1 to 3 (`MAX_PLAYERS = 4`). Hashes are compared host to
+guest on every link; two guests in step with the host are in step with each other.
+
+**The lobby.** One invite link serves everyone. A guest who opens it is told he is in and
+how many are; the host sees the list with each role and presses Start. (Before, the game
+began the moment the one guest arrived; with a third player that moment cannot be guessed.)
+A fifth player is told the game is full.
+
+**A slow player holds nobody up.** This comes with the host clock: the host never waits
+for a guest. A guest who falls behind runs ticks faster until he is level (`follow`), tells
+the host in his ping how far behind he is, and the host's status line names anyone more
+than two seconds late. A guest silent for twelve seconds is dropped and the others play on;
+if the host goes, each guest continues alone on his own clock (their worlds part from there).
+
+**The computer.** The players share one army and one economy, so a third player adds
+attention, not material. `tuningFor(level, humans)` gives the computer 35% more per player
+beyond two: trucks, factories and army size up, first attack and the rest between attacks
+down, a quicker hand on production, one more squad per garrison. The number of players is
+fixed at the start and goes to every sim in `init`, so it cannot desync. One or two players
+get the level exactly as it stands: the golden hash and the two-player game are untouched.
+
+**Not built:** joining a game in progress, a relay between guests if the host leaves,
+per-player ownership of units.
