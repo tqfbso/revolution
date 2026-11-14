@@ -1574,3 +1574,48 @@ houses, no breaking off. Once there the troops stand and shoot at what comes at 
 is for manoeuvre; Attack and Hold remain the missions that fight for a place.
 
 The golden hash is unchanged (919328295): the computer player does not use the staff.
+
+## 095. Buildings come down sooner, and a battle wrecks the street it is fought in (2026-11-14)
+
+Fabio, after playing the city: buildings are now too hard to destroy, and he wants more
+destruction, including collateral damage from battles nearby. (He asked for tougher
+buildings two days ago, 074. Both are right: the numbers of 074 were set for the four-cell
+houses of the ridge map, and the houses of the city map average nine cells. At 450 a cell
+and a quarter of a tank's shell reaching the structure, a lone tank needed fourteen minutes
+for an ordinary city house.)
+
+**Tougher by class, not by the acre.** Structure per cell 200, 400, 600 (was 450, 900,
+1300); walls per cell of face 120, 220, 320 (was 200, 400, 600). Direct fire does half its
+damage to the structure (was a quarter). A lone tank guts an ordinary city house in about
+two minutes and levels it in three; four tanks need 45 seconds. A building looks damaged
+at 80% (was 70%), so the first marks show sooner. Artillery: 160 a shell (was 120).
+
+**Collateral damage.** Nobody has to order it:
+
+- _Stray rounds._ A shot at a target in the open that has a building behind it, up to five
+  cells on and in a fan a little to either side, also hits that building (`strayFire`,
+  `UnitKind.stray`). Along a street that is the fronts on both sides. Bullets and light
+  cannon (rifle and engineer squads 5, fighting vehicle 3) shoot a building up, as far as
+  the damaged state, and wear its wall at half that rate: they cannot gut it. Shells,
+  missiles and warheads (tank 30, missile team 20, strike drone 40) have no such limit and
+  also catch a building their target is standing against.
+- _Shell bursts._ Every building the burst reaches takes its share, full under the shell
+  and half at the rim, as the men in the open always did (`blastStructures`). Before, only
+  the building under the shell was hurt.
+- _Vehicles that blow up._ A vehicle killed in a street does 60 to the buildings within
+  six metres of it.
+- _The fight inside._ Storming a held building costs it 16 a second while it lasts.
+
+**What stays.** A ruin is still rubble that gives cover and can be fortified; a gutted
+shell is still a position. A fortified building still loses a quarter less, to collateral
+too, so fortifying matters more now that everything else is softer. Rifle squads ordered
+onto a building, or firing at its garrison, do what they did.
+
+**Measured.** Hard against hard on the city for 45 minutes, two seeds: 8 and 14 buildings
+marked or worse before; 19 and 52 after, most of them shot up, 5 and 8 levelled. The
+computer fields few guns, so a player with tanks and artillery will see more. Step time
+unchanged (2.7 ms a tick mean; the lookups are a handful of cells per shot). New event
+`EV_STRAY` (25) for the dust on the wall. Golden hash 1641703504.
+
+**Not built:** fire that spreads, damage to street furniture and trees, an AI that shells
+a held block on purpose (U5).

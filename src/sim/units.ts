@@ -45,6 +45,14 @@ export interface UnitKind {
   damage: readonly number[];
   /** Damage per shot against buildings and bridges. Rifles do nothing to masonry. */
   siege: number;
+  /**
+   * What a shot at a target in the open does to a building just behind or beside it
+   * (decision 095): the structure takes this much. Below BLAST_STRAY it is bullets and
+   * light cannon, which shoot a building up but cannot gut it, and do half as much to the
+   * wall. From BLAST_STRAY up it is a shell, a missile or a warhead: no such limit, and it
+   * also catches a building the target is standing against.
+   */
+  stray: number;
   /** Can occupy buildings. */
   garrison: boolean;
   /** Ticks a wreck stays on the field before its slot is freed. */
@@ -85,6 +93,8 @@ export interface UnitKind {
 
 const PLAIN = { spotter: false, stealth: false, jam: 0, kamikaze: false, engineer: false };
 
+/** From this much `stray` a round is high explosive (see UnitKind.stray). */
+export const BLAST_STRAY = 16;
 const DIRECT = { indirect: false, minRange: 0, blast: 0 };
 
 const BASE_KINDS: readonly UnitKind[] = [
@@ -97,6 +107,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 60,
     damage: [60, 75, 75, 80, 90, 75, 0, 0, 90, 90, 90, 75],
     siege: 60,
+    stray: 30,
     garrison: false,
     wreckTicks: 1800,
     armour: [70, 115, 180],
@@ -119,6 +130,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 24,
     damage: [3, 9, 9, 5, 10, 9, 1, 1, 10, 10, 10, 9],
     siege: 2,
+    stray: 5,
     garrison: true,
     wreckTicks: 200,
     armour: null,
@@ -139,6 +151,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 140,
     damage: [134, 0, 0, 130, 130, 0, 0, 0, 130, 130, 130, 0],
     siege: 40,
+    stray: 20,
     garrison: true,
     wreckTicks: 200,
     armour: null,
@@ -157,6 +170,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 8,
     damage: [3, 11, 11, 7, 9, 11, 2, 2, 9, 9, 9, 11],
     siege: 4,
+    stray: 3,
     garrison: false,
     wreckTicks: 1800,
     armour: [100, 120, 150],
@@ -177,7 +191,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     range: fx(110),
     reload: 120,
     damage: [50, 70, 70, 60, 80, 70, 0, 0, 80, 80, 80, 70],
-    siege: 120,
+    siege: 160,
+    stray: 0,
     garrison: false,
     wreckTicks: 1800,
     armour: null,
@@ -200,6 +215,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 1000,
     damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
+    stray: 0,
     garrison: true,
     wreckTicks: 200,
     armour: null,
@@ -220,6 +236,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 1000,
     damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
+    stray: 0,
     garrison: false,
     wreckTicks: 1,
     armour: null,
@@ -242,6 +259,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 1,
     damage: [75, 50, 60, 150, 120, 50, 0, 0, 130, 130, 130, 50],
     siege: 0,
+    stray: 40,
     garrison: false,
     wreckTicks: 1,
     armour: null,
@@ -262,6 +280,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 12,
     damage: [0, 0, 0, 0, 0, 0, 10, 12, 0, 0, 0, 0],
     siege: 0,
+    stray: 0,
     garrison: false,
     wreckTicks: 1800,
     armour: null,
@@ -281,6 +300,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 1000,
     damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
+    stray: 0,
     garrison: false,
     wreckTicks: 1800,
     armour: null,
@@ -302,6 +322,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 1000,
     damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
+    stray: 0,
     garrison: false,
     wreckTicks: 1200,
     armour: null,
@@ -323,6 +344,7 @@ const BASE_KINDS: readonly UnitKind[] = [
     reload: 50,
     damage: [2, 10, 10, 4, 8, 10, 0, 0, 8, 8, 8, 10],
     siege: 90,
+    stray: 5,
     garrison: true,
     wreckTicks: 200,
     armour: null,

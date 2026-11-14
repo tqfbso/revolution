@@ -204,7 +204,7 @@ describe('determinism', () => {
   });
 });
 
-const GOLDEN = 919328295;
+const GOLDEN = 1641703504;
 
 describe('movement', () => {
   it('units ordered to move arrive in formation around the target and stop', () => {
@@ -535,13 +535,13 @@ describe('cities', () => {
     step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [2, 3, 4, 5], structure: 0 }]);
     w.events.length = 0;
     let fell = -1;
-    // Four tank guns need a minute and a half for a small house (decision 074).
+    // Four tank guns need under half a minute for a small house (decision 095; 90 s before).
     for (let t = 0; t < 2600 && fell < 0; t++) {
       step(w, []);
       if (hasEvent(w, EV_COLLAPSE)) fell = t;
     }
-    expect(fell).toBeGreaterThan(1200);
-    expect(fell).toBeGreaterThan(0);
+    expect(fell).toBeGreaterThan(200);
+    expect(fell).toBeLessThan(900);
     expect(hasEvent(w, EV_SIEGE)).toBe(true);
     expect(w.sHp[0]).toBe(0);
     expect(w.map.type[cellOfPos(fx(506), fx(498))]).toBe(T_RUBBLE);

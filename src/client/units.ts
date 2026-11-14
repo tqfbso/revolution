@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { attribute, mix, vec3 } from 'three/tsl';
 import {
   AIR_HEIGHT,
+  BLAST_STRAY,
   KINDS,
   KIND_AD,
   KIND_ARTILLERY,
@@ -30,6 +31,7 @@ import {
   EV_LAUNCH,
   EV_SHOT,
   EV_SIEGE,
+  EV_STRAY,
   EV_UNLOAD,
   EV_WALL,
   MAX_UNITS,
@@ -496,6 +498,19 @@ export class UnitView {
           this.sound?.at(SND_IMPACT, c.x, c.z, seen);
           if (seen) this.structures.breach(a, b);
         }
+        continue;
+      }
+      if (ev[e] === EV_STRAY) {
+        // A round meant for someone else: dust and chips off the wall it hit.
+        if (this.lodOf[b] === LOD_HIDDEN) continue;
+        const p = this.structures.hit(a);
+        if (!this.fog.sees(p.x, p.z)) continue;
+        fx.thin = this.lodOf[b] >= 2 ? 1 : 0;
+        if (KINDS[this.kind[b]].stray >= BLAST_STRAY) {
+          this.sound?.at(SND_IMPACT, p.x, p.z, true);
+          fx.shellImpact(p.x, p.y - 0.8, p.z);
+        }
+        fx.squadHit(p.x, p.y, p.z);
         continue;
       }
       if (ev[e] === EV_UNLOAD) continue;
