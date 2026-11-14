@@ -1731,3 +1731,38 @@ then the march picks it up; an enemy on the way is still fought through; nobody 
 under fire; joiners turn round at once (`Post.turn`). Same test: under 3 s in every case.
 Golden hash unchanged (the computer player does not use the staff); the two-page co-op
 run stays in sync.
+
+## 100. A dropped co-op player comes back into the running game (2026-11-14)
+
+Until now a lost connection ended that player's game: the others played on and the most
+the host could do was restart for everyone.
+
+**Decided: replay, not a copy of the world.** The host keeps a record of every tick that
+had orders in it (`GameLog` in `src/client/replay.ts`; nearly all ticks have none). A
+player who opens the invite link while the game runs is given the free seat, the same
+game settings, and the record in pieces. His sim starts at tick 0 and plays it through
+flat out, without pictures, sounds or hash reports, until it is within ten seconds of the
+others; then it follows like any guest and the hashes are compared again. Sending the
+world itself would have been quicker for him, but the world is not all of the state: the
+computer player, the staff and several caches live outside it, and a copy that missed one
+of them would drift apart silently. A replay is right by construction, because it is
+exactly what lockstep already does.
+
+- Only a seat someone left can be taken (the computer's strength was set by the number
+  of players at the start), by anyone with the link, with any role.
+- The host must stay: if the host goes, everyone plays on alone as before.
+- A guest whose line dropped sees a "rejoin their game" button (it reloads the page).
+- A line is given up after 12 seconds of silence on two checks running, as before, but a
+  check after a stall of this page itself no longer counts, and a player coming back has
+  90 seconds' grace while his page loads the map.
+- Only the host announces pause and speed; a player coming back is told how they stand.
+
+**Cost:** catching up takes as long as the sim needs to run the game so far: measured
+headless, 0.7 ms a tick in a quiet game, so about a minute for every 25 to 30 minutes
+played, more in a heavy battle. A notice shows the percentage.
+
+**Checked:** `tests/lockstep.test.ts` (the record cut up and put together again is the
+game tick for tick; a late player's world hashes equal to the host's), and three headless
+browsers over `?net=local`: one closed, opened the link again, caught up, 14 hashes
+compared with the others and none different. Not checked: over the real broker between
+machines. Golden hash unchanged (nothing in the sim changed).

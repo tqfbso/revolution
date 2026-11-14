@@ -16,6 +16,7 @@
 // files. `?net=local` swaps the network for a channel between two tabs of one browser.
 import type { Command } from '../sim/commands';
 import type { Frame, NetReport } from '../worker/protocol';
+import { GameLog, expand, type Piece } from './replay';
 
 declare const __BUILD__: string;
 
@@ -52,7 +53,11 @@ type Msg =
   /** Host, in the lobby: you are in, with this many players so far. */
   | { t: 'wait'; n: number }
   /** Host: the game starts. Every player's role by seat (0 = the host), and your seat. */
-  | { t: 'cfg'; cfg: Config; duties: number[]; you: number }
+  | { t: 'cfg'; cfg: Config; duties: number[]; you: number; resume?: boolean }
+  /** Host, to a player coming back: a stretch of the game so far (see replay.ts). */
+  | ({ t: 'r' } & Piece)
+  /** Host: the seat is taken again, by a player with this role. */
+  | { t: 'back'; seat: number; duty: number }
   | { t: 'busy' }
   | { t: 'full' }
   /** Host: the player in this seat has left. */
@@ -281,6 +286,8 @@ interface Peer {
   ping: number;
   /** Guest: ticks it has received and not yet run, as it last told us. */
   behind: number;
+  /** Until then its silence is forgiven (a player coming back is busy loading the map). */
+  grace: number;
 }
 
 /** The co-op session once the players are in. Seat 0 is the host, guests sit in 1 to 3. */
@@ -305,6 +312,15 @@ export class Coop {
   onMark: (x: number, z: number, from: number) => void = () => {};
   /** The host has gone: the guest's sim must run on its own clock from here. */
   onAlone: () => void = () => {};
+  /** Host: a player has come back and must be told how the game stands (pause, speed). */
+  onJoined: () => void = () => {};
+  /** Host: everything every sim has been sent, for a player who comes back. */
+  private readonly log = new GameLog();
+  /** Host: seats being brought up to date, not yet in the game. */
+  private readonly joining = new Set<number>();
+  /** Guest who came back: the most ticks he has had to catch up, and the notice that says so. */
+  private backlog = 0;
+  private catchEl: HTMLElement | null = null;
   /** Our own hashes, by tick. */
   private readonly mine = new Map<number, number>();
   /** Host: the guests by seat. Guest: the host, under seat 0. */
@@ -328,6 +344,10 @@ export class Coop {
     /** Every player's role, by seat. */
     readonly duties: number[],
     listener: Listener | null,
+    /** Host: what is being played, for a player who comes back. */
+    private readonly cfg: Config | null = null,
+    /** Guest: we are coming back into a game in progress. */
+    resumed = false,
   ) {
     this.humans = duties.length;
     for (let k = 0; k < duties.length; k++) {
@@ -347,30 +367,43 @@ export class Coop {
     document.body.appendChild(this.bar);
     links.forEach((link, k) => this.attach(role === 'host' ? k + 1 : 0, link));
     if (listener) {
-      // A player who lost the connection and opens the invite again finds a game already
-      // under way, which he cannot join half way: the host is offered a fresh start.
+      // A player who lost the connection and opens the invite again is let back in: into
+      // the seat he (or anyone) left, with the game so far to play through.
       listener.onLink = (l) => {
         l.onMessage = (m) => {
-          if (m.t !== 'hello') return;
-          l.send({ t: 'busy' });
-          this.say(
-            'A player is waiting at the invite link. <button id="coop-restart">Restart the game together</button>',
-          );
-          document
-            .getElementById('coop-restart')
-            ?.addEventListener('click', () => location.reload());
+          if (m.t === 'hello') this.readmit(l, m.build, m.duty | 0);
         };
       };
     }
+    if (resumed) {
+      this.catchEl = document.createElement('div');
+      this.catchEl.id = 'coop-catchup';
+      this.catchEl.style.cssText =
+        'position:fixed;top:38%;left:50%;transform:translateX(-50%);z-index:40;padding:18px 28px;' +
+        'background:rgba(20,23,26,0.92);color:#e8e6df;border:1px solid #3a4046;border-radius:8px;' +
+        'font:16px/1.5 system-ui,sans-serif;text-align:center';
+      this.catchEl.textContent = 'Rejoining the battle…';
+      document.body.appendChild(this.catchEl);
+    }
+    let checked = performance.now();
     setInterval(() => {
       const now = performance.now();
+      // If this page itself stood still (loading the map, a tab in the background), what
+      // the others sent meanwhile has not been read yet: their silence proves nothing.
+      // This check is skipped, and a line is only given up after two unbroken ones.
+      const stalled = now - checked > 6000;
+      checked = now;
       for (const [seat, p] of [...this.peers]) {
         p.link.send({ t: 'p', ts: now, behind: this.behind });
+        if (stalled) {
+          p.suspect = false;
+          continue;
+        }
         // A line that dies without saying so (a closed lid, a lost network) is noticed by
         // its silence: twelve seconds without a word, seen on two checks running, so that
         // a long stall of our own (loading) is not mistaken for theirs.
-        const quiet = now - p.heard > 12000;
-        if (quiet && p.suspect) this.drop(seat);
+        const quiet = now - p.heard > 12000 && now > p.grace;
+        if (quiet && p.suspect) this.drop(seat, 'silent');
         p.suspect = quiet;
       }
       this.paint();
@@ -386,15 +419,76 @@ export class Coop {
       suspect: false,
       ping: 0,
       behind: 0,
+      grace: 0,
     });
     link.onMessage = (m) => this.receive(seat, m);
-    link.onClose = () => this.drop(seat);
+    link.onClose = () => this.drop(seat, 'closed');
+  }
+
+  /** Host: someone has opened the invite while the game is running. */
+  private readmit(link: Link, build: string, duty: number): void {
+    if (build !== __BUILD__) {
+      link.send({ t: 'bad', build: __BUILD__ });
+      return;
+    }
+    let seat = -1;
+    for (let k = 1; k < this.humans && seat < 0; k++) {
+      if (!this.present.has(k) && !this.joining.has(k)) seat = k;
+    }
+    if (seat < 0 || !this.cfg || this.desyncAt >= 0) {
+      link.send({ t: 'full' });
+      return;
+    }
+    this.joining.add(seat);
+    const duties = this.duties.slice();
+    duties[seat] = duty;
+    link.send({ t: 'cfg', cfg: this.cfg, duties, you: seat, resume: true });
+    this.say(`Player ${seat + 1} is coming back into the game…`);
+    let open = true;
+    link.onMessage = () => {};
+    link.onClose = () => {
+      open = false;
+      this.joining.delete(seat);
+    };
+    // The record goes out a few pieces at a time so the line is not choked; the game runs
+    // on meanwhile and the record with it. The moment he has all of it he is in, and the
+    // next frames go to him like to everyone else.
+    let from = 0;
+    let at = 0;
+    const feed = () => {
+      if (!open) return;
+      for (let n = 0; n < 24; n++) {
+        const next = this.log.piece(from, at);
+        if (!next) {
+          this.joining.delete(seat);
+          this.duties[seat] = duty;
+          this.present.add(seat);
+          this.live = true;
+          this.send({ t: 'back', seat, duty });
+          this.attach(seat, link);
+          // His page is still loading the map and cannot answer yet: a minute's grace
+          // before his silence counts against him.
+          const p = this.peers.get(seat);
+          if (p) p.grace = performance.now() + 90000;
+          this.say(`Player ${seat + 1} is back and catching up.`);
+          this.onJoined();
+          this.paint();
+          return;
+        }
+        link.send({ t: 'r', ...next.piece });
+        from = next.piece.to;
+        at = next.at;
+      }
+      setTimeout(feed, 25);
+    };
+    feed();
   }
 
   /** The line to this seat is gone. */
-  private drop(seat: number): void {
+  private drop(seat: number, why: string): void {
     const p = this.peers.get(seat);
     if (!p) return;
+    console.info(`co-op: the line to seat ${seat} is gone (${why})`);
     this.peers.delete(seat);
     this.present.delete(seat);
     this.partners[seat].x = -1;
@@ -405,17 +499,22 @@ export class Coop {
     }
     if (this.role === 'guest') {
       this.live = false;
-      this.say('The host has left. You keep playing alone from here.');
+      this.say(
+        'The line to the host is gone. You keep playing alone from here. If the others are still playing, <button id="coop-rejoin">rejoin their game</button>',
+      );
+      document.getElementById('coop-rejoin')?.addEventListener('click', () => location.reload());
       this.onAlone();
     } else {
       this.send({ t: 'gone', seat });
       if (this.peers.size === 0) {
         this.live = false;
         this.say(
-          'You are the only one left. You keep playing alone; if the others open the invite link again you can restart together.',
+          'You are the only one left. The game runs on; anyone who opens the invite link again comes back into it.',
         );
       } else {
-        this.say(`Player ${seat + 1} has left. The rest of you play on.`);
+        this.say(
+          `Player ${seat + 1} has left. The rest of you play on; the invite link brings him back.`,
+        );
       }
     }
     this.paint();
@@ -441,9 +540,14 @@ export class Coop {
     const p = this.peers.get(seat);
     if (!p) return;
     p.heard = performance.now();
-    if (m.t === 'f') {
-      if (this.started) this.onFrames(m.f);
-      else this.early.push(...m.f);
+    if (m.t === 'f' || m.t === 'r') {
+      const frames = m.t === 'f' ? m.f : expand(m);
+      if (this.started) this.onFrames(frames);
+      else for (const f of frames) this.early.push(f);
+    } else if (m.t === 'back') {
+      this.present.add(m.seat);
+      this.duties[m.seat] = m.duty;
+      this.say(`Player ${m.seat + 1} is back in the game.`);
     } else if (m.t === 'c') this.onCommand(m.c);
     else if (m.t === 'h') this.theirs(p, m.k, m.v);
     else if (m.t === 'ctl') this.onControl(m.pause, m.speed);
@@ -464,7 +568,9 @@ export class Coop {
     } else if (m.t === 'gone') {
       this.present.delete(m.seat);
       if (this.partners[m.seat]) this.partners[m.seat].x = -1;
-      this.say(`Player ${m.seat + 1} has left. The rest of you play on.`);
+      this.say(
+        `Player ${m.seat + 1} has left. The rest of you play on; the invite link brings him back.`,
+      );
     }
   }
 
@@ -502,9 +608,20 @@ export class Coop {
   /** What the sim worker reports after running ticks. */
   fromWorker(net: NetReport): void {
     if (net.frames && net.frames.length > 0 && this.role === 'host') {
+      this.log.add(net.frames);
       this.send({ t: 'f', f: net.frames });
     }
     if (net.behind !== undefined) this.behind = net.behind;
+    if (this.catchEl) {
+      if (this.behind > this.backlog) this.backlog = this.behind;
+      if (this.backlog > 0 && this.behind < 40) {
+        this.catchEl.remove();
+        this.catchEl = null;
+      } else if (this.backlog > 0) {
+        const done = Math.floor((100 * (this.backlog - this.behind)) / this.backlog);
+        this.catchEl.textContent = `Rejoining the battle… ${done}% (${Math.ceil(this.behind / 1200)} min of it still to play through)`;
+      }
+    }
     if (net.hashes) {
       for (let k = 0; k < net.hashes.length; k += 2) {
         this.send({ t: 'h', k: net.hashes[k], v: net.hashes[k + 1] });
@@ -523,7 +640,8 @@ export class Coop {
   }
 
   state(paused: boolean, speed: number): void {
-    this.send({ t: 'st', paused, speed });
+    // The host's clock is the only one: a guest has no state to announce.
+    if (this.role === 'host') this.send({ t: 'st', paused, speed });
   }
 
   camera(x: number, z: number): void {
@@ -709,6 +827,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
             0,
             duties,
             listening,
+            cfg,
           ),
         );
       });
@@ -767,7 +886,15 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       else params.delete('ai');
       ui.hide();
       // Our role as the host has it, unless we changed it in the last instant.
-      return new Coop('guest', [link], answer.you, answer.duties, null);
+      return new Coop(
+        'guest',
+        [link],
+        answer.you,
+        answer.duties,
+        null,
+        null,
+        answer.resume === true,
+      );
     }
     link.close();
     if (answer?.t === 'bad') {
@@ -778,7 +905,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
     }
     say(
       answer?.t === 'busy'
-        ? 'The host is in the middle of a game. Waiting for them to restart it (they have been told you are here)…'
+        ? 'The host is in the middle of a game. Waiting…'
         : answer?.t === 'full'
           ? `That game already has ${MAX_PLAYERS} players. Waiting for a place…`
           : 'Waiting for the host…',

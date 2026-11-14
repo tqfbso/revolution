@@ -69,6 +69,10 @@ let pending: Command[] = [];
 let mode: NetMode = 'solo';
 /** Host: ticks run since the last report. Guest: ticks received and waiting to be run. */
 let frames: Frame[] = [];
+/** Guest: how many of `frames` have been run already (they are dropped in batches). */
+let head = 0;
+/** A guest this far behind is playing a game through to rejoin it: no pictures, no hashes. */
+const REPLAY_BEHIND = 200;
 let hashes: number[] = [];
 /** Both sides hash the world on the same ticks, two seconds apart. */
 const HASH_EVERY = TICK_RATE * 2;
@@ -112,6 +116,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     paused = false;
     mode = msg.net ?? 'solo';
     frames = [];
+    head = 0;
     hashes = [];
     inbox = [];
     accumulator = TICK_MS; // run the first tick immediately
@@ -124,8 +129,11 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     for (const f of msg.frames) frames.push(f);
   } else if (msg.type === 'alone') {
     if (world && mode === 'guest') {
-      for (const f of frames) if (f[0] === world.tick) tick(world, f[1]);
+      for (let k = head; k < frames.length; k++) {
+        if (frames[k][0] === world.tick) tick(world, frames[k][1]);
+      }
       frames = [];
+      head = 0;
       mode = 'solo';
       accumulator = 0;
       lastTime = performance.now();
@@ -140,14 +148,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
 };
 
 /** One tick: the players' orders, then the computer's, then the world moves. */
-function tick(w: World, orders: Command[]): number {
+function tick(w: World, orders: Command[], quiet = false): number {
   const t0 = performance.now();
   for (const c of orders) pending.push(c);
   for (const ai of ais) aiThink(ai, w, pending);
   if (staff) staffThink(staff, w, pending);
   step(w, pending);
   pending = [];
-  if (mode !== 'solo' && w.tick % HASH_EVERY === 0) hashes.push(w.tick, hashWorld(w));
+  if (!quiet && mode !== 'solo' && w.tick % HASH_EVERY === 0) hashes.push(w.tick, hashWorld(w));
   return performance.now() - t0;
 }
 
@@ -156,18 +164,29 @@ let lastReport = 0;
 /** The guest's clock is the host's: run what has arrived, faster if we have fallen behind. */
 function follow(w: World, now: number): void {
   lastTime = now;
-  const cap = frames.length > 60 ? 24 : frames.length > 6 ? 4 : frames.length > 2 ? 2 : 1;
+  const waiting = frames.length - head;
+  // Far behind means a player who came back (decision 100): the whole game so far is
+  // waiting. It is played through flat out; what happened on the way is not shown or
+  // sounded, and the hashes are compared again once he is level.
+  const replay = waiting > REPLAY_BEHIND;
+  const cap = replay ? 1 << 30 : waiting > 60 ? 24 : waiting > 6 ? 4 : waiting > 2 ? 2 : 1;
   let simMs = 0;
   let ticks = 0;
   const t0 = performance.now();
-  while (frames.length > 0 && ticks < cap && performance.now() - t0 < 40) {
-    const f = frames.shift() as Frame;
+  while (head < frames.length && ticks < cap && performance.now() - t0 < (replay ? 30 : 40)) {
+    const f = frames[head++];
     // A frame for another tick than ours cannot be played; the hash check will report it.
     if (f[0] !== w.tick) continue;
-    simMs = tick(w, f[1]);
+    const quiet = frames.length - head > REPLAY_BEHIND;
+    simMs = tick(w, f[1], quiet);
+    if (quiet) w.events.length = 0;
     ticks++;
   }
-  if (ticks > 0 || now - lastReport > 500) {
+  if (head > 1024 || head === frames.length) {
+    frames = frames.slice(head);
+    head = 0;
+  }
+  if (replay ? now - lastReport > 400 : ticks > 0 || now - lastReport > 500) {
     lastReport = now;
     postSnapshot(w, simMs);
   }
@@ -367,7 +386,7 @@ function postSnapshot(w: World, simMs: number): void {
   }
   if (w.tick % TICK_RATE === 0) snapshot.hash = hashWorld(w);
   if (mode !== 'solo') {
-    snapshot.net = { hashes, behind: mode === 'guest' ? frames.length : 0 };
+    snapshot.net = { hashes, behind: mode === 'guest' ? frames.length - head : 0 };
     if (mode === 'host') {
       snapshot.net.frames = frames;
       frames = [];

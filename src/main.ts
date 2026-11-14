@@ -354,6 +354,7 @@ async function start(): Promise<void> {
       if (speedEl && (v === 0.75 || v === 1)) speedEl.value = String(v);
     };
     coop.onAlone = () => post({ type: 'alone' });
+    coop.onJoined = () => coop.state(paused, speedNow);
     production.whose = dutyOf(coop.duties[coop.seat], coop.otherDuties(), KINDS.length);
     coop.start();
     coop.state(paused, speedNow);
