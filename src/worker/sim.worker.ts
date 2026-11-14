@@ -33,6 +33,8 @@ import {
   MAX_CAMERAS,
   MAX_COMMANDERS,
   CF_AUTO,
+  CF_STYLE_MASK,
+  CF_STYLE_SHIFT,
 } from '../sim/world';
 import { CAPTURE_POINTS } from '../sim/units';
 import {
@@ -50,6 +52,7 @@ import {
   COMMANDER_AUTO,
   COMMANDER_FIGHTING,
   COMMANDER_NEED,
+  COMMANDER_STYLE_SHIFT,
   COMMANDER_STRIDE,
   type Frame,
   type NetMode,
@@ -320,7 +323,9 @@ function postSnapshot(w: World, simMs: number): void {
     commanders[o] = w.cMission[c];
     commanders[o + 1] = Math.round(fromFx(w.cX[c]));
     commanders[o + 2] = Math.round(fromFx(w.cY[c]));
-    commanders[o + 9] = (w.cFlags[c] & CF_AUTO) !== 0 ? COMMANDER_AUTO : 0;
+    commanders[o + 9] =
+      ((w.cFlags[c] & CF_AUTO) !== 0 ? COMMANDER_AUTO : 0) |
+      (((w.cFlags[c] >> CF_STYLE_SHIFT) & CF_STYLE_MASK) << COMMANDER_STYLE_SHIFT);
     if (!p) continue;
     commanders[o + 3] = p.status;
     commanders[o + 4] = p.power;

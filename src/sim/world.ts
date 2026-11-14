@@ -80,6 +80,12 @@ export const M_MOVE = 6;
 export const MISSION_COUNT = 7;
 /** Commander flag: losses are ordered again and sent to it by themselves. */
 export const CF_AUTO = 1;
+/** Bits 1 and 2 of a commander's flags: its attack style (STYLE_*). */
+export const CF_STYLE_SHIFT = 1;
+export const CF_STYLE_MASK = 3;
+export const STYLE_TOGETHER = 0;
+export const STYLE_INFANTRY = 1;
+export const STYLE_ARMOUR = 2;
 /** The most of one kind that can be on bulk order, or kept in the field, at once. */
 export const ORDER_MAX = 999;
 

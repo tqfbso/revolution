@@ -20,6 +20,8 @@ export const COMMANDER_STRIDE = 10;
 export const COMMANDER_AUTO = 1;
 export const COMMANDER_NEED = 2;
 export const COMMANDER_FIGHTING = 4;
+/** Bits 3 and 4: the commander's attack style (STYLE_* in the sim). */
+export const COMMANDER_STYLE_SHIFT = 3;
 
 /**
  * Bits of Snapshot.info: life state (2 bits), team (2 bits), inside a building, (for a

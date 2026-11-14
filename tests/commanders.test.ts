@@ -9,6 +9,7 @@ import {
   CMD_ORDER,
   CMD_REINFORCE,
   CMD_SPAWN,
+  CMD_STYLE,
   type Command,
 } from '../src/sim/commands';
 import { B_BARRACKS, B_DEPOT, B_HQ } from '../src/sim/economy';
@@ -55,6 +56,9 @@ import {
   M_PATROL,
   M_SCREEN,
   STATE_ALIVE,
+  STYLE_ARMOUR,
+  STYLE_INFANTRY,
+  STYLE_TOGETHER,
   TICK_RATE,
   createWorld,
   hashWorld,
@@ -331,6 +335,46 @@ describe('sub-commanders: the staff', () => {
     play(w, st, 60, () => seen.add(st.posts[1].status));
     expect(seen.has(ST_FALLBACK)).toBe(false);
   }, 60000);
+
+  it('attack style: infantry first keeps the tanks a bound behind, armour first the squads', () => {
+    const gap = (style: number) => {
+      const { w, st } = field();
+      const t = town(w, 'Westgate');
+      const ids = add(w, [spawn(0, KIND_INFANTRY, 10, 250, 770), spawn(0, KIND_TANK, 3, 258, 778)]);
+      add(w, [spawn(1, KIND_INFANTRY, 6, 358, 682)]);
+      step(w, [
+        { type: CMD_ASSIGN, units: ids, slot: 0 },
+        { type: CMD_STYLE, team: 0, slot: 0, style },
+        mission(0, M_ATTACK, w.map.townX[t], w.map.townY[t]),
+      ]);
+      const far = (kind: number) => {
+        const of = ids.filter((i) => w.kind[i] === kind && w.state[i] === STATE_ALIVE);
+        return (
+          of.reduce(
+            (a, i) => a + Math.hypot(w.posX[i] - w.map.townX[t], w.posY[i] - w.map.townY[t]),
+            0,
+          ) /
+          (of.length || 1) /
+          fx(1)
+        );
+      };
+      // Tanks' distance from the town less the squads', averaged over the approach.
+      let sum = 0;
+      let n = 0;
+      play(w, st, 200, () => {
+        const p = st.posts[0];
+        if (p.status === ST_ATTACK && far(KIND_INFANTRY) > 30 && far(KIND_TANK) > 30) {
+          sum += far(KIND_TANK) - far(KIND_INFANTRY);
+          n++;
+        }
+      });
+      expect(st.posts[0].status).toBe(ST_SECURED);
+      return n > 0 ? sum / n : 0;
+    };
+    const together = gap(STYLE_TOGETHER);
+    expect(gap(STYLE_INFANTRY)).toBeGreaterThan(together + 8);
+    expect(gap(STYLE_ARMOUR)).toBeLessThan(together - 4);
+  }, 120000);
 
   it('hold: its engineers sandbag the houses its squads are in, one after another', () => {
     const { w, st } = field();

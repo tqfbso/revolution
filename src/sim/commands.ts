@@ -362,6 +362,19 @@ export interface MissionCommand {
   y: number;
 }
 
+/**
+ * How commander `slot` of `team` goes into an attack (decision 112): STYLE_TOGETHER, the
+ * default, STYLE_INFANTRY (the vehicles keep a bound behind the squads) or STYLE_ARMOUR
+ * (the squads keep a bound behind the vehicles).
+ */
+export const CMD_STYLE = 36;
+export interface StyleCommand {
+  type: typeof CMD_STYLE;
+  team: number;
+  slot: number;
+  style: number;
+}
+
 /** Commander `slot` of `team` has its losses replaced by itself (or, off, not). */
 export interface ReinforceCommand {
   type: typeof CMD_REINFORCE;
@@ -380,6 +393,7 @@ export type Command = (
   | AssignCommand
   | MissionCommand
   | ReinforceCommand
+  | StyleCommand
   | OrderCommand
   | KeepCommand
   | DestCommand
