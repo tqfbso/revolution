@@ -1801,3 +1801,44 @@ normal had this morning.
 first big attack at minute 17. Normal beats easy on three seeds (in 22 to 25 minutes;
 before, 27 to 44), hard beats normal on two (25 and 34 minutes). Golden hash unchanged
 (the pinned run has no computer player).
+
+## 102. Civilians: 400 people in the houses, who run, can be hit, and cost the army that hits them (2026-11-14)
+
+Fabio asked for civilians to make the city feel lived in, about 400 a map, with no gore,
+and for casualties to be paid in resources so that players feel them.
+
+**What a civilian is.** Not a unit. A number, a place, a home and a state, in arrays of
+their own (`src/sim/civilians.ts`, at most 512). They do not block anyone, are not
+targeted by anyone, cost no pathfinding of their own and are not in the unit count. At
+the start the map puts 400 of them (or three a house, if that is fewer) into its houses,
+from a random stream of its own so that the rest of the map is as it was.
+
+**They run.** The map is cut into squares of 16 m. A shot fired or landing in a square
+marks it dangerous for a few seconds. Once a second, a civilian at home looks at his own
+square and its neighbours; if one is dangerous, or his house has come down, he leaves.
+Everyone in the open follows one flow field to the nearest edge of the map (rebuilt every
+30 seconds, since buildings fall), at a run slower than a soldier's, and is gone when he
+gets there. The figures are drawn only where the player can see.
+
+**They can be hit.** A shot whose line passes within 2 m of someone in the open kills him
+one time in eight; a blast (grenade, rocket, drone) kills those within 5 m; a shell kills
+in the open by its burst, and a shell on a house kills half of those still inside and
+sends the rest running. Nobody aims at them: all of it is stray fire and collateral.
+
+**No gore.** The figure falls, lies for a few seconds and sinks into the ground. No blood,
+no sound of its own.
+
+**The bill.** Each death costs the army that fired 100 supplies and 40 credits, at once.
+Supplies may go below zero (down to -1500), so an army with empty stores still pays, by
+building nothing until it has earned its way back. The player gets a "Civilians killed by
+our fire" alert, and the towns panel counts those still in town, those who got out, and
+those killed by each side.
+
+**Checked.** Headless, city map, 30 minutes, normal against normal, three seeds: 5 to 6
+killed, about 185 got out, about 200 still at home; the sim costs the same per tick as
+before (1.9 to 2.1 ms against 2.2). Two computer players rarely fight in the housing
+blocks; a player who shells a held block will pay far more. The knobs are
+`CIVILIAN_SUPPLIES`, `CIVILIAN_CREDITS` and `STRAY_ODDS`.
+
+**Golden hash** changes to 287657647: civilians are part of the world and of its hash
+(state, deaths, where the runners are), so that co-op machines agree on them.

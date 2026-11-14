@@ -3,6 +3,7 @@
 import { aiThink, createAi, type Ai } from '../sim/ai';
 import { createStaff, staffThink, type Staff } from '../sim/staff';
 import type { Command } from '../sim/commands';
+import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
 import { fromFx } from '../sim/fixed';
 import { S_BUILDING, generateMap } from '../sim/map';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, UNIT_PRICE } from '../sim/economy';
@@ -329,6 +330,12 @@ function postSnapshot(w: World, simMs: number): void {
     commanders[o + 8] = Math.round(fromFx(p.cy));
     commanders[o + 9] |= (p.need ? COMMANDER_NEED : 0) | (p.fighting ? COMMANDER_FIGHTING : 0);
   }
+  const civs: number[] = [];
+  let civHome = 0;
+  for (let k = 0; k < w.civCount; k++) {
+    if (w.civState[k] === CIV_HOME) civHome++;
+    else if (w.civState[k] === CIV_FLEEING) civs.push(k, fromFx(w.civX[k]), fromFx(w.civY[k]));
+  }
   const events = Int32Array.from(w.events);
   w.events.length = 0;
   const snapshot: Snapshot = {
@@ -363,6 +370,8 @@ function postSnapshot(w: World, simMs: number): void {
     cmdr: w.cmdr.slice(0, n),
     commanders,
     task,
+    civilians: Float32Array.from(civs),
+    civStats: Int32Array.from([w.civCount, civHome, w.civEscaped, ...w.civKilled]),
     siteStock: w.siteStock.slice(0, map.siteCount),
     bases: Int32Array.from(bases),
     simMs,

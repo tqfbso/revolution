@@ -11,6 +11,7 @@ import {
   type GameMap,
 } from './map';
 import { seedRng } from './rng';
+import { CIV_FLEEING, DANGER_DIM, MAX_CIVILIANS, placeCivilians } from './civilians';
 
 /** Room per team in the per-kind tables of the world (at least KIND_COUNT of the unit table). */
 export const KIND_SLOTS = 16;
@@ -140,6 +141,8 @@ export const EV_STORMED = 22; // a = structure, b = the army that took it from i
 export const EV_STRIKE = 23; // a = target, b = drone: strike drones are lining up on it
 export const EV_FORTIFIED = 24; // a = structure, b = 1 fortified, 0 mended back to whole
 export const EV_STRAY = 25; // a = structure, b = shooter: a round meant for someone else hit it
+/** a = where (see packPoint), b = the army whose fire killed a civilian there. */
+export const EV_CIVILIAN = 26;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
 
 /** A map position squeezed into one event integer, to 1/64 of a unit. */
@@ -350,6 +353,22 @@ export interface World {
   wIndex: Int32Array;
   /** Counts changes to the field works, for whoever draws them. Not part of the state. */
   worksRev: number;
+  /**
+   * Civilians (see src/sim/civilians.ts): where each is, what it is doing, the house it
+   * lives in; how many each army has killed and how many got away; per square of the map
+   * the tick until which there is shooting there. `civField` is the way to the edge of
+   * the map, worked out from the map every so often (`civFieldAt`); it is not hashed.
+   */
+  civCount: number;
+  civX: Int32Array;
+  civY: Int32Array;
+  civState: Uint8Array;
+  civHome: Int16Array;
+  civKilled: Int32Array;
+  civEscaped: number;
+  danger: Int32Array;
+  civField: Uint16Array | null;
+  civFieldAt: number;
   /** Flowfields for move orders: goal cell (-1 = unused), movement class, cost-to-goal. */
   fieldGoal: Int32Array;
   fieldClass: Uint8Array;
@@ -482,6 +501,16 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     wBuild: new Int16Array(CELL_COUNT),
     wIndex: new Int32Array(CELL_COUNT),
     worksRev: 0,
+    civCount: 0,
+    civX: new Int32Array(MAX_CIVILIANS),
+    civY: new Int32Array(MAX_CIVILIANS),
+    civState: new Uint8Array(MAX_CIVILIANS),
+    civHome: new Int16Array(MAX_CIVILIANS),
+    civKilled: new Int32Array(MAX_TEAMS),
+    civEscaped: 0,
+    danger: new Int32Array(DANGER_DIM * DANGER_DIM),
+    civField: null,
+    civFieldAt: 0,
     fieldGoal: new Int32Array(MAX_FIELDS).fill(-1),
     fieldClass: new Uint8Array(MAX_FIELDS),
     fieldDist: new Array<Uint16Array | null>(MAX_FIELDS).fill(null),
@@ -498,6 +527,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     for (let f = 0; f < 4; f++) world.sWall[4 * s + f] = wallMax(map, s, f);
   }
   seedRng(world.rng, seed);
+  placeCivilians(world, seed);
   return world;
 }
 
@@ -582,6 +612,17 @@ export function hashWorld(w: World): number {
     mix(c | (w.wKind[c] << 16) | (w.wTeam[c] << 24));
     mix((w.wHp[c] & 0xffff) | (w.wBuild[c] << 16));
   }
+  mix(w.civCount ^ (w.civEscaped << 12));
+  mix(w.civFieldAt);
+  for (let t = 0; t < MAX_TEAMS; t++) mix(w.civKilled[t]);
+  for (let k = 0; k < w.civCount; k++) {
+    mix(w.civState[k] | (w.civHome[k] << 8));
+    if (w.civState[k] !== CIV_FLEEING) continue;
+    mix(w.civX[k]);
+    mix(w.civY[k]);
+  }
+  for (let c = 0; c < DANGER_DIM * DANGER_DIM; c++)
+    if (w.danger[c] > w.tick) mix(c ^ (w.danger[c] << 12));
   const n = w.count;
   for (let i = 0; i < n; i++) {
     mix(w.jobCell[i] ^ (w.ration[i] << 24));

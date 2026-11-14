@@ -6,6 +6,8 @@ import { MAP_SIZE, MAX_UNITS, M_NONE } from './sim/world';
 import { ALERT_NOTE, Alerts } from './client/alerts';
 import { SAY_URGENT } from './client/voice';
 import { Cameras } from './client/cameras';
+import { Civilians } from './client/civilians';
+import { CIVILIAN_SUPPLIES } from './sim/civilians';
 import { RtsCamera } from './client/camera';
 import { CommandCard } from './client/card';
 import { Governor, ratioFor, type Levers } from './client/governor';
@@ -155,6 +157,12 @@ async function start(): Promise<void> {
     () => alerts,
     () => units.playerTeam,
   );
+  const civilians = new Civilians(
+    terrain,
+    fog,
+    () => alerts,
+    () => units.playerTeam,
+  );
   const supply = new SupplyView(map, units);
   const sound = new Sound();
   units.sound = sound;
@@ -215,6 +223,7 @@ async function start(): Promise<void> {
     structures.applySnapshot(e.data, performance.now() / 1000);
     works.applySnapshot(e.data);
     cameras.applySnapshot(e.data, performance.now() / 1000);
+    civilians.applySnapshot(e.data, performance.now() / 1000);
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
     production.applySnapshot(e.data);
@@ -482,6 +491,7 @@ async function start(): Promise<void> {
     scars.mesh,
     units.group,
     cameras.group,
+    civilians.group,
     effects.group,
     input.marker,
     card.group,
@@ -502,6 +512,15 @@ async function start(): Promise<void> {
       if (TEAM_NAME[taking] !== undefined) {
         html += ` <span style="color:${TEAM_CSS[taking]}">${TEAM_NAME[taking]} taking ${structures.townProgress[t]}%</span>`;
       }
+    }
+    // The people who live here (decision 102), and what the fighting has cost them.
+    if (civilians.total > 0) {
+      const ours = civilians.killed[units.playerTeam] ?? 0;
+      const theirs = civilians.killed.reduce((n, k) => n + k, 0) - ours;
+      html += `<br /><br /><b>Civilians</b> ${civilians.home + civilians.fleeing} in town, ${civilians.escaped} got out`;
+      html += `<br /><span id="civ-count"${ours > 0 ? ' class="short"' : ''}>Killed by our fire: ${ours}`;
+      if (ours > 0) html += ` (cost ${ours * CIVILIAN_SUPPLIES} supplies)`;
+      html += `</span><br />Killed by the enemy: ${theirs}`;
     }
     townsEl.innerHTML = html;
   }, 500);
@@ -730,6 +749,7 @@ async function start(): Promise<void> {
     const c1 = performance.now();
     cameras.zoom = rts.distance;
     cameras.update();
+    civilians.update(now / 1000, dt);
     structures.update(now / 1000, dt);
     works.update(now / 1000);
     const c2 = performance.now();
@@ -789,6 +809,7 @@ async function start(): Promise<void> {
   // Read by automated performance checks.
   (window as unknown as { __revolution: unknown }).__revolution = {
     stats: hud.stats,
+    civilians,
     governor,
     perfTest,
     sound,
