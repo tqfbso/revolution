@@ -18,6 +18,7 @@ import type { Minimap } from './minimap';
 import type { Sound } from './sound';
 import type { StructureView } from './structures';
 import type { UnitView } from './units';
+import { SAY_NORMAL, SAY_ROUTINE, SAY_URGENT, Speaker, browserMouth } from './voice';
 
 export const ALERT_BASE = 0;
 export const ALERT_TOWN = 1;
@@ -69,6 +70,14 @@ export class AlertBook {
     if (!this.open(kind, x, z, now)) return null;
     this.last.set(this.key(kind, x, z), now);
     this.lastKind[kind] = now;
+    return this.add(kind, x, z, text, now);
+  }
+
+  /**
+   * Put an alert on the list whatever was raised before it: for a report whose sender
+   * does its own rationing (a commander), which must not be lost to another note nearby.
+   */
+  add(kind: number, x: number, z: number, text: string, now: number): Alert {
     const alert = { kind, x, z, text, at: now };
     this.list.push(alert);
     if (this.list.length > KEEP) this.list.shift();
@@ -153,7 +162,7 @@ export class Alerts {
   private frame = 0;
   private cursor = 0;
   private lastJump = -1e9;
-  private spokeAt = -1e9;
+  private readonly speaker: Speaker;
 
   constructor(
     private readonly map: GameMap,
@@ -167,6 +176,7 @@ export class Alerts {
   ) {
     this.list = document.getElementById('alerts') as HTMLElement;
     this.arrows = document.getElementById('alert-arrows') as HTMLElement;
+    this.speaker = new Speaker(browserMouth(() => this.sound.volume));
     window.addEventListener('keydown', (e) => {
       if (e.code !== 'Backspace' || e.ctrlKey || e.metaKey || e.altKey) return;
       e.preventDefault();
@@ -265,6 +275,24 @@ export class Alerts {
     this.show(this.book.raise(kind, x, z, text, now));
   }
 
+  /**
+   * A commander's report. Never held back by the other alerts: the commanders ration
+   * their own lines (src/client/reports.ts). `voiced` false shows it without a sound, for
+   * a partner's commander in co-op.
+   */
+  commander(
+    text: string,
+    x: number,
+    z: number,
+    level: number,
+    bad: boolean,
+    voiced: boolean,
+    now: number,
+  ): void {
+    const alert = this.book.add(bad ? ALERT_ARMY : ALERT_NOTE, x, z, text, now);
+    this.show(alert, voiced ? level : -1);
+  }
+
   private attack(kind: number, x: number, z: number, text: string, now: number): void {
     if (!this.book.open(kind, x, z, now)) return;
     // What the player is looking at needs no announcement.
@@ -324,12 +352,26 @@ export class Alerts {
     }
   }
 
-  private show(alert: Alert | null): void {
+  /**
+   * Banner, ping, arrow, tone and spoken line. `level` is how badly the line wants to be
+   * heard (SAY_*), -1 for no sound at all; left out, an attack is urgent but only worth
+   * saying at once, and a note waits its turn.
+   */
+  private show(alert: Alert | null, level?: number): void {
     if (alert === null) return;
     this.cursor = 0;
     this.minimap.ping(alert.x, alert.z, RGB[alert.kind]);
-    this.sound.alert(alert.kind === ALERT_CONTACT || alert.kind === ALERT_NOTE ? 1 : 0);
-    this.speak(alert);
+    const note = alert.kind === ALERT_CONTACT || alert.kind === ALERT_NOTE;
+    if (level === undefined) {
+      const said = alert.kind === ALERT_TOWN || note ? alert.text : SPOKEN[alert.kind];
+      this.sound.alert(note ? 1 : 0);
+      if (alert.kind === ALERT_NOTE) this.speaker.push(said, SAY_NORMAL, alert.at);
+      else this.speaker.push(said, SAY_URGENT, alert.at, 4);
+    } else if (level >= 0) {
+      // An order acknowledged follows the player's own click: the voice is enough.
+      if (level !== SAY_ROUTINE) this.sound.alert(1);
+      this.speaker.push(alert.text, level, alert.at);
+    }
     const row = document.createElement('div');
     row.className = 'alert';
     row.style.borderLeftColor = CSS[alert.kind];
@@ -357,26 +399,9 @@ export class Alerts {
     this.pointers.push({ alert, el });
   }
 
-  /** The spoken line, in whatever voice the browser has. Quiet when the sound is off. */
-  private speak(alert: Alert): void {
-    const synth = window.speechSynthesis as SpeechSynthesis | undefined;
-    if (!synth || this.sound.volume === 0 || alert.at - this.spokeAt < 3) return;
-    this.spokeAt = alert.at;
-    try {
-      const line = new SpeechSynthesisUtterance(
-        alert.kind === ALERT_TOWN || alert.kind === ALERT_NOTE ? alert.text : SPOKEN[alert.kind],
-      );
-      line.rate = 1.1;
-      line.pitch = 0.85;
-      line.volume = Math.min(1, this.sound.volume * 0.9);
-      synth.speak(line);
-    } catch {
-      // no voice on this machine: the tone and the banner still say it
-    }
-  }
-
   /** Every frame: fade the banners out and keep the arrows on the edge of the screen. */
   update(now: number): void {
+    this.speaker.update(now);
     for (let k = this.rows.length - 1; k >= 0; k--) {
       const age = now - this.rows[k].alert.at;
       if (age > BANNER_SECONDS) {

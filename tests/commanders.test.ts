@@ -290,7 +290,8 @@ describe('sub-commanders: the staff', () => {
       mission(4, M_ATTACK, w.map.townX[t], w.map.townY[t]),
     ]);
     const seen = new Set<number>();
-    play(w, st, 200, () => seen.add(st.posts[4].status));
+    // (After a minute and a half with no enemy in sight it goes to look again: before that.)
+    play(w, st, 185, () => seen.add(st.posts[4].status));
     expect(seen.has(ST_FALLBACK)).toBe(true);
     expect(st.posts[4].status).toBe(ST_REGROUP);
     expect(st.posts[4].need).toBe(true);
@@ -489,4 +490,64 @@ describe('sub-commanders: the staff', () => {
     };
     expect(once()).toBe(once());
   }, 60000);
+});
+
+describe('sub-commanders: new orders', () => {
+  /** Seconds until nine in ten of `ids` are a few metres nearer (x, y) than they were. */
+  function answer(w: World, st: Staff, ids: number[], x: number, y: number): number {
+    const d0 = ids.map((i) => Math.hypot(w.posX[i] - x, w.posY[i] - y));
+    for (let t = 1; t <= 60 * TICK_RATE; t++) {
+      play(w, st, 1 / TICK_RATE);
+      let n = 0;
+      let all = 0;
+      ids.forEach((i, k) => {
+        if (w.state[i] !== STATE_ALIVE) return;
+        all++;
+        if (w.carrier[i] >= 0 || d0[k] - Math.hypot(w.posX[i] - x, w.posY[i] - y) > fx(4)) n++;
+      });
+      if (n * 10 >= all * 9) return t / TICK_RATE;
+    }
+    return 60;
+  }
+
+  it('acts on an order the tick it arrives, not at the next think', () => {
+    const { w, st } = field();
+    const ids = add(w, [spawn(0, KIND_INFANTRY, 12, 300, 760)]);
+    step(w, [{ type: CMD_ASSIGN, units: ids, slot: 0 }]);
+    play(w, st, 2);
+    // One tick after a think: the next one is nineteen ticks away.
+    while (w.tick % 20 !== 1) play(w, st, 1 / TICK_RATE);
+    step(w, [mission(0, M_HOLD, fx(600), fx(760))]);
+    play(w, st, 2 / TICK_RATE);
+    expect(st.posts[0].seq).toBe(w.cSeq[0]);
+    expect(ids.filter((i) => (w.flags[i] & 1) !== 0).length).toBeGreaterThan(8);
+  });
+
+  it('breaks contact for a new order when the enemy is not on the way', () => {
+    const { w, st } = field();
+    const ids = add(w, [spawn(0, KIND_INFANTRY, 30, 400, 760), spawn(0, KIND_TANK, 4, 400, 772)]);
+    step(w, [{ type: CMD_ASSIGN, units: ids, slot: 0 }]);
+    step(w, [mission(0, M_ATTACK, fx(400), fx(760))]);
+    play(w, st, 5);
+    // The enemy shows up to the west; the order is to go east.
+    add(w, [spawn(1, KIND_INFANTRY, 20, 378, 760)]);
+    play(w, st, 6);
+    expect(ids.filter((i) => w.attack[i] >= 0).length).toBeGreaterThan(5);
+    step(w, [mission(0, M_ATTACK, fx(700), fx(760))]);
+    // It used to stand and shoot it out first: half a minute and more.
+    expect(answer(w, st, ids, fx(700), fx(760))).toBeLessThan(6);
+  });
+
+  it('still fights through an enemy that stands between it and the new place', () => {
+    const { w, st } = field();
+    const ids = add(w, [spawn(0, KIND_INFANTRY, 30, 400, 760)]);
+    step(w, [{ type: CMD_ASSIGN, units: ids, slot: 0 }]);
+    step(w, [mission(0, M_ATTACK, fx(400), fx(760))]);
+    play(w, st, 5);
+    const foes = add(w, [spawn(1, KIND_INFANTRY, 6, 424, 760)]);
+    play(w, st, 4);
+    step(w, [mission(0, M_ATTACK, fx(700), fx(760))]);
+    play(w, st, 40);
+    expect(alive(w, foes)).toBe(0);
+  });
 });

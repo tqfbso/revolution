@@ -42,6 +42,7 @@ import {
 import { gridRef } from './grid';
 import { COMMANDER_RGB } from './icons';
 import type { Posting } from './production';
+import { CommanderReports, type Report } from './reports';
 import type { UnitView } from './units';
 
 const ME = 0;
@@ -133,8 +134,15 @@ export interface BoardHooks {
   lookAt: (x: number, z: number) => void;
   /** Ask the player for a place on the map (or, with null, stop asking). */
   ask: (prompt: string | null, done?: (x: number, z: number) => void) => void;
-  alert: (text: string, x: number, z: number) => void;
+  /**
+   * A commander has something to say. `mine` is false in co-op for a commander another
+   * player is running: it is shown if it matters, but not spoken.
+   */
+  report: (report: Report, mine: boolean) => void;
 }
+
+/** Seconds within which a change of orders seen in the game counts as this player's own. */
+const MY_ORDER = 6;
 
 export class MissionBoard {
   open = false;
@@ -142,6 +150,15 @@ export class MissionBoard {
   /** The commander whose row is opened up, or -1. */
   private focus = -1;
   private html = '';
+  /**
+   * Co-op: several players share the commanders. Each hears the ones they gave the last
+   * orders to (the game does not record who ordered what, so the board remembers what it
+   * sent itself and takes any other change of orders to be somebody else's).
+   */
+  shared = false;
+  private readonly mine = new Array<boolean>(MAX_COMMANDERS).fill(false);
+  private readonly orderedAt = new Array<number>(MAX_COMMANDERS).fill(-1e9);
+  private readonly reports: CommanderReports;
   private readonly body: HTMLElement;
 
   constructor(
@@ -151,6 +168,10 @@ export class MissionBoard {
     private readonly send: (command: Command) => void,
     private readonly hooks: BoardHooks,
   ) {
+    this.reports = new CommanderReports({
+      name: (x, z) => this.spot(x, z),
+      there: (c) => this.there(c.x, c.z, c.cx, c.cz),
+    });
     for (let slot = 0; slot < MAX_COMMANDERS; slot++) {
       this.info.push({
         slot,
@@ -191,11 +212,11 @@ export class MissionBoard {
     else this.render();
   }
 
-  applySnapshot(s: Snapshot): void {
+  applySnapshot(s: Snapshot, now = performance.now() / 1000): void {
     for (let slot = 0; slot < MAX_COMMANDERS; slot++) {
       const o = slot * COMMANDER_STRIDE;
       const c = this.info[slot];
-      const was = { status: c.status, need: c.need, count: c.count, fighting: c.fighting };
+      const was = { ...c };
       const flags = s.commanders[o + 9];
       c.mission = s.commanders[o];
       c.x = s.commanders[o + 1];
@@ -211,20 +232,20 @@ export class MissionBoard {
       c.auto = (flags & COMMANDER_AUTO) !== 0;
       c.need = (flags & COMMANDER_NEED) !== 0;
       c.fighting = (flags & COMMANDER_FIGHTING) !== 0;
-      // What the player must hear about, wherever they are looking.
-      // (Troops the player took back are not a loss: only a command that died fighting.)
-      if (c.count === 0 && was.count > 0 && (was.fighting || was.status === ST_FALLBACK)) {
-        this.hooks.alert(`${c.name} has no troops left`, c.cx, c.cz);
-      } else if (c.status !== was.status && c.status === ST_FALLBACK) {
-        this.hooks.alert(`${c.name} is falling back`, c.cx, c.cz);
-      } else if (c.status !== was.status && c.status === ST_SECURED) {
-        this.hooks.alert(`${c.name} has taken ${this.place(c.x, c.z)}`, c.cx, c.cz);
-      } else if (c.status !== was.status && c.status === ST_ARRIVED && was.status === ST_MOVE) {
-        this.hooks.alert(`${c.name} is in place at ${this.place(c.x, c.z)}`, c.cx, c.cz);
-      } else if (c.need && !was.need && !c.auto) {
-        this.hooks.alert(`${c.name} needs reinforcements`, c.cx, c.cz);
+      // New orders, or troops for a commander that had none: whose is it now?
+      const ordered = c.mission !== was.mission || c.x !== was.x || c.z !== was.z;
+      if (ordered || (c.count > 0 && was.count === 0)) {
+        this.mine[slot] = now - this.orderedAt[slot] < MY_ORDER;
       }
+      // What the player must hear about, wherever they are looking.
+      const mine = !this.shared || this.mine[slot];
+      for (const r of this.reports.step(c, was, now)) this.hooks.report(r, mine);
     }
+  }
+
+  /** This player has just given commander `slot` orders (or its first troops). */
+  private own(slot: number): void {
+    this.orderedAt[slot] = performance.now() / 1000;
   }
 
   /** Commanders new units can be sent to: those with troops or with orders. */
@@ -260,6 +281,7 @@ export class MissionBoard {
     if (this.units.selectedCount === 0) return -1;
     const free = this.info.find((c) => c.count === 0);
     if (!free) return -1;
+    this.own(free.slot);
     this.send({ type: CMD_ASSIGN, units: this.units.selectedIds(), slot: free.slot });
     // A new command starts with no orders, whatever the last holder of the name had.
     this.send({ type: CMD_MISSION, team: ME, slot: free.slot, mission: M_NONE, x: 0, y: 0 });
@@ -299,6 +321,24 @@ export class MissionBoard {
     return `grid ${gridRef(x, z)}`;
   }
 
+  /** A place as a commander says it: the town with its grid square, or the square alone. */
+  spot(x: number, z: number): string {
+    const place = this.place(x, z);
+    return place.startsWith('grid ') ? place : `${place}, ${gridRef(x, z)}`;
+  }
+
+  /** Is a body centred on (cx, cz) at the place (x, z): in that town, or within 60 of it? */
+  there(x: number, z: number, cx: number, cz: number): boolean {
+    const map = this.map;
+    for (let t = 0; t < map.townCount; t++) {
+      const tx = map.townX[t] / 1024;
+      const tz = map.townY[t] / 1024;
+      const r = map.townR[t] / 1024 + 15;
+      if ((tx - x) ** 2 + (tz - z) ** 2 < r * r) return (tx - cx) ** 2 + (tz - cz) ** 2 < r * r;
+    }
+    return (x - cx) ** 2 + (z - cz) ** 2 < 60 * 60;
+  }
+
   private act(act: string, slot: number, mission: number): void {
     const u = this.units;
     const c = this.info[slot];
@@ -310,11 +350,13 @@ export class MissionBoard {
       u.setSelected(ids, false);
     } else if (act === 'jump') this.hooks.lookAt(c.cx, c.cz);
     else if (act === 'add') {
+      if (c.count === 0) this.own(slot);
       this.send({ type: CMD_ASSIGN, units: u.selectedIds(), slot });
     } else if (act === 'mission') {
       const def = MISSIONS.find((d) => d.m === mission);
       if (!def) return;
       this.hooks.ask(`Click the map: where should ${c.name} ${def.ask}? (Esc cancels)`, (x, z) => {
+        this.own(slot);
         this.send({
           type: CMD_MISSION,
           team: ME,
@@ -325,6 +367,7 @@ export class MissionBoard {
         });
       });
     } else if (act === 'stand') {
+      this.own(slot);
       this.send({ type: CMD_MISSION, team: ME, slot, mission: M_NONE, x: 0, y: 0 });
     } else if (act === 'auto') {
       this.send({ type: CMD_REINFORCE, team: ME, slot, on: !c.auto });
