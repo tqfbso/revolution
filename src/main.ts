@@ -322,6 +322,7 @@ async function start(): Promise<void> {
     demo,
     speed,
     net: coop ? coop.role : 'solo',
+    humans: coop ? coop.humans : 1,
   });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
   const setSpeed = (v: number) => {
@@ -345,7 +346,7 @@ async function start(): Promise<void> {
       if (speedEl && (v === 0.75 || v === 1)) speedEl.value = String(v);
     };
     coop.onAlone = () => post({ type: 'alone' });
-    production.whose = dutyOf(coop.duty, coop.partnerDuty, KINDS.length);
+    production.whose = dutyOf(coop.duties[coop.seat], coop.otherDuties(), KINDS.length);
     coop.start();
     coop.state(paused, speedNow);
   }
@@ -694,12 +695,12 @@ async function start(): Promise<void> {
     input.update(dt);
     card.update();
     if (coop) {
-      // Tell the partner where we look, three times a second, and show where they look.
+      // Tell the others where we look, three times a second, and show where they look.
       if (now - camSent > 330) {
         camSent = now;
         coop.camera(rts.focus.x, rts.focus.z);
       }
-      minimap.partner = coop.live && coop.partner.x >= 0 ? coop.partner : null;
+      minimap.partners = coop.live ? coop.partners.filter((p) => p.x >= 0) : [];
     }
     minimap.update(now);
     alerts?.update(now / 1000);

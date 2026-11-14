@@ -103,7 +103,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
             : skirmishCommands(world.map);
     ais = [];
     if (msg.scenario === 'skirmish' && msg.ai !== 'off') {
-      ais.push(createAi(1, msg.ai, msg.seed));
+      ais.push(createAi(1, msg.ai, msg.seed, msg.humans ?? 1));
       // `?demo=1`: the AI plays red as well, to watch it at work.
       if (msg.demo) ais.push(createAi(0, msg.ai, msg.seed));
     }

@@ -105,8 +105,8 @@ export class Minimap {
     () => [];
 
   /** Draw attention to a world point: an alert happened there. */
-  /** Co-op: the middle of the other player's view, or null. */
-  partner: { x: number; z: number } | null = null;
+  /** Co-op: the middle of each other player's view. */
+  partners: { x: number; z: number }[] = [];
 
   ping(x: number, z: number, rgb: readonly number[]): void {
     this.pings.push({
@@ -268,10 +268,10 @@ export class Minimap {
       ctx.strokeRect(p.x - 3, p.y - 3, 6, 6);
     }
 
-    // Co-op: where the other player is looking.
-    if (this.partner) {
-      const px = (this.partner.x / MAP_SIZE) * N;
-      const py = (this.partner.z / MAP_SIZE) * N;
+    // Co-op: where the other players are looking.
+    for (const partner of this.partners) {
+      const px = (partner.x / MAP_SIZE) * N;
+      const py = (partner.z / MAP_SIZE) * N;
       ctx.strokeStyle = 'rgba(120,225,255,0.95)';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(px - 7, py - 5, 14, 10);

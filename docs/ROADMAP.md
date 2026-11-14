@@ -283,7 +283,7 @@ is designed around the urban rules instead of being redesigned for them.
 That order changed the same evening: see "Strategic command" below, which now comes
 before co-op and before U2.
 
-## Co-op (foundation built 2026-11-13, awaiting a first real two-player test)
+## Co-op (two players confirmed over a real network 2026-11-14; three and four built, decision 093)
 
 Decision 092. Host-clock lockstep over WebRTC, invite link, build check, hash check every
 two seconds, shared pause and speed, either side plays on alone after a drop. Roles, first

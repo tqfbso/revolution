@@ -202,14 +202,15 @@ and for the economy: gather, build, assist, train, cancel, rally, research, stan
 command holds integers only; float-to-fixed conversion happens once on the client before
 sending. A command applies on the next tick.
 
-## Co-op (`src/client/net.ts`, decision 092)
+## Co-op (`src/client/net.ts`, decisions 092 and 093)
 
-Two browsers, one army. The host's worker runs as in a game alone and reports, per tick,
+Up to four browsers, one army: a star, each guest linked to the host only. The host's worker runs as in a game alone and reports, per tick,
 the players' orders that went in (`Frame`); the guest's worker has no clock and runs only
 the frames it is sent (`follow` in `sim.worker.ts`). Orders, frames, hashes and a little
 presence travel over a WebRTC data channel found through the public PeerJS broker;
 `?net=local` uses a `BroadcastChannel` between two tabs instead. Both sides hash the world
-every two seconds and compare. The sim itself does not know the game is shared.
+every two seconds and compare. The sim does not know the game is shared, except that the
+computer player is told how many humans it faces (`tuningFor` in `ai.ts`).
 
 ## Rendering
 

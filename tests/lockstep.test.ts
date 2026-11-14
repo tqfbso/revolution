@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aiThink, createAi } from '../src/sim/ai';
+import { AI_TUNING, aiThink, createAi, tuningFor } from '../src/sim/ai';
 import { CMD_ATTACK_MOVE, CMD_MOVE, CMD_STOP, type Command } from '../src/sim/commands';
 import { fx } from '../src/sim/fixed';
 import { generateMap } from '../src/sim/map';
@@ -12,9 +12,9 @@ import type { Frame } from '../src/worker/protocol';
 // Co-op (decision 092): the guest's sim is sent nothing but the players' orders, tick by
 // tick, and must arrive at the host's world. This plays the worker's loop on both sides.
 
-function side(seed: number) {
+function side(seed: number, humans = 1) {
   const w = createWorld(seed, generateMap(seed, 'city'));
-  const ais = [createAi(1, 'normal', seed)];
+  const ais = [createAi(1, 'normal', seed, humans)];
   const staff = createStaff(0, seed);
   let pending: Command[] = skirmishCommands(w.map);
   const tick = (orders: Command[]): void => {
@@ -92,5 +92,39 @@ describe('co-op lockstep', () => {
       b.tick(t === 130 ? orders(63, b.w.count) : []);
     }
     expect(hashWorld(a.w)).not.toBe(hashWorld(b.w));
+  });
+
+  it('three players: two guests fed the same frames both arrive at the host world', () => {
+    const host = side(5, 3);
+    const guests = [side(5, 3), side(5, 3)];
+    const hashes: number[][] = [[], [], []];
+    for (let t = 0; t < 600; t++) {
+      const wire = JSON.stringify([host.w.tick, orders(t, host.w.count)] satisfies Frame);
+      host.tick((JSON.parse(wire) as Frame)[1]);
+      guests[0].tick((JSON.parse(wire) as Frame)[1]);
+      guests[1].tick((JSON.parse(wire) as Frame)[1]);
+      if (host.w.tick % 40 === 0) {
+        hashes[0].push(hashWorld(host.w));
+        hashes[1].push(hashWorld(guests[0].w));
+        hashes[2].push(hashWorld(guests[1].w));
+      }
+    }
+    expect(hashes[1]).toEqual(hashes[0]);
+    expect(hashes[2]).toEqual(hashes[0]);
+  });
+
+  it('the computer is strengthened for three and four players, and only then', () => {
+    for (const level of ['recruit', 'easy', 'normal', 'hard'] as const) {
+      expect(tuningFor(level, 1)).toBe(AI_TUNING[level]);
+      expect(tuningFor(level, 2)).toBe(AI_TUNING[level]);
+      const three = tuningFor(level, 3);
+      const four = tuningFor(level, 4);
+      expect(three.size).toBeGreaterThan(AI_TUNING[level].size);
+      expect(three.trucks).toBeGreaterThan(AI_TUNING[level].trucks);
+      expect(three.firstAttack).toBeLessThan(AI_TUNING[level].firstAttack);
+      expect(four.size).toBeGreaterThan(three.size);
+      expect(four.firstAttack).toBeLessThan(three.firstAttack);
+      expect(tuningFor(level, 9)).toEqual(four);
+    }
   });
 });
