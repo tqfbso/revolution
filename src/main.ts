@@ -21,6 +21,7 @@ import { makeLook, readQuality, skyScene } from './client/look';
 import { DUTIES, dutyOf, openCoop } from './client/net';
 import { bakeSurfaces } from './client/surfaces';
 import { Clutter } from './client/clutter';
+import { Decks } from './client/decks';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { GridOverlay, gridRef } from './client/grid';
@@ -136,11 +137,17 @@ async function start(): Promise<void> {
     scene.environmentIntensity = 0.45;
     pmrem.dispose();
   }
-  // The skirmish is fought in the city unless `?map=ridge` or `?map=river` asks for an
-  // older map; the other scenarios are laid out for the river.
+  // The skirmish is fought in the city unless `?map=euro`, `?map=ridge` or `?map=river` asks
+  // for another map; the other scenarios are laid out for the river.
   const asked = params.get('map');
   const layout: Layout =
-    scenario !== 'skirmish' || asked === 'river' ? 'river' : asked === 'ridge' ? 'ridge' : 'city';
+    scenario !== 'skirmish' || asked === 'river'
+      ? 'river'
+      : asked === 'ridge'
+        ? 'ridge'
+        : asked === 'euro'
+          ? 'euro'
+          : 'city';
   const map = generateMap(seed, layout);
   fog.setMap(map);
   const terrain = new Terrain(map, fog, look);
@@ -149,6 +156,7 @@ async function start(): Promise<void> {
   const works = new WorksView(map, terrain, fog, effects, look);
   const scars = new Scars(fog, terrain, look);
   const clutter = new Clutter(terrain, fog, look);
+  const decks = new Decks(map, fog, shadows);
   structures.clutter = clutter;
   works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
@@ -506,6 +514,7 @@ async function start(): Promise<void> {
     terrain.water,
     terrain.trees,
     clutter.group,
+    decks.group,
     structures.group,
     works.group,
     scars.mesh,

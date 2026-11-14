@@ -2,6 +2,7 @@
 // from the seed with integer arithmetic only, so the simulation (passability) and every
 // client (what is drawn) derive the identical map without sending it over the wire.
 import { generateCity } from './city';
+import { generateEuro } from './euro';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
 
 // Map is a square of MAP_SIZE world units. Sim (x, y) maps to render (x, z).
@@ -219,13 +220,18 @@ export interface GameMap {
    * ends (x0, y0, x1, y1) and the kind (1 = a main road, 0 = a side street), five numbers each.
    */
   streets: number[];
+  /**
+   * Carriageways carried over the ground (a motorway on its embankment), for the client to
+   * draw: the cells of both ends of each and its height (x0, y0, x1, y1, height).
+   */
+  decks: number[];
 }
 
 /**
  * Which battlefield: the river with its fords and bridges, the ridge with its four ways,
  * or the city, a town at every flag and streets between them (see city.ts).
  */
-export type Layout = 'river' | 'ridge' | 'city';
+export type Layout = 'river' | 'ridge' | 'city' | 'euro';
 
 /** What a cell is paved with (GameMap.road): nothing, a carriageway, or a yard or square. */
 export const ROAD_NONE = 0;
@@ -284,6 +290,7 @@ const HALF = fx(MAP_SIZE / 2);
 export function generateMap(seed: number, layout: Layout = 'river'): GameMap {
   if (layout === 'ridge') return generateRidge(seed);
   if (layout === 'city') return generateCity(seed);
+  if (layout === 'euro') return generateEuro(seed);
   const s = seed | 0;
   const heights = new Int32Array(MAP_VERTS * MAP_VERTS);
   const fords: number[] = [];
@@ -904,6 +911,7 @@ export function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     layout: 'river',
     road: new Uint8Array(CELL_COUNT),
     streets: [],
+    decks: [],
   };
 }
 

@@ -397,8 +397,9 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 6. Helicopters (capped by helipads, about 3 a pad) and paratroopers (built into a
    reserve, dropped by a transport plane that air defence can shoot down). BUILT
    (decision 106)
-7. European city map: dense blocks, parks, an elevated highway, a river with bridges
-   balanced by tunnels and underpasses, a central station
+7. European city map: BUILT (decision 107). `?map=euro` or Menu > Map: European city. One
+   dense city on both banks of a river: four bridges that can be cut, three covered
+   crossings that cannot, two parks, a motorway on an embankment, a station.
 8. The computer fighting in cities (U5): garrisoning, storming, using ruins
 9. Night battles: flares, muzzle flashes, fog of war that matters more
 10. PvP for up to four players, free-for-all or 2v2, on the co-op netcode

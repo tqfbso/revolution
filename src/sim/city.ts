@@ -166,6 +166,99 @@ const MIX: readonly (readonly number[])[] = [
 ];
 const FLOORS = [2, 2, 2, 3, 4, 5];
 
+/** What a block is built with: a house (if there is room), a paved yard, a tree. */
+export interface BlockTools {
+  build: (x: number, y: number, w: number, h: number, floors: number) => void;
+  /** Paved ground, in cells from the corner of the block. */
+  yard: (a: number, b: number, c: number, d: number) => void;
+  tree: (x: number, y: number) => void;
+  /** Floors of the house numbered `extra` in the block. */
+  floors: (extra: number) => number;
+}
+
+/**
+ * Lay out one block, nine cells square with its corner at (x0, y0): flats round a courtyard,
+ * slabs, four houses, a hall, small houses, a park or a car park (kind 0 to 6). `h` is the
+ * dice of the block, `dense` how built up the place is (0 to 5).
+ */
+export function layBlock(
+  kind: number,
+  x0: number,
+  y0: number,
+  h: number,
+  dense: number,
+  s: number,
+  { build, yard, tree, floors }: BlockTools,
+): void {
+  if (kind === 0) {
+    // Flats round a courtyard: eight houses wall to wall. Half the courtyards have a
+    // way in where one house is missing.
+    const gap = (h >> 12) % 8;
+    const sides = [
+      [3, 0],
+      [0, 3],
+      [6, 3],
+      [3, 6],
+    ];
+    for (let q = 0; q < 4; q++) build(x0 + (q & 1) * 6, y0 + (q >> 1) * 6, 3, 3, floors(q));
+    for (let q = 0; q < 4; q++) {
+      if (q === gap) yard(sides[q][0], sides[q][1], sides[q][0] + 2, sides[q][1] + 2);
+      else build(x0 + sides[q][0], y0 + sides[q][1], 3, 3, floors((q + 1) & 3));
+    }
+    if (gap < 4) yard(3, 3, 5, 5);
+    else for (let q = 0; q < 9; q++) tree(x0 + 3 + (q % 3), y0 + 3 + Math.trunc(q / 3));
+  } else if (kind === 1) {
+    // Two slabs with a yard between them, a row of trees down its middle.
+    const turn = ((h >> 12) & 1) === 1;
+    const at = (a: number, b: number, w: number, d: number, e: number) =>
+      turn
+        ? build(x0 + b, y0 + a, d, w, Math.max(3, floors(e)))
+        : build(x0 + a, y0 + b, w, d, Math.max(3, floors(e)));
+    at(0, 0, 5, 3, 0);
+    at(5, 0, 4, 3, 1);
+    at(0, 6, 4, 3, 2);
+    at(4, 6, 5, 3, 3);
+    if (turn) yard(3, 0, 5, 8);
+    else yard(0, 3, 8, 5);
+    for (let q = 2; q <= 6; q++) tree(x0 + (turn ? 4 : q), y0 + (turn ? q : 4));
+  } else if (kind === 2) {
+    // Four houses and the alleys between them, a tree where the alleys cross.
+    for (let q = 0; q < 4; q++)
+      build(x0 + (q & 1) * 5, y0 + (q >> 1) * 5, 4, 4, Math.max(3, floors(q)));
+    yard(4, 0, 4, 8);
+    yard(0, 4, 8, 4);
+    tree(x0 + 4, y0 + 4);
+  } else if (kind === 3) {
+    // A hall (a market, a works, a depot) and its yard.
+    const turn = ((h >> 12) & 1) === 1;
+    if (turn) build(x0 + 1, y0 + 1, 5, 7, 2);
+    else build(x0 + 1, y0 + 1, 7, 5, 2);
+    yard(0, 0, 8, 8);
+  } else if (kind === 4) {
+    // Small houses three by three, a garden where one is missing, hedges where the
+    // paths between them cross (men get through, vehicles do not).
+    for (let q = 0; q < 9; q++) {
+      const a = x0 + (q % 3) * 3;
+      const b = y0 + Math.trunc(q / 3) * 3;
+      const hh = lattice(a, b, s + 73);
+      if (hh % 100 < 28) {
+        if (hh % 3 !== 0) for (let t = 0; t < 4; t++) tree(a + (t & 1), b + (t >> 1));
+      } else build(a, b, 2, 2, 2 + ((hh >> 8) % 2) + (dense >= 3 ? 1 : 0));
+    }
+    for (let q = 0; q < 4; q++) tree(x0 + 2 + (q & 1) * 3, y0 + 2 + (q >> 1) * 3);
+  } else if (kind === 5) {
+    for (let b = 1; b < 8; b++) {
+      for (let a = 1; a < 8; a++) if (a !== 4 && b !== 4) tree(x0 + a, y0 + b);
+    }
+    yard(0, 4, 8, 4);
+    yard(4, 0, 4, 8);
+  } else {
+    // A car park with a garage in it.
+    build(x0 + 3, y0 + 3, 3, 2, 2);
+    yard(0, 0, 8, 8);
+  }
+}
+
 /** The city map (see the notes above). */
 export function generateCity(seed: number): GameMap {
   const s = seed | 0;
@@ -308,73 +401,7 @@ export function generateCity(seed: number): GameMap {
         let roll = h % 100;
         let kind = 0;
         while (kind < 6 && roll >= MIX[dense][kind]) roll -= MIX[dense][kind++];
-        if (kind === 0) {
-          // Flats round a courtyard: eight houses wall to wall. Half the courtyards have a
-          // way in where one house is missing.
-          const gap = (h >> 12) % 8;
-          const sides = [
-            [3, 0],
-            [0, 3],
-            [6, 3],
-            [3, 6],
-          ];
-          for (let q = 0; q < 4; q++) build(x0 + (q & 1) * 6, y0 + (q >> 1) * 6, 3, 3, floors(q));
-          for (let q = 0; q < 4; q++) {
-            if (q === gap) yard(sides[q][0], sides[q][1], sides[q][0] + 2, sides[q][1] + 2);
-            else build(x0 + sides[q][0], y0 + sides[q][1], 3, 3, floors((q + 1) & 3));
-          }
-          if (gap < 4) yard(3, 3, 5, 5);
-          else for (let q = 0; q < 9; q++) tree(x0 + 3 + (q % 3), y0 + 3 + Math.trunc(q / 3));
-        } else if (kind === 1) {
-          // Two slabs with a yard between them, a row of trees down its middle.
-          const turn = ((h >> 12) & 1) === 1;
-          const at = (a: number, b: number, w: number, d: number, e: number) =>
-            turn
-              ? build(x0 + b, y0 + a, d, w, Math.max(3, floors(e)))
-              : build(x0 + a, y0 + b, w, d, Math.max(3, floors(e)));
-          at(0, 0, 5, 3, 0);
-          at(5, 0, 4, 3, 1);
-          at(0, 6, 4, 3, 2);
-          at(4, 6, 5, 3, 3);
-          if (turn) yard(3, 0, 5, 8);
-          else yard(0, 3, 8, 5);
-          for (let q = 2; q <= 6; q++) tree(x0 + (turn ? 4 : q), y0 + (turn ? q : 4));
-        } else if (kind === 2) {
-          // Four houses and the alleys between them, a tree where the alleys cross.
-          for (let q = 0; q < 4; q++)
-            build(x0 + (q & 1) * 5, y0 + (q >> 1) * 5, 4, 4, Math.max(3, floors(q)));
-          yard(4, 0, 4, 8);
-          yard(0, 4, 8, 4);
-          tree(x0 + 4, y0 + 4);
-        } else if (kind === 3) {
-          // A hall (a market, a works, a depot) and its yard.
-          const turn = ((h >> 12) & 1) === 1;
-          if (turn) build(x0 + 1, y0 + 1, 5, 7, 2);
-          else build(x0 + 1, y0 + 1, 7, 5, 2);
-          yard(0, 0, 8, 8);
-        } else if (kind === 4) {
-          // Small houses three by three, a garden where one is missing, hedges where the
-          // paths between them cross (men get through, vehicles do not).
-          for (let q = 0; q < 9; q++) {
-            const a = x0 + (q % 3) * 3;
-            const b = y0 + Math.trunc(q / 3) * 3;
-            const hh = lattice(a, b, s + 73);
-            if (hh % 100 < 28) {
-              if (hh % 3 !== 0) for (let t = 0; t < 4; t++) tree(a + (t & 1), b + (t >> 1));
-            } else build(a, b, 2, 2, 2 + ((hh >> 8) % 2) + (dense >= 3 ? 1 : 0));
-          }
-          for (let q = 0; q < 4; q++) tree(x0 + 2 + (q & 1) * 3, y0 + 2 + (q >> 1) * 3);
-        } else if (kind === 5) {
-          for (let b = 1; b < 8; b++) {
-            for (let a = 1; a < 8; a++) if (a !== 4 && b !== 4) tree(x0 + a, y0 + b);
-          }
-          yard(0, 4, 8, 4);
-          yard(4, 0, 4, 8);
-        } else {
-          // A car park with a garage in it.
-          build(x0 + 3, y0 + 3, 3, 2, 2);
-          yard(0, 0, 8, 8);
-        }
+        layBlock(kind, x0, y0, h, dense, s, { build, yard, tree, floors });
       }
     }
   }
