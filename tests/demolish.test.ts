@@ -113,7 +113,7 @@ describe('engineers fell trees (decision 118)', () => {
 });
 
 describe('a house brought down on the people in it (decision 118)', () => {
-  /** A house on cells (126..128, 124..126) of an empty map: three people live in it. */
+  /** A house on cells (126..128, 124..126) of an empty map: fourteen people live in it. */
   function withHouse() {
     const m = flatMap();
     addTown(m, fx(510), fx(502), fx(40), 'Test');
@@ -132,7 +132,7 @@ describe('a house brought down on the people in it (decision 118)', () => {
     let seeds = 0;
     for (let seed = 1; seed <= 6; seed++) {
       const w = createWorld(seed, withHouse());
-      expect(count(w, CIV_HOME)).toBe(3);
+      expect(count(w, CIV_HOME)).toBe(14);
       step(w, [spawnAt(0, KIND_ENGINEER, 2, 500, 520)]);
       const before = w.supplies[0];
       step(w, [{ type: CMD_ATTACK_STRUCTURE, units: [0, 1], structure: 0 }]);
@@ -148,10 +148,10 @@ describe('a house brought down on the people in it (decision 118)', () => {
       dead += w.civKilled[0];
       expect(w.state[0]).toBe(STATE_ALIVE);
     }
-    // Half of those at home at each of the two falls (floors, then walls): about nine of
-    // eighteen over six houses.
-    expect(dead).toBeGreaterThanOrEqual(5);
-    expect(dead).toBeLessThanOrEqual(15);
-    expect(seeds).toBeGreaterThanOrEqual(4);
+    // Half of those at home when the floors come down: about forty of eighty-four over
+    // six houses. The rest run.
+    expect(dead).toBeGreaterThanOrEqual(28);
+    expect(dead).toBeLessThanOrEqual(56);
+    expect(seeds).toBe(6);
   });
 });

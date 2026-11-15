@@ -391,8 +391,8 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 2. Co-op rejoin: a dropped player comes back into the running game. BUILT (decision 100)
 3. Raiding AI: small squads that probe, harass and pull back; big attacks rarer. BUILT
    (decision 101)
-4. Civilians: about 400 a map, fleeing to the edges; each death costs the army that
-   caused it resources. No gore. BUILT (decision 102)
+4. Civilians: about 400 a map (1,400 since decision 119), fleeing to the edges; each
+   death costs the army that caused it resources. No gore. BUILT (decision 102)
    Redrawn as people the size of the soldiers (decision 111).
 5. Victory screen: kills, losses, buildings and civilians lost, an MVP per player. BUILT
    (decision 103)
@@ -434,6 +434,8 @@ From the proposal in the "Design tactical attack formations" thread.
 - Concentrate: a commander's troops on one exact spot, key R. BUILT (decision 117)
 - Demolish for engineers, key O: charges on buildings, felling woods; people still in a
   house that is brought down die. BUILT (decision 118)
+- More civilians: 1,400 a map, most round the flags, one in three sheltering at home.
+  BUILT (decision 119)
 
 ## M10 Factions
 

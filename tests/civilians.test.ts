@@ -9,6 +9,7 @@ import {
   CIV_HOME,
   SUPPLY_FLOOR,
   civiliansShelled,
+  homeRoom,
 } from '../src/sim/civilians';
 import { CMD_SPAWN, type Command } from '../src/sim/commands';
 import { fx } from '../src/sim/fixed';
@@ -25,7 +26,7 @@ import { step } from '../src/sim/sim';
 import { KIND_INFANTRY } from '../src/sim/units';
 import { EV_CIVILIAN, TICK_RATE, createWorld, hashWorld, type World } from '../src/sim/world';
 
-/** A house on cells (126..128, 124..126) of an empty map: three people live in it. */
+/** A house on cells (126..128, 124..126) of an empty map: fourteen people live in it. */
 function withHouse() {
   const m = flatMap();
   addTown(m, fx(510), fx(502), fx(40), 'Test');
@@ -50,7 +51,7 @@ const states = (w: World, state: number) => {
 };
 
 describe('civilians (decision 102)', () => {
-  it('about 400 live in the houses of the city, the same ones every time', () => {
+  it('about 1,400 live in the houses of the city, the same ones every time', () => {
     const a = createWorld(1, generateMap(1, 'city'));
     const b = createWorld(1, generateMap(1, 'city'));
     expect(a.civCount).toBe(CIVILIANS);
@@ -74,7 +75,8 @@ describe('civilians (decision 102)', () => {
 
   it('run for the edge of the map when shooting starts by the house, and are gone', () => {
     const w = createWorld(1, withHouse());
-    expect(w.civCount).toBe(3);
+    // Three storeys of nine cells inside a flag's circle: fourteen people.
+    expect(w.civCount).toBe(14);
     // A firefight in the street south of the house.
     step(w, [spawnAt(0, KIND_INFANTRY, 4, 500, 530), spawnAt(1, KIND_INFANTRY, 4, 520, 530)]);
     let ran = false;
@@ -91,9 +93,41 @@ describe('civilians (decision 102)', () => {
     }
     for (let t = 0; t < 250 * TICK_RATE && states(w, CIV_FLEEING) > 0; t++) step(w, []);
     expect(states(w, CIV_FLEEING)).toBe(0);
-    expect(w.civEscaped + w.civKilled[0] + w.civKilled[1]).toBe(3);
+    // One in three stays in the cellar while the house stands (decision 119).
+    expect(states(w, CIV_HOME)).toBe(5);
+    expect(w.civEscaped + w.civKilled[0] + w.civKilled[1]).toBe(9);
     expect(states(w, CIV_GONE)).toBe(w.civEscaped);
     expect(w.civEscaped).toBeGreaterThan(0);
+  });
+
+  it('there are more of them where the houses are big and in the middle of a town', () => {
+    const w = createWorld(1, generateMap(1, 'city'));
+    const m = w.map;
+    const per = new Int32Array(m.structCount);
+    for (let k = 0; k < w.civCount; k++) per[w.civHome[k]]++;
+    let inner = 0;
+    let innerHouses = 0;
+    let outer = 0;
+    let outerHouses = 0;
+    for (let s = 0; s < m.structCount; s++) {
+      if (m.sKind[s] !== S_BUILDING) continue;
+      expect(per[s]).toBeLessThanOrEqual(homeRoom(m, s));
+      const cx = (2 * m.sX[s] + m.sW[s]) * 2048;
+      const cy = (2 * m.sY[s] + m.sH[s]) * 2048;
+      let central = false;
+      for (let t = 0; t < m.townCount; t++) {
+        if (Math.hypot(cx - m.townX[t], cy - m.townY[t]) <= m.townR[t]) central = true;
+      }
+      if (central) {
+        inner += per[s];
+        innerHouses++;
+      } else {
+        outer += per[s];
+        outerHouses++;
+      }
+    }
+    expect(innerHouses).toBeGreaterThan(20);
+    expect(inner / innerHouses).toBeGreaterThan((1.5 * outer) / outerHouses);
   });
 
   it('a shell on a house with people in it kills some, and the army that fired pays', () => {
@@ -116,9 +150,9 @@ describe('civilians (decision 102)', () => {
       dead += killed;
       fled += states(w, CIV_FLEEING);
     }
-    // Half and half, near enough, over eight houses of three.
-    expect(dead).toBeGreaterThan(5);
-    expect(fled).toBeGreaterThan(5);
+    // Half and half, near enough, over eight houses of fourteen.
+    expect(dead).toBeGreaterThan(40);
+    expect(fled).toBeGreaterThan(40);
   });
 
   it('a shell among people in the open kills those close to it, and debt has a floor', () => {
