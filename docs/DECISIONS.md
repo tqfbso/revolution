@@ -2682,3 +2682,23 @@ waits twice as long (up to four times), so a place it cannot take does not eat i
 at a time. A new order resets that.
 
 Golden hash unchanged: the staff is not part of the sim state.
+
+## 129. Gunships with a commander fight as its escort (2026-11-15)
+
+Fabio: helicopters behave oddly in a commander group, they rarely engage.
+
+**Why.** Everything in a body that does not fight in the line is placed by `follow`
+(`src/sim/ai.ts`). Attack helicopters fell in with the jammers and scouts: kept within 16
+of the middle of the body by a plain move order every second. The middle is behind the
+line, a gunship reaches 28, so the enemy was nearly always out of reach, and one that did
+get a shot was called back. The hunting of decision 116 does not apply: that is for a
+helicopter without orders, and these had a new one every second.
+
+**Now** (`escort`). Each gunship of a body that has no target goes for the nearest enemy
+the army knows of within `ESCORT_REACH` (150) of the middle of the body that it can hurt,
+a helicopter before anything on the ground, by attack-move, so it fights what it meets on
+the way. One already on its way to about that place is left alone. With nothing to go for
+it comes back over the body (`ESCORT_LEASH` 26). The computer player's own gunships go
+through the same code and gain the same.
+
+Not done: they do not look where the air defence is before they go. Golden hash unchanged.

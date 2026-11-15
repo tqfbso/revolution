@@ -118,6 +118,7 @@ import {
   FLAG_FLARE,
   FLAG_BREACH,
   FLAG_GARRISON,
+  FLAG_AMOVE,
   FLAG_MOVING,
   FLAG_SIEGE,
   JOB_BUILD,
@@ -2858,6 +2859,7 @@ export function follow(
   const mid: number[] = [];
   const rear: number[] = [];
   const strikes: number[] = [];
+  const gunships: number[] = [];
   // With no line there is nothing to keep behind: `cx, cy` is then the centre of these
   // very troops, and a place "behind" it moves away as fast as they close on it. They
   // would creep off toward the staging area against whatever sent them forward (drones
@@ -2869,6 +2871,8 @@ export function follow(
     if (LINE[kind]) continue;
     if (kind === KIND_STRIKE) {
       if (w.attack[i] === NO_TARGET) strikes.push(i);
+    } else if (kind === KIND_HELI) {
+      if (w.attack[i] === NO_TARGET) gunships.push(i);
     } else if (!led) {
       continue;
     } else if (kind === KIND_ARTILLERY) {
@@ -2878,6 +2882,7 @@ export function follow(
   }
   order(out, CMD_MOVE, mid, cx, cy);
   order(out, CMD_MOVE, rear, bx, by);
+  escort(ai, w, out, gunships, cx, cy, led);
   if (strikes.length === 0) return;
   const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2, 0, 0, 0, 0, 0];
   let best = -1;
@@ -2898,6 +2903,62 @@ export function follow(
     const far = strikes.filter((i) => dist(w.posX[i], w.posY[i], bx, by) > fx(22));
     order(out, CMD_MOVE, far, bx, by);
   }
+}
+
+/** Gunships with a body go for an enemy the army knows of within this of the body's middle. */
+const ESCORT_REACH = fx(150);
+/** With nothing to go for they come back to the body when further from it than this. */
+const ESCORT_LEASH = fx(26);
+
+/**
+ * Attack helicopters that belong to a body of troops. They used to be kept in the middle
+ * of it with the jammers and the scouts, by plain move orders, every second: well behind
+ * the line and out of reach (28) of anything the line was fighting, and pulled back the
+ * moment one did get a shot. Now each one without a target goes for the nearest enemy the
+ * army knows of round the body that it can hurt, a helicopter before anything on the
+ * ground, fighting its way there; with nothing to go for it comes back over the body.
+ */
+function escort(
+  ai: Ai,
+  w: World,
+  out: Command[],
+  gunships: readonly number[],
+  cx: number,
+  cy: number,
+  led: boolean,
+): void {
+  if (gunships.length === 0) return;
+  const dmg = KINDS[KIND_HELI].damage;
+  const prey: number[] = [];
+  for (const e of ai.seen) {
+    if (dmg[w.kind[e]] === 0 || w.inside[e] >= 0 || w.carrier[e] >= 0) continue;
+    if (dist(w.posX[e], w.posY[e], cx, cy) <= ESCORT_REACH) prey.push(e);
+  }
+  const home: number[] = [];
+  const hunts = new Map<number, number[]>();
+  for (const i of gunships) {
+    let best = -1;
+    let bestKey = 0;
+    for (const e of prey) {
+      const key =
+        dist(w.posX[e], w.posY[e], w.posX[i], w.posY[i]) +
+        (KINDS[w.kind[e]].cls === CLASS_AIR ? 0 : 2 * ESCORT_REACH);
+      if (best < 0 || key < bestKey) {
+        best = e;
+        bestKey = key;
+      }
+    }
+    const going = (w.flags[i] & (FLAG_MOVING | FLAG_AMOVE)) === (FLAG_MOVING | FLAG_AMOVE);
+    if (best >= 0) {
+      // Already on its way to about there: leave it be, a new order would only cost it time.
+      if (going && dist(w.targetX[i], w.targetY[i], w.posX[best], w.posY[best]) < fx(14)) continue;
+      const list = hunts.get(best);
+      if (list) list.push(i);
+      else hunts.set(best, [i]);
+    } else if (led && !going && dist(w.posX[i], w.posY[i], cx, cy) > ESCORT_LEASH) home.push(i);
+  }
+  for (const [e, list] of hunts) order(out, CMD_ATTACK_MOVE, list, w.posX[e], w.posY[e]);
+  order(out, CMD_ATTACK_MOVE, home, cx, cy);
 }
 
 /**

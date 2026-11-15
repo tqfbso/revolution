@@ -40,7 +40,9 @@ import { fortified } from '../src/sim/urban';
 import {
   KIND_DRONE,
   KIND_ENGINEER,
+  KIND_HELI,
   KIND_IFV,
+  KIND_RECON,
   KIND_INFANTRY,
   KIND_STRIKE,
   KIND_TANK,
@@ -392,6 +394,32 @@ describe('sub-commanders: the staff', () => {
     const later = new Set<number>();
     play(w, st, 120, () => later.add(p.status));
     expect(later.has(ST_MARCH) || later.has(ST_ATTACK) || later.has(ST_GATHER)).toBe(true);
+  }, 60000);
+
+  it('gunships with a commander go out for what the army sees round the body', () => {
+    const { w, st } = field();
+    const ids = add(w, [
+      spawn(0, KIND_INFANTRY, 6, 300, 760),
+      spawn(0, KIND_RECON, 1, 304, 760),
+      spawn(0, KIND_HELI, 2, 296, 766),
+    ]);
+    const helis = ids.filter((i) => w.kind[i] === KIND_HELI);
+    step(w, [{ type: CMD_ASSIGN, units: ids, slot: 3 }, mission(3, M_HOLD, fx(300), fx(760))]);
+    play(w, st, 20);
+    // Vehicles well out of the gunships' own reach (28), in sight of the body's scouts.
+    const foes = add(w, [spawn(1, KIND_IFV, 3, 352, 760)]);
+    let engaged = false;
+    play(w, st, 90, () => {
+      for (const h of helis) if (foes.includes(w.attack[h])) engaged = true;
+    });
+    expect(engaged).toBe(true);
+    expect(alive(w, foes)).toBe(0);
+    // Nothing left to go for: they come back over the body.
+    play(w, st, 40);
+    for (const h of helis) {
+      if (w.state[h] !== STATE_ALIVE) continue;
+      expect(Math.hypot(w.posX[h] - fx(300), w.posY[h] - fx(760))).toBeLessThan(fx(45));
+    }
   }, 60000);
 
   it('hold: goes there, digs into the houses and stays put under attack', () => {
