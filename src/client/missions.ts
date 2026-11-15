@@ -48,6 +48,7 @@ import { gridRef } from './grid';
 import { COMMANDER_RGB } from './icons';
 import type { Posting } from './production';
 import { CommanderReports, type Report } from './reports';
+import { runTickers, tickHtml } from './ticker';
 import type { UnitView } from './units';
 
 export const COMMANDER_NAMES = [
@@ -105,16 +106,19 @@ const MISSIONS = [
     tip: 'A thin line of lookouts through the place you click, across the way from your base. It warns you and pulls back from anything strong.',
   },
 ];
-const MISSION_NAME = [
+/** The mission as the board's first column has it. */
+const MISSION_SHORT = [
   'No orders',
   'Attack',
   'Hold',
   'Defend',
-  'Patrol to',
+  'Patrol',
   'Screen',
-  'Move to',
-  'Concentrate on',
+  'Move',
+  'Concentrate',
 ];
+/** The keys that give a mission without the board. */
+const MISSION_KEY: Record<number, string> = { [M_MOVE]: 'T', [M_FOCUS]: 'R' };
 const STATUS: Record<number, string> = {
   [ST_IDLE]: 'Awaiting orders',
   [ST_MARCH]: 'On the march',
@@ -183,7 +187,10 @@ const STYLES = [
 ];
 
 export class MissionBoard {
-  open = false;
+  /** Shown or hidden (M). It is on the screen all the time unless the player hides it. */
+  open = true;
+  /** The button at the top that shows whether the board is up. */
+  button: HTMLElement | null = null;
   readonly info: CommanderInfo[] = [];
   /** The commander whose row is opened up, or -1. */
   private focus = -1;
@@ -229,10 +236,14 @@ export class MissionBoard {
         fighting: false,
       });
     }
-    el.innerHTML =
-      `<div class="head"><b>Commanders</b><button data-act="close">Close <kbd>M</kbd></button></div>` +
-      `<div class="body"></div>`;
+    el.innerHTML = `<div class="body"></div>`;
     this.body = el.querySelector('.body') as HTMLElement;
+    try {
+      this.open = localStorage.getItem('revolution.board') !== '0';
+    } catch {
+      // not remembered: the board is up
+    }
+    el.style.display = this.open ? 'block' : 'none';
     // Act on press: the board is redrawn under the pointer.
     el.addEventListener('pointerdown', (e) => {
       const button = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
@@ -247,6 +258,12 @@ export class MissionBoard {
   toggle(open = !this.open): void {
     this.open = open;
     this.el.style.display = open ? 'block' : 'none';
+    this.button?.classList.toggle('on', open);
+    try {
+      localStorage.setItem('revolution.board', open ? '1' : '0');
+    } catch {
+      // not remembered
+    }
     if (!open) this.hooks.ask(null);
     else this.render();
   }
@@ -457,58 +474,74 @@ export class MissionBoard {
     const u = this.units;
     const active = this.info.filter((c) => c.count > 0 || c.mission !== M_NONE);
     const picked = u.selectedIds();
+    const free = this.info.some((c) => c.count === 0);
     let html = '';
     if (active.length === 0) {
       html +=
-        '<p class="hint">No commanders yet. Select troops and press <kbd>N</kbd> (or the button below): they get a commander. Give it a mission and it runs them for you: it marches, attacks, holds, falls back and asks for more by itself.</p>';
+        '<p class="hint">No commanders yet. Select troops and press <kbd>N</kbd>: they get a commander. Give it a mission and it runs them for you: it marches, attacks, holds, falls back and asks for more by itself.</p>';
+    } else {
+      html +=
+        '<div class="cols"><span></span><span>Mission</span><span>Objective and state</span><span>Grid</span><span>Strength</span><span class="r">Units</span></div>';
     }
     for (const c of active) {
       const pct = c.best > 0 ? Math.min(100, Math.round((c.power * 100) / c.best)) : 0;
       const tone = c.status === ST_FALLBACK || pct < 45 ? 'bad' : c.need ? 'warn' : 'ok';
-      const what =
-        c.mission === M_NONE ? 'No orders' : `${MISSION_NAME[c.mission]} ${this.place(c.x, c.z)}`;
-      const notes = [STATUS[c.status] ?? ''];
+      const notes = [(STATUS[c.status] ?? '').toLowerCase()];
       if (c.fighting && c.status !== ST_ATTACK) notes.push('in contact');
       if (c.need) notes.push(c.auto ? 'replacements on order' : 'needs reinforcements');
-      const openRow = this.focus === c.slot;
+      // Where it is going if it has orders, where it stands if it has none.
+      const ordered = c.mission !== M_NONE;
+      const place = ordered ? this.place(c.x, c.z).replace(/^grid /, 'Grid ') : '';
+      const sq = ordered ? gridRef(c.x, c.z) : c.count > 0 ? gridRef(c.cx, c.cz) : '';
+      const rgb = COMMANDER_RGB[c.slot].map((v) => Math.round(v * 255)).join(',');
       html +=
-        `<div class="cmd ${tone}${openRow ? ' open' : ''}">` +
-        `<div class="row" data-act="open" data-s="${c.slot}" title="Click: select its troops and show its orders"><i style="display:inline-block;width:9px;height:11px;margin-right:5px;border:1px solid #0b0d0f;background:rgb(${COMMANDER_RGB[c.slot].map((v) => Math.round(v * 255)).join(',')})" title="The colour of the pennant its troops carry on the battlefield"></i><b>${c.name}</b><span class="what">${what}</span><span class="n">${c.count}</span></div>` +
-        `<div class="bar"><i style="width:${pct}%"></i></div>` +
-        `<div class="state">${notes.join(' · ')}</div>`;
-      // Troops selected that are not this commander's: one click puts them under it.
-      const extra = picked.filter((id) => u.cmdr[id] !== c.slot).length;
-      if (extra > 0) {
-        html += `<div class="orders"><button data-act="add" data-s="${c.slot}" class="on" title="Put the selected units under ${c.name}. New arrivals join its body when they catch up with it">+ Add ${extra} selected to ${c.name}</button></div>`;
+        `<div class="cmd ${tone}${this.focus === c.slot ? ' open' : ''}" data-act="open" data-s="${c.slot}" title="${c.name}. Click: select its troops and show its orders. The colour is the pennant its troops carry">` +
+        `<i class="chip" style="background:rgb(${rgb})">${c.name[0]}</i>` +
+        `<b>${MISSION_SHORT[c.mission]}</b>` +
+        tickHtml(`cmd${c.slot}`, `${place} <i>${notes.filter((n) => n !== '').join(', ')}</i>`) +
+        `<span class="sq">${sq}</span>` +
+        `<span class="str"><span class="bar"><i style="width:${pct}%"></i></span><em>${pct}%</em></span>` +
+        `<span class="n">${c.count}</span>` +
+        `</div>`;
+    }
+    // The orders of the commander whose row is open, under the table.
+    const c = active.find((a) => a.slot === this.focus);
+    if (c) {
+      html += `<div class="orders first"><span>${c.name}</span>`;
+      for (const d of MISSIONS) {
+        const key = MISSION_KEY[d.m] ? ` <kbd>${MISSION_KEY[d.m]}</kbd>` : '';
+        html += `<button data-act="mission" data-s="${c.slot}" data-m="${d.m}" title="${d.tip}"${c.mission === d.m ? ' class="on"' : ''}>${d.name}${key}</button>`;
       }
-      if (openRow) {
-        html += '<div class="orders">';
-        for (const d of MISSIONS) {
-          html += `<button data-act="mission" data-s="${c.slot}" data-m="${d.m}" title="${d.tip}"${c.mission === d.m ? ' class="on"' : ''}>${d.name}</button>`;
-        }
-        html +=
-          `</div><div class="orders">` +
-          `<button data-act="jump" data-s="${c.slot}" title="Look at its troops">Go to</button>` +
-          `<button data-act="auto" data-s="${c.slot}" class="${c.auto ? 'on' : ''}" title="Replace losses: what ${c.name} loses is ordered again from your factories and sent to it, as money allows">Replace losses: ${c.auto ? 'on' : 'off'}</button>` +
-          `<button data-act="style" data-s="${c.slot}" class="${c.style ? 'on' : ''}" title="${STYLES[c.style].tip} Click to change.">Attack: ${STYLES[c.style].name}</button>` +
-          `<button data-act="stand" data-s="${c.slot}" title="Stop where it is and wait for orders">Stand down</button>` +
-          `<button data-act="disband" data-s="${c.slot}" title="Its troops go back under your own orders">Disband</button>` +
-          `</div>`;
+      html +=
+        `</div><div class="orders">` +
+        `<button data-act="jump" data-s="${c.slot}" title="Look at its troops">Go to</button>` +
+        `<button data-act="style" data-s="${c.slot}" title="${STYLES[c.style].tip} Click to change.">Attack: ${STYLES[c.style].name}</button>` +
+        `<button data-act="auto" data-s="${c.slot}" title="Replace losses: what ${c.name} loses is ordered again from your factories and sent to it, as money allows">Replace losses: ${c.auto ? 'on' : 'off'}</button>` +
+        `<button data-act="stand" data-s="${c.slot}" title="Stop where it is and wait for orders">Stand down</button>` +
+        `<button data-act="disband" data-s="${c.slot}" title="Its troops go back under your own orders">Disband</button>` +
+        `</div>`;
+    }
+    // Troops selected that are not some commander's: one click puts them under it.
+    const joinable = active.filter((a) => picked.some((id) => u.cmdr[id] !== a.slot));
+    if (picked.length > 0 && joinable.length > 0) {
+      html += `<div class="orders"><span>Add ${picked.length} selected to</span>`;
+      for (const a of joinable) {
+        html += `<button data-act="add" data-s="${a.slot}" title="Put the selected units under ${a.name}. New arrivals join its body when they catch up with it">${a.name}</button>`;
       }
       html += '</div>';
     }
     const idle = this.idle().length;
-    const free = this.info.some((c) => c.count === 0);
-    html += '<div class="foot">';
-    html += `<button data-act="new" title="The selected units get a commander of their own"${u.selectedCount === 0 || !free ? ' disabled' : ''}>New commander from selection <kbd>N</kbd></button>`;
+    html += '<div class="foot"><span>';
     if (idle > 0) {
       html +=
-        `<div class="idle"><span>${idle} idle unit${idle === 1 ? '' : 's'} without a commander</span>` +
-        `<button data-act="idle" title="Select them and look at them">Select</button>` +
-        `<button data-act="absorb" title="Each joins the commander whose troops are nearest"${active.some((c) => c.count > 0) ? '' : ' disabled'}>Give to nearest</button></div>`;
+        `${idle} idle unit${idle === 1 ? '' : 's'}` +
+        `<button data-act="idle" title="Units with no commander and nothing to do. Select them and look at them">Select</button>` +
+        `<button data-act="absorb" title="Each joins the commander whose troops are nearest"${active.some((a) => a.count > 0) ? '' : ' disabled'}>Give to nearest</button>`;
     }
-    html +=
-      '<p class="hint">An order you give a unit yourself takes it out of its commander\'s hands. To put it back, select it and press + Add on the commander.</p></div>';
-    if (html !== this.html) this.body.innerHTML = this.html = html;
+    html += `</span><span><button data-act="new" title="The selected units get a commander of their own. An order you give a unit yourself takes it out of its commander's hands; to put it back, select it and add it to the commander"${u.selectedCount === 0 || !free ? ' disabled' : ''}>New commander <kbd>N</kbd></button></span></div>`;
+    if (html !== this.html) {
+      this.body.innerHTML = this.html = html;
+      runTickers(this.body);
+    }
   }
 }

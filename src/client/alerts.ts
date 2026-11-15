@@ -27,9 +27,11 @@ import {
 } from '../worker/protocol';
 import type { GameMap } from '../sim/map';
 import type { Fog } from './fog';
+import { gridRef } from './grid';
 import type { Minimap } from './minimap';
 import type { Sound } from './sound';
 import type { StructureView } from './structures';
+import { runTicker, tickEl } from './ticker';
 import type { UnitView } from './units';
 import { SAY_NORMAL, SAY_ROUTINE, SAY_URGENT, Speaker, browserMouth } from './voice';
 
@@ -416,16 +418,25 @@ export class Alerts {
     }
     const row = document.createElement('div');
     row.className = 'alert';
-    row.style.borderLeftColor = CSS[alert.kind];
-    row.textContent = alert.text;
-    const hint = document.createElement('span');
-    hint.textContent = 'Backspace';
-    row.append(hint);
+    row.title = 'Click (or Backspace) to look there';
+    const dot = document.createElement('i');
+    dot.style.background = CSS[alert.kind];
+    const line = tickEl(alert.text);
+    row.append(dot, line);
+    // Where, as a grid square, unless the line says it already.
+    const sq = gridRef(alert.x, alert.z);
+    if (!new RegExp(`\\b${sq}\\b`).test(alert.text)) {
+      const where = document.createElement('span');
+      where.className = 'sq';
+      where.textContent = sq;
+      row.append(where);
+    }
     row.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.lookAt(alert.x, alert.z);
     });
     this.list.append(row);
+    runTicker(line);
     this.rows.push({ alert, el: row });
     while (this.rows.length > 4) this.rows.shift()!.el.remove();
     const el = document.createElement('div');

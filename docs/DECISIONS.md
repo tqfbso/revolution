@@ -2623,3 +2623,39 @@ it from the shader altogether). Reason: in this game a half-missing building mea
 damaged one, and a block eaten away by the fade reads as that at first glance. Fabio to
 try it and say whether it should be on, changed (whole building fades, or an outline of
 his own troops through walls instead), or removed. Shadows of faded parts are dotted too.
+
+## 127. The v1 interface: quiet glass, with the commanders always on screen (2026-11-15)
+
+Fabio chose from a canvas of five directions: option E for the battle (glass pills with a
+commander table), option A (plain glass) for the screens outside a battle.
+
+**In a battle.** No bars: dark see-through pills over the battlefield in fixed zones.
+Resources top left, with flags (a square per town, in its owner's colour) and the armies
+in the field (colour, power, struck through when its headquarters has fallen, so three or
+four armies read at a glance). The game's buttons top right, with a clock. Under them the
+commander board, always there (M hides it, remembered): one row per commander with
+mission, objective and state, grid square, strength and units; the orders of the row that
+is open sit under the table. Alerts bottom left with their grid square, the selection and
+its orders bottom centre, the minimap bottom right.
+
+**No blur.** Glass normally blurs what is behind it; behind this glass is a picture that
+changes every frame, and blurring it costs frame rate. The pills are flat tints. The
+interface costs the same as the old one: the same timers redraw the same elements, only
+when their text changes.
+
+**Text that does not fit is never cut silently** (`src/client/ticker.ts`). It runs past
+once like a news ticker, then rests with an ellipsis, and runs again under the pointer.
+The boards redraw several times a second, so what has run is remembered by field: a line
+at rest stays at rest, one in mid-run carries on.
+
+**Outside a battle** (`src/client/menu.ts`). The game opens on a main menu: Skirmish,
+Co-op with friends, Versus, Settings, How to play. The new battle screen holds what the
+Menu dropdown held: map, armies, time, weather, both powers, opponent; it remembers the
+last choices. Nothing of the battle is built until one is asked for, and it is asked for
+as before, by the address: any link or test flag that names a battle (`?map=`, `?ai=`,
+`?scenario=`, `?join=`…) skips the menu, so every old link works. The in-game menu keeps
+sound, graphics, the performance test, Restart battle and Main menu. The lobby and the end
+of a game are the same glass; the end screen has a column per army in a free-for-all.
+
+Not done: the score counts three armies (`STAT_TEAMS`), so a fourth shows dashes. Changing
+that moves the score's layout in the sim state and wants its own change.

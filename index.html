@@ -4,14 +4,45 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Revolution</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
+      /*
+       * The v1 interface (decision 127): quiet glass. Dark, see-through pills over the
+       * battlefield, one typeface, amber for keys and grid squares. No blur behind the
+       * glass: blurring a moving picture costs frame rate, flat tints cost nothing.
+       */
+      :root {
+        --glass: rgba(14, 17, 20, 0.62);
+        --glass2: rgba(14, 17, 20, 0.74);
+        --sheet: rgba(14, 17, 20, 0.93);
+        --ink: #f4f6f8;
+        --dim: #c9d1d9;
+        --faint: #aab4be;
+        --amber: #ffd27a;
+        --good: #7ed492;
+        --warn: #f0c060;
+        --bad: #ff8a7a;
+        --line: rgba(255, 255, 255, 0.16);
+        --chip: rgba(255, 255, 255, 0.12);
+        --dark: #101214;
+      }
       html,
       body {
         margin: 0;
         height: 100%;
         overflow: hidden;
-        background: #9db4c4;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: #0c1014;
+        color: var(--ink);
+        font-family:
+          Inter,
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
         user-select: none;
         -webkit-user-select: none;
       }
@@ -21,129 +52,504 @@
         height: 100vh;
         cursor: crosshair;
       }
+      button,
+      select {
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--ink);
+        background: var(--chip);
+        border: 0;
+        border-radius: 13px;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      select {
+        appearance: none;
+        -webkit-appearance: none;
+        padding-right: 12px;
+      }
+      select option {
+        color: var(--ink);
+        background: #1a1f24;
+      }
+      button:hover,
+      select:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      button.on {
+        background: rgba(255, 210, 122, 0.16);
+        box-shadow: inset 0 0 0 1px var(--amber);
+        color: var(--amber);
+      }
+      button:disabled,
+      button.off {
+        opacity: 0.45;
+        cursor: default;
+      }
+      kbd {
+        margin-left: 5px;
+        font: inherit;
+        font-weight: 600;
+        color: var(--amber);
+      }
       .panel {
         position: fixed;
-        background: rgba(12, 16, 20, 0.72);
-        color: #e6edf3;
+        background: var(--glass2);
+        color: var(--ink);
         font-size: 12px;
         line-height: 1.5;
-        padding: 8px 12px;
-        border-radius: 6px;
+        padding: 10px 14px;
+        border-radius: 18px;
         pointer-events: none;
       }
-      /*
-       * The screen is cut into zones that never share ground: a bar along the top
-       * (resources left, game controls right), a column down the left (performance,
-       * towns, alerts at its foot), the minimap bottom right, and what is selected with
-       * its command card bottom centre, between the two.
-       */
-      #top {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 40px;
+      .pill {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 0 10px;
+        gap: 10px;
+        min-height: 30px;
+        padding: 0 14px;
         box-sizing: border-box;
-        background: rgba(12, 16, 20, 0.82);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-        z-index: 5;
+        border-radius: 18px;
+        background: var(--glass);
+        font-size: 12px;
+        color: var(--dim);
+        white-space: nowrap;
       }
+      .pill b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .sep {
+        flex: none;
+        width: 1px;
+        height: 14px;
+        background: rgba(255, 255, 255, 0.25);
+      }
+      .sq {
+        flex: none;
+        font-weight: 600;
+        color: var(--amber);
+      }
+      /* Text longer than its field: it runs past once like a news ticker, then rests with
+         an ellipsis, and runs again under the pointer (ticker.ts). */
+      .tick {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .tick.go {
+        text-overflow: clip;
+      }
+      .tick.go > .tick-in {
+        display: inline-block;
+        animation: tick linear 1 both;
+      }
+      @keyframes tick {
+        0%,
+        12% {
+          transform: translateX(0);
+        }
+        88%,
+        100% {
+          transform: translateX(var(--tick));
+        }
+      }
+      /*
+       * The screen is cut into zones that never share ground: resources, flags and armies
+       * top left; the game's buttons and the commanders top right; alerts bottom left; the
+       * minimap bottom right; what is selected, with its orders, bottom centre.
+       */
       #left {
         position: fixed;
-        top: 50px;
-        left: 10px;
+        top: 14px;
+        left: 16px;
+        max-width: calc(100vw - 620px);
         display: flex;
         flex-direction: column;
         align-items: flex-start;
         gap: 8px;
-        max-width: 300px;
         pointer-events: none;
+        z-index: 5;
       }
-      #left .panel,
-      #bottom .panel,
-      #top .panel {
-        position: static;
-        transform: none;
+      #left > * {
+        pointer-events: auto;
+      }
+      #resources {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      #resources .stats {
+        min-height: 36px;
+        gap: 16px;
+        font-size: 13px;
+        font-weight: 500;
+        flex-wrap: wrap;
+        row-gap: 0;
+      }
+      #resources button {
+        height: 36px;
+        padding: 0 14px;
+        border-radius: 18px;
+        background: var(--glass);
+        font-size: 13px;
+        color: var(--amber);
+      }
+      #resources button:hover {
+        background: var(--glass2);
+      }
+      #resources button.air {
+        color: #b9e2ff;
+      }
+      #resources button.warn {
+        color: #ffb4a8;
+      }
+      #resources i,
+      #card i,
+      #production td i {
+        font-style: normal;
+      }
+      #card i {
+        margin: 0 8px 0 0;
+      }
+      .sup {
+        color: #e6d3a3;
+      }
+      .fuel {
+        color: #f5b95a;
+      }
+      .cred {
+        color: #9ddcae;
+      }
+      #card i.short,
+      .short {
+        color: var(--bad);
+      }
+      #status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      #towns .flags {
+        display: flex;
+        gap: 4px;
+      }
+      #towns .flags i {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+      #armies i {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+      }
+      #armies span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      #armies .me {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      #armies .out {
+        text-decoration: line-through;
+        opacity: 0.55;
       }
       #perf {
         margin: 0;
-        pointer-events: auto;
+        display: block;
+        min-height: 0;
+        padding: 4px 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--faint);
+        background: rgba(14, 17, 20, 0.45);
         cursor: pointer;
         white-space: pre;
       }
-      #help {
-        top: 50px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: min(760px, 86vw);
-        max-height: calc(100vh - 120px);
+      #right {
+        position: fixed;
+        top: 14px;
+        right: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+        pointer-events: none;
+        z-index: 6;
+      }
+      #right > * {
+        pointer-events: auto;
+      }
+      #actions {
+        min-height: 36px;
+        padding: 0 8px;
+        gap: 4px;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      #actions #clock {
+        padding: 0 8px;
+        font-variant-numeric: tabular-nums;
+      }
+      #actions button,
+      #actions select,
+      #menu summary {
+        height: 28px;
+        padding: 0 12px;
+        border-radius: 14px;
+        background: transparent;
+        font-size: 13px;
+        color: var(--ink);
+      }
+      #actions button:hover,
+      #actions select:hover,
+      #menu summary:hover,
+      #menu[open] summary {
+        background: var(--chip);
+      }
+      #actions button.on {
+        background: rgba(255, 255, 255, 0.16);
+        box-shadow: none;
+        color: var(--ink);
+      }
+      #actions .icon {
+        width: 32px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #menu {
+        position: relative;
+      }
+      #menu summary {
+        list-style: none;
+        cursor: pointer;
+        width: 32px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #menu summary::-webkit-details-marker {
+        display: none;
+      }
+      #menu .drop {
+        position: absolute;
+        top: 38px;
+        right: -8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px;
+        min-width: 210px;
+        background: var(--sheet);
+        border-radius: 18px;
+        z-index: 9;
+      }
+      #menu .drop button,
+      #menu .drop select {
+        height: 32px;
+        border-radius: 16px;
+        background: var(--chip);
+        text-align: left;
+      }
+      #menu .drop button:hover,
+      #menu .drop select:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      /* The commander board: always there once there is a commander (M hides it). */
+      #missions {
+        position: static;
+        width: 548px;
+        max-width: calc(100vw - 32px);
+        max-height: calc(100vh - 330px);
         overflow-y: auto;
         box-sizing: border-box;
-        color: #b9c4cf;
-        background: rgba(12, 16, 20, 0.94);
+        padding: 10px 12px 12px;
+        background: rgba(14, 17, 20, 0.66);
+        font-size: 13px;
+        line-height: 1.3;
+        display: none;
+        pointer-events: auto;
+      }
+      #missions .cols,
+      #missions .cmd {
+        display: grid;
+        grid-template-columns: 26px 92px minmax(0, 1fr) 30px 104px 30px;
+        gap: 10px;
+        align-items: center;
+        padding: 0 6px;
+      }
+      #missions .cols {
+        height: 22px;
+        font-size: 11px;
+        color: var(--dim);
+      }
+      #missions .cmd {
+        height: 36px;
+        border-radius: 12px;
+        cursor: pointer;
+      }
+      #missions .cmd:hover {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      #missions .cmd.open {
+        background: var(--chip);
+      }
+      #missions .chip {
+        width: 26px;
+        height: 26px;
+        border-radius: 13px;
+        color: var(--dark);
+        font-style: normal;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #missions .cmd b {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      #missions .cmd .tick i {
+        font-style: normal;
+        color: var(--dim);
+      }
+      #missions .str {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--good);
+      }
+      #missions .str .bar {
+        flex: 1;
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.2);
+      }
+      #missions .str .bar i {
+        display: block;
+        height: 4px;
+        border-radius: 2px;
+        background: currentColor;
+      }
+      #missions .str em {
+        width: 34px;
+        text-align: right;
+        font-style: normal;
+        font-size: 12px;
+      }
+      #missions .warn .str {
+        color: var(--warn);
+      }
+      #missions .bad .str {
+        color: var(--bad);
+      }
+      #missions .n {
+        text-align: right;
+        color: var(--dim);
+      }
+      #missions .r {
+        text-align: right;
+      }
+      #missions .orders {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px;
+        padding: 8px 6px 0;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--dim);
+      }
+      #missions .orders.first {
+        margin-top: 8px;
+        border-top: 1px solid var(--line);
+      }
+      #missions button {
+        height: 26px;
+        padding: 0 11px;
+      }
+      #missions .orders.first button {
+        padding: 0 8px;
+      }
+      #missions .orders.first button.on {
+        background: var(--ink);
+        box-shadow: none;
+        color: var(--dark);
+        font-weight: 600;
+      }
+      #missions .orders.first button.on kbd {
+        color: #7a5a10;
+      }
+      #missions .foot {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+        padding: 0 6px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      #missions .foot span {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      #missions .hint {
+        margin: 0;
+        padding: 2px 6px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--dim);
+      }
+      #help {
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(780px, 86vw);
+        max-height: calc(100vh - 130px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: 18px 22px;
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--dim);
+        background: var(--sheet);
         display: none;
         pointer-events: auto;
         z-index: 8;
       }
-      #resources {
-        background: none;
-        padding: 0;
-        white-space: nowrap;
-        font-size: 13px;
-        overflow: hidden;
-      }
-      #resources button {
-        pointer-events: auto;
-        padding: 2px 8px;
-        margin-left: 8px;
-        border-color: #dcc48c;
-      }
-      #resources button.air {
-        border-color: #8fd0ff;
-        color: #b9e2ff;
-      }
-      #resources button.warn {
-        border-color: #ff7b6b;
-        color: #ff9d90;
-      }
-      #resources i,
-      #card i {
-        font-style: normal;
-        margin: 0 7px;
-      }
-      .sup {
-        color: #dcc48c;
-      }
-      .fuel {
-        color: #f2a91e;
-      }
-      .cred {
-        color: #8fd0a0;
-      }
-      #card i.short,
-      .short {
-        color: #ff7b6b;
-      }
       #bottom {
         position: fixed;
-        bottom: 10px;
+        bottom: 16px;
         left: 50%;
         transform: translateX(-50%);
         /* Never under the minimap (right) or the alerts (left). */
-        width: min(720px, calc(100vw - 560px));
+        width: min(720px, calc(100vw - 620px));
         min-width: 420px;
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        align-items: center;
+        gap: 8px;
         pointer-events: none;
       }
       #card {
+        position: static;
         display: none;
+        align-self: stretch;
         pointer-events: auto;
         max-height: 44vh;
         overflow-y: auto;
@@ -160,41 +566,42 @@
         position: relative;
         height: 34px;
         box-sizing: border-box;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 4px;
-        padding: 2px 4px;
+        border-radius: 8px;
+        background: var(--chip);
+        padding: 3px 6px;
         font-size: 10px;
         line-height: 1.25;
         overflow: hidden;
-        color: #c8d2db;
+        color: var(--dim);
       }
       #card .slot.empty {
-        border-style: dashed;
-        opacity: 0.4;
+        background: none;
+        box-shadow: inset 0 0 0 1px var(--line);
+        opacity: 0.6;
       }
       #card .slot b {
         position: absolute;
         left: 0;
         bottom: 0;
         height: 3px;
-        background: #8fd0a0;
+        background: var(--good);
       }
       #card .note {
         height: 16px;
         font-size: 11px;
-        color: #ff7b6b;
+        color: var(--bad);
         overflow: hidden;
         white-space: nowrap;
       }
       #card .title {
         font-size: 13px;
-        font-weight: bold;
+        font-weight: 600;
         margin-bottom: 4px;
       }
       #card .title span,
       #card .hint {
-        color: #9aa7b3;
-        font-weight: normal;
+        color: var(--dim);
+        font-weight: 400;
       }
       #card .queue {
         margin-bottom: 6px;
@@ -208,179 +615,48 @@
       #card button {
         text-align: left;
         min-width: 104px;
+        border-radius: 12px;
+        padding: 6px 10px;
       }
       #card button kbd {
         float: right;
         margin-left: 8px;
-        padding: 0 4px;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 3px;
-        font: inherit;
-        font-size: 10px;
-        color: #d8c27a;
+        font-weight: 700;
       }
       #card button span {
         display: block;
         font-size: 11px;
-        color: #9aa7b3;
-      }
-      #card button span i {
-        margin: 0 8px 0 0;
-      }
-      #card button.off {
-        opacity: 0.45;
-        cursor: default;
-      }
-      #card button.on {
-        outline: 1px solid #d8c27a;
-        color: #f0e2b0;
+        font-weight: 400;
+        color: var(--dim);
       }
       #card .row.works button {
         min-width: 86px;
       }
-      /* The mission board: the sub-commanders, down the right side above the minimap. */
-      #missions {
-        position: fixed;
-        top: 50px;
-        right: 10px;
-        width: 300px;
-        max-height: calc(100vh - 320px);
-        overflow-y: auto;
-        box-sizing: border-box;
-        background: rgba(12, 16, 20, 0.92);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        display: none;
-        pointer-events: auto;
-        z-index: 6;
-        font-size: 12px;
-      }
-      #missions .head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 14px;
-        margin-bottom: 6px;
-      }
-      #missions button {
-        padding: 2px 7px;
-        font-size: 11px;
-      }
-      #actions button.on {
-        border-color: #ffe082;
-        color: #ffe082;
-      }
-      #missions button.on {
-        outline: 1px solid #d8c27a;
-        color: #ffe082;
-      }
-      #missions button:disabled {
-        opacity: 0.4;
-      }
-      #missions .cmd {
-        border-left: 3px solid #6fbf73;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 3px;
-        padding: 4px 6px;
-        margin-bottom: 5px;
-      }
-      #missions .cmd.warn {
-        border-left-color: #e0b84a;
-      }
-      #missions .cmd.bad {
-        border-left-color: #ff6b5b;
-      }
-      #missions .cmd.open {
-        background: rgba(255, 255, 255, 0.1);
-      }
-      #missions .row {
-        display: flex;
-        gap: 8px;
-        align-items: baseline;
-        cursor: pointer;
-      }
-      #missions .row b {
-        color: #ffe082;
-      }
-      #missions .row .what {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      #missions .row .n {
-        color: #9aa7b3;
-      }
-      #missions .bar {
-        height: 4px;
-        background: rgba(255, 255, 255, 0.12);
-        border-radius: 2px;
-        margin: 3px 0;
-      }
-      #missions .bar i {
-        display: block;
-        height: 100%;
-        border-radius: 2px;
-        background: #6fbf73;
-      }
-      #missions .warn .bar i {
-        background: #e0b84a;
-      }
-      #missions .bad .bar i {
-        background: #ff6b5b;
-      }
-      #missions .state {
-        color: #c8d2db;
-        font-size: 11px;
-      }
-      #missions .orders {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        margin-top: 5px;
-      }
-      #missions .idle {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        align-items: center;
-        margin-top: 6px;
-        color: #ffcf7a;
-      }
-      #missions .idle span {
-        flex: 1 0 100%;
-      }
-      #missions .hint {
-        color: #9aa7b3;
-        font-size: 11px;
-        margin: 6px 0 0;
-        line-height: 1.35;
-      }
       /* A question to the player: click the map to answer it. */
       #prompt {
-        position: fixed;
-        top: 52px;
+        top: 62px;
         left: 50%;
         transform: translateX(-50%);
         display: none;
-        background: rgba(60, 48, 12, 0.95);
-        border: 1px solid #d8c27a;
-        color: #ffe082;
+        padding: 8px 18px;
+        background: rgba(255, 210, 122, 0.94);
+        color: var(--dark);
         font-size: 14px;
-        font-weight: bold;
+        font-weight: 600;
         z-index: 8;
         pointer-events: none;
       }
       /* The war production centre: a sheet over the middle of the screen. */
       #production {
-        top: 52px;
+        top: 62px;
         left: 50%;
         transform: translateX(-50%);
         width: min(1040px, calc(100vw - 40px));
-        max-height: calc(100vh - 130px);
+        max-height: calc(100vh - 140px);
         overflow-y: auto;
         box-sizing: border-box;
-        background: rgba(12, 16, 20, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.18);
+        padding: 14px 18px;
+        background: var(--sheet);
         display: none;
         pointer-events: auto;
         z-index: 7;
@@ -389,18 +665,18 @@
         display: flex;
         align-items: center;
         gap: 14px;
-        font-size: 14px;
+        font-size: 15px;
       }
       #production .head span {
         flex: 1;
         font-size: 11px;
-        color: #9aa7b3;
+        color: var(--dim);
       }
       #production .bank,
       #production .foot {
         margin: 6px 0;
         font-size: 11px;
-        color: #9aa7b3;
+        color: var(--dim);
       }
       #production table {
         width: 100%;
@@ -408,9 +684,9 @@
       }
       #production th {
         text-align: left;
-        font-weight: normal;
+        font-weight: 400;
         font-size: 11px;
-        color: #9aa7b3;
+        color: var(--dim);
         padding: 2px 6px;
       }
       #production td {
@@ -418,23 +694,22 @@
         white-space: nowrap;
       }
       #production tr.group td {
-        padding-top: 8px;
-        font-weight: bold;
-        color: #d8c27a;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        padding-top: 10px;
+        font-weight: 600;
+        color: var(--amber);
+        border-bottom: 1px solid var(--line);
       }
       #production tr.group.none td {
-        color: #ff7b6b;
+        color: var(--bad);
       }
       #production tr.dim td:first-child {
         opacity: 0.5;
       }
       #production td button {
-        padding: 2px 7px;
+        padding: 3px 9px;
         margin-right: 3px;
       }
       #production td i {
-        font-style: normal;
         margin-right: 7px;
       }
       #production [data-cell^='keep'] {
@@ -445,258 +720,152 @@
       #production [data-cell^='why'] {
         margin-left: 6px;
         font-size: 11px;
-        color: #ff7b6b;
+        color: var(--bad);
       }
       #production .hot {
-        color: #f0e2b0;
-        font-weight: bold;
+        color: var(--amber);
+        font-weight: 600;
       }
       #production select {
-        font: inherit;
         font-size: 11px;
-        color: #e6edf3;
-        background: rgba(12, 16, 20, 0.72);
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        border-radius: 4px;
-        padding: 2px 4px;
+        padding: 3px 10px;
         max-width: 190px;
       }
-      kbd {
-        margin-left: 6px;
-        padding: 0 4px;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 3px;
-        font: inherit;
-        font-size: 10px;
-        color: #d8c27a;
-      }
-      #debrief {
-        top: 12%;
-        left: 50%;
-        transform: translateX(-50%);
-        display: none;
-        pointer-events: auto;
-        z-index: 20;
-        min-width: 420px;
-        max-width: 92vw;
-        max-height: 80vh;
-        overflow: auto;
-        padding: 18px 26px;
-        font-size: 13px;
-        background: rgba(12, 16, 20, 0.94);
-        border: 1px solid #3a4652;
-      }
-      #debrief h2 {
-        margin: 0 0 4px;
-        font-size: 26px;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-      }
-      #debrief h2.won {
-        color: #dcc48c;
-      }
-      #debrief h2.lost {
-        color: #ff9d90;
-      }
-      #debrief table {
-        border-collapse: collapse;
-        width: 100%;
-        margin: 10px 0;
-      }
-      #debrief th,
-      #debrief td {
-        text-align: right;
-        padding: 3px 10px;
-        border-bottom: 1px solid #26303a;
-      }
-      #debrief th:first-child,
-      #debrief td:first-child {
-        text-align: left;
-      }
-      #debrief tr.mvp td {
-        color: #dcc48c;
-      }
-      #debrief .note {
-        color: #8b98a5;
-        font-size: 11px;
-      }
-      #debrief .buttons {
-        text-align: right;
-        margin-top: 12px;
-      }
-      #debrief button {
-        margin-left: 8px;
-        padding: 4px 12px;
-      }
       #banner {
-        position: fixed;
         top: 30%;
         left: 50%;
         transform: translateX(-50%);
         display: none;
         font-size: 22px;
-        padding: 16px 28px;
+        font-weight: 300;
+        padding: 16px 30px;
+        border-radius: 30px;
       }
       #paused {
-        position: fixed;
-        top: 14%;
+        top: 24%;
         left: 50%;
         transform: translateX(-50%);
         display: none;
         font-size: 18px;
-        padding: 10px 22px;
+        font-weight: 300;
+        letter-spacing: 0.08em;
+        padding: 10px 26px;
+        border-radius: 26px;
         text-align: center;
         pointer-events: none;
       }
+      #paused small {
+        display: block;
+        font-size: 12px;
+        letter-spacing: 0;
+        color: var(--dim);
+        margin-top: 2px;
+      }
       #perf-test-result {
-        position: fixed;
         top: 22%;
         left: 50%;
         transform: translateX(-50%);
         display: none;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 12px;
         padding: 14px 18px;
         margin: 0;
         white-space: pre-wrap;
         max-width: 760px;
         cursor: pointer;
+        background: var(--sheet);
+        pointer-events: auto;
         z-index: 30;
-      }
-      #paused small {
-        display: block;
-        font-size: 12px;
-        color: #9aa7b3;
-        margin-top: 4px;
-      }
-      #towns {
-        min-width: 190px;
       }
       /* Control groups that exist: a chip each, with its number and size. */
       #groups {
         display: flex;
         justify-content: center;
-        gap: 4px;
+        gap: 6px;
         pointer-events: auto;
       }
       #groups button {
-        padding: 2px 8px;
-        font-size: 11px;
+        height: 26px;
+        padding: 0 10px;
+        background: var(--glass);
+        font-weight: 600;
+      }
+      #groups button:hover {
+        background: var(--glass2);
       }
       #groups button b {
-        color: #d8c27a;
-        margin-right: 5px;
+        color: var(--amber);
+        margin-right: 6px;
       }
       #groups button.on {
-        outline: 1px solid #d8c27a;
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: none;
+        color: var(--dark);
+      }
+      #groups button.on b {
+        color: var(--dark);
       }
       #selection {
         display: none;
-        align-self: center;
         max-width: 100%;
-        box-sizing: border-box;
-        text-align: center;
+        min-height: 34px;
+        gap: 14px;
+        padding: 0 18px;
+        background: var(--glass2);
+        font-size: 13px;
+        pointer-events: auto;
       }
-      #actions {
-        display: flex;
-        gap: 6px;
-        align-items: center;
+      #selection b {
         flex: none;
+        font-weight: 700;
       }
-      #top button,
-      #top select {
-        padding: 4px 9px;
-      }
-      #menu {
-        position: relative;
-      }
-      #menu summary {
-        list-style: none;
-        font-size: 12px;
-        color: #e6edf3;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        border-radius: 6px;
-        padding: 4px 9px;
-        cursor: pointer;
-      }
-      #menu summary::-webkit-details-marker {
-        display: none;
-      }
-      #menu[open] summary {
-        background: rgba(40, 52, 64, 0.9);
-      }
-      #menu .drop {
-        position: absolute;
-        top: 34px;
-        right: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 10px;
-        min-width: 190px;
-        background: rgba(12, 16, 20, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 6px;
-      }
-      #actions select {
-        font: inherit;
-        font-size: 12px;
-        color: #e6edf3;
-        background: rgba(12, 16, 20, 0.72);
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        border-radius: 6px;
-        padding: 6px 8px;
-        cursor: pointer;
-      }
-      button {
-        font: inherit;
-        font-size: 12px;
-        color: #e6edf3;
-        background: rgba(12, 16, 20, 0.72);
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        border-radius: 6px;
-        padding: 7px 12px;
-        cursor: pointer;
-      }
-      button:hover {
-        background: rgba(40, 52, 64, 0.9);
+      #selection .under {
+        flex: none;
+        color: var(--amber);
       }
       #minimap {
         position: fixed;
-        right: 10px;
-        bottom: 10px;
+        right: 16px;
+        bottom: 16px;
         width: 240px;
         height: 240px;
-        border: 1px solid rgba(255, 255, 255, 0.35);
-        border-radius: 4px;
+        border-radius: 14px;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
         background: #0c1014;
         cursor: pointer;
       }
       #alerts {
         position: fixed;
-        left: 10px;
-        bottom: 10px;
-        width: 250px;
+        left: 16px;
+        bottom: 16px;
+        width: 280px;
         display: flex;
         flex-direction: column;
         gap: 6px;
         pointer-events: none;
       }
       .alert {
-        background: rgba(12, 16, 20, 0.86);
-        color: #fff;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        padding: 0 14px;
+        box-sizing: border-box;
+        border-radius: 19px;
+        background: var(--glass2);
         font-size: 13px;
-        font-weight: bold;
-        padding: 7px 10px;
-        border-left: 5px solid #ff5a4a;
-        border-radius: 4px;
+        font-weight: 600;
         pointer-events: auto;
         cursor: pointer;
       }
-      .alert span {
-        display: block;
-        font-size: 11px;
-        font-weight: normal;
-        color: #9aa7b3;
+      .alert > i {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+      }
+      .alert .tick {
+        flex: 1;
       }
       #alert-arrows {
         position: fixed;
@@ -725,16 +894,384 @@
         inset: 0;
         display: grid;
         place-items: center;
-        color: #0c1014;
+        background: #0c1014;
+        color: var(--dim);
+        font-size: 15px;
+        font-weight: 300;
+        letter-spacing: 0.04em;
+        z-index: 4;
+      }
+      /* Players sharing a game: who is there, and how the line is. */
+      #coop-status {
+        display: block;
+        padding: 6px 14px;
+        white-space: normal;
+      }
+      #coop-status div + div {
+        color: var(--amber);
+      }
+      #coop-catchup {
+        top: 38%;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 40;
+        padding: 18px 30px;
+        font-size: 16px;
+        font-weight: 300;
+      }
+      /*
+       * The screens outside a battle: main menu, new battle, settings, how to play, the
+       * lobby and the end of a game. Glass on a picture of the game.
+       */
+      .screen {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: clamp(28px, 7vh, 64px) clamp(24px, 7vw, 88px);
+        background: #0c1014;
+        color: var(--ink);
         font-size: 14px;
+        line-height: 1.5;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .screen::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: url('./menu.jpg') center / cover;
+        opacity: 0.35;
+        pointer-events: none;
+      }
+      .screen.home::before {
+        opacity: 1;
+      }
+      .screen.home::after {
+        content: '';
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: min(620px, 80vw);
+        background: linear-gradient(90deg, rgba(8, 10, 12, 0.9), rgba(8, 10, 12, 0));
+        pointer-events: none;
+      }
+      .screen.over {
+        z-index: 20;
+        background: rgba(8, 10, 12, 0.9);
+        display: none;
+      }
+      .screen.over::before {
+        display: none;
+      }
+      .screen > * {
+        position: relative;
+        z-index: 1;
+      }
+      .screen h1 {
+        margin: 0;
+        font-size: 36px;
+        font-weight: 300;
+      }
+      .screen.home h1 {
+        font-size: clamp(44px, 7vw, 64px);
+        letter-spacing: 0.02em;
+      }
+      .screen.over h1 {
+        font-size: clamp(48px, 8vw, 72px);
+      }
+      .screen h1.lost {
+        color: #ffb4a8;
+      }
+      .screen .sub {
+        margin: 8px 0 0;
+        font-size: 15px;
+        color: var(--dim);
+      }
+      .screen .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 20px;
+        margin-bottom: clamp(18px, 4vh, 40px);
+      }
+      .screen .top span {
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .screen nav {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        margin-top: clamp(28px, 9vh, 88px);
+      }
+      .screen nav button {
+        position: relative;
+        height: 52px;
+        padding: 0 0 0 20px;
+        border-radius: 0;
+        background: none;
+        font-size: 24px;
+        font-weight: 500;
+        color: var(--dim);
+      }
+      .screen nav button:hover,
+      .screen nav button:focus-visible {
+        background: none;
+        color: var(--ink);
+        outline: none;
+      }
+      .screen nav button:hover::before,
+      .screen nav button:focus-visible::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 23px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--amber);
+      }
+      .screen .corner {
+        position: fixed;
+        left: clamp(24px, 7vw, 88px);
+        bottom: 36px;
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .screen .last {
+        position: fixed;
+        right: 40px;
+        bottom: 32px;
+        min-height: 40px;
+        gap: 18px;
+        padding: 0 18px;
+        font-size: 13px;
+      }
+      .screen .last b {
+        font-weight: 400;
+      }
+      .screen .cols2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+        gap: 22px clamp(28px, 6vw, 96px);
+        padding-bottom: 96px;
+      }
+      .screen .col {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-width: 0;
+        max-width: 620px;
+      }
+      .screen .opt {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .screen .opt > span,
+      .screen .label {
+        color: var(--dim);
+      }
+      .screen .seg {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .screen .seg button,
+      .screen .ghost,
+      .screen .go,
+      .screen select {
+        height: 40px;
+        padding: 0 18px;
+        border-radius: 20px;
+        font-size: 14px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .screen .seg button:hover,
+      .screen .ghost:hover,
+      .screen select:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      .screen .seg button.on {
+        background: var(--ink);
+        box-shadow: none;
+        color: var(--dark);
+        font-weight: 600;
+      }
+      .screen .opt p,
+      .screen .small {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--faint);
+      }
+      .screen .bar {
+        position: fixed;
+        right: clamp(24px, 7vw, 88px);
+        bottom: clamp(20px, 6vh, 56px);
+        display: flex;
+        gap: 10px;
+        z-index: 2;
+      }
+      .screen .bar button {
+        height: 52px;
+        padding: 0 28px;
+        border-radius: 26px;
+        font-size: 15px;
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .screen .bar .go,
+      .screen .go {
+        background: var(--amber);
+        color: var(--dark);
+        font-weight: 700;
+      }
+      .screen .bar .go {
+        padding: 0 36px;
+        font-size: 16px;
+      }
+      .screen .go:hover {
+        background: #ffe0a0;
+      }
+      .screen .go:disabled {
+        background: rgba(255, 255, 255, 0.14);
+        color: var(--dim);
+        opacity: 1;
+      }
+      .screen .seat {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: 52px;
+        padding: 0 18px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .screen .seat i {
+        flex: none;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: var(--good);
+      }
+      .screen .seat b {
+        flex: 1;
+        font-weight: 600;
+      }
+      .screen .seat span {
+        color: var(--dim);
+      }
+      .screen .seat.open i {
+        background: #6b7680;
+      }
+      .screen .seat.open b {
+        color: var(--faint);
+        font-weight: 400;
+      }
+      .screen .seat.mvp {
+        background: var(--amber);
+        color: var(--dark);
+      }
+      .screen .seat.mvp span {
+        color: var(--dark);
+      }
+      .screen .linkrow {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .screen .linkrow input {
+        flex: 1;
+        min-width: 0;
+        height: 40px;
+        padding: 0 16px;
+        box-sizing: border-box;
+        border: 0;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.08);
+        font: inherit;
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .screen a {
+        color: var(--dim);
+      }
+      .screen a:hover {
+        color: var(--amber);
+      }
+      .screen .text {
+        max-width: 820px;
+        padding-bottom: 96px;
+        color: var(--dim);
+      }
+      .screen .text p {
+        margin: 0 0 12px;
+      }
+      .screen .score {
+        display: grid;
+        align-items: center;
+      }
+      .screen .score > * {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        border-top: 1px solid rgba(255, 255, 255, 0.14);
+        font-size: 20px;
+        font-weight: 300;
+        color: var(--dim);
+      }
+      .screen .score > .h {
+        min-height: 32px;
+        border-top: 0;
+        font-size: 12px;
+        font-weight: 400;
+      }
+      .screen .score > .l {
+        justify-content: flex-start;
+        font-size: 14px;
+        font-weight: 400;
+        color: var(--ink);
+      }
+      .screen .score > .a {
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .screen .seat.stat {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 120px 76px 60px 50px;
+        gap: 8px;
+      }
+      .screen .seat.stat > :nth-child(n + 3) {
+        text-align: right;
+      }
+      .screen .seat.stat.h {
+        min-height: 20px;
+        background: none;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .screen .seat.stat.h b {
+        font-weight: 400;
       }
     </style>
   </head>
   <body>
     <canvas id="game"></canvas>
-    <div id="top">
-      <div id="resources" class="panel"></div>
-      <div id="actions">
+    <div id="left">
+      <div id="resources"></div>
+      <div id="status">
+        <div id="towns" class="pill"></div>
+        <div id="armies" class="pill"></div>
+      </div>
+      <pre id="perf" class="pill" title="Click (or F3) for the full performance readout">
+starting…</pre>
+    </div>
+    <div id="right">
+      <div id="actions" class="pill">
+        <span id="clock" title="How long the battle has lasted">0:00</span>
         <button
           id="production-toggle"
           title="War production: order units from every factory at once, keep numbers up, choose where new units go"
@@ -743,7 +1280,7 @@
         </button>
         <button
           id="missions-toggle"
-          title="Commanders: give groups of troops a commander and a mission (attack, hold, defend, patrol, screen) and it runs them for you"
+          title="Commanders: the board of your commanders, what each is doing and how strong it is. M hides and shows it"
         >
           Commanders <kbd>M</kbd>
         </button>
@@ -753,78 +1290,39 @@
         >
           Grid <kbd>K</kbd>
         </button>
-        <button id="pause" title="Pause (Space). Orders given while paused start when you resume">
-          Pause (Space)
-        </button>
+        <button
+          id="pause"
+          class="icon"
+          aria-label="Pause"
+          title="Pause (Space). Orders given while paused start when you resume"
+        ></button>
         <select id="game-speed" aria-label="Game speed" title="Game speed">
-          <option value="1">Speed 1x</option>
-          <option value="0.75">Speed 0.75x</option>
+          <option value="1">1x</option>
+          <option value="0.75">0.75x</option>
         </select>
-        <button id="help-toggle" title="How to play: every order and key">Help (F1)</button>
+        <button
+          id="help-toggle"
+          class="icon"
+          aria-label="How to play"
+          title="How to play: every order and key (F1)"
+        >
+          ?
+        </button>
         <details id="menu">
-          <summary title="Opponent, map, sound, graphics, new game">Menu</summary>
+          <summary aria-label="Menu" title="Sound, graphics, restart, main menu">
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="12"
+              viewBox="0 0 14 12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M1 2h12M1 6h12M1 10h12" />
+            </svg>
+          </summary>
           <div class="drop">
-            <select
-              id="ai-level"
-              aria-label="Opponent"
-              title="Opponent. Changing this starts a new game"
-            >
-              <option value="recruit">AI: recruit</option>
-              <option value="easy">AI: easy</option>
-              <option value="normal">AI: normal</option>
-              <option value="hard">AI: hard</option>
-              <option value="off">AI: none</option>
-            </select>
-            <select id="army-pick" aria-label="Your army">
-              <option value="nato">Army: Western alliance</option>
-              <option value="russia">Army: Russia</option>
-              <option value="china">Army: China</option>
-              <option value="none">Army: no faction</option>
-            </select>
-            <select id="foe-pick" aria-label="Enemy army">
-              <option value="nato">Enemy: Western alliance</option>
-              <option value="russia">Enemy: Russia</option>
-              <option value="china">Enemy: China</option>
-              <option value="none">Enemy: no faction</option>
-            </select>
-            <select
-              id="armies-pick"
-              aria-label="Armies"
-              title="How many armies. With three or four it is every army for itself, on the four corners map. Changing this starts a new game"
-            >
-              <option value="2">Armies: 2</option>
-              <option value="3">Armies: 3, free-for-all</option>
-              <option value="4">Armies: 4, free-for-all</option>
-            </select>
-            <select
-              id="map-pick"
-              aria-label="Map"
-              title="Battlefield. Changing this starts a new game"
-            >
-              <option value="city">Map: city</option>
-              <option value="euro">Map: European city</option>
-              <option value="ridge">Map: ridge</option>
-              <option value="river">Map: river</option>
-              <option value="four">Map: four corners</option>
-            </select>
-            <select
-              id="time-pick"
-              aria-label="Time of day"
-              title="Day or night. At night troops see less far, and flares (G), gunfire and burning wrecks show what is near them. Changing this starts a new game"
-            >
-              <option value="day">Time: day</option>
-              <option value="night">Time: night</option>
-            </select>
-            <select
-              id="weather-pick"
-              aria-label="Weather"
-              title="Weather. In rain, fog and snow everyone sees less far: least of all in fog. Changing this starts a new game"
-            >
-              <option value="clear">Weather: clear</option>
-              <option value="rain">Weather: rain</option>
-              <option value="fog">Weather: fog</option>
-              <option value="snow">Weather: snow</option>
-            </select>
             <select id="volume" aria-label="Sound" title="Sound volume">
               <option value="0">Sound: off</option>
               <option value="0.35">Sound: quiet</option>
@@ -834,7 +1332,7 @@
             <select
               id="quality"
               aria-label="Graphics"
-              title="Graphics detail. Changing this reloads the page and starts a new game"
+              title="Graphics detail. Changing this reloads the page and starts the battle again"
             >
               <option value="low">Graphics: low</option>
               <option value="normal">Graphics: normal</option>
@@ -849,45 +1347,49 @@
             <button id="add-units" title="Stress test: 500 more units for each side">
               +1000 units
             </button>
-            <button id="reset" title="Start this game again">New game</button>
             <button
               id="coop-host"
-              title="Play this map with up to three others: you get one link to send them. Together against the computer, or versus: red against blue, players on the same side sharing an army"
+              title="Play this battle with up to three others: you get one link to send them. Together against the computer, or versus: red against blue, players on the same side sharing an army"
             >
-              Multiplayer: co-op or versus
+              Invite friends to this battle
+            </button>
+            <button id="reset" title="Start this battle again, with the same map and armies">
+              Restart battle
+            </button>
+            <button
+              id="to-menu"
+              title="Leave this battle and go to the main menu, where a new battle is set up: map, armies, time, weather, opponent"
+            >
+              Main menu
             </button>
           </div>
         </details>
       </div>
-    </div>
-    <div id="left">
-      <pre id="perf" class="panel" title="Click (or F3) for the full performance readout">
-starting…</pre>
-      <div id="towns" class="panel"></div>
+      <div id="missions" class="panel"></div>
     </div>
     <div id="bottom">
       <div id="groups"></div>
-      <div id="selection" class="panel"></div>
+      <div id="selection" class="pill"></div>
       <div id="card" class="panel"></div>
     </div>
     <div id="production" class="panel"></div>
-    <div id="missions" class="panel"></div>
     <div id="prompt" class="panel"></div>
     <div id="banner" class="panel"></div>
-    <div id="debrief" class="panel"></div>
+    <div id="debrief" class="screen over"></div>
     <div id="paused" class="panel"></div>
     <pre id="perf-test-result" class="panel"></pre>
     <div id="help" class="panel">
-      The enemy base is off the map until one of your units sees it: scout. The Menu (top right)
-      sets the opponent and starts a new game.<br />
+      The enemy base is off the map until one of your units sees it: scout. A battle is set up on
+      the New battle screen (main menu, Skirmish): map, armies, time, weather and opponent. The menu
+      button (top right, three lines) has sound, graphics, Restart battle and Main menu.<br />
       Versus (2 to 4 players): the same invitation, with Game set to Versus in the lobby. Red
       against blue and no computer; everyone picks a side, players on one side share its army (2 v
       2, a duel, or uneven sides), and each side sees only what its own troops see<br />
-      Co-op (2 to 4 players): Menu, "Multiplayer: co-op or versus" gives one link to send to
-      everyone; the host presses Start when all are in. Whoever opens it commands the same army with
-      you against the computer. Z rings the point under your pointer on every minimap and tells
-      everyone its grid square; the cyan box on the minimap is where your partner is looking. Pause
-      and speed are shared.<br />
+      Co-op (2 to 4 players): main menu, "Co-op with friends" gives one link to send to everyone;
+      the host presses Start when all are in. Whoever opens it commands the same army with you
+      against the computer. Z rings the point under your pointer on every minimap and tells everyone
+      its grid square; the cyan box on the minimap is where your partner is looking. Pause and speed
+      are shared.<br />
       Map grid: the minimap is ruled in squares, A to H across and 1 to 8 down ("armour to C4"). K
       (or the Grid button) draws the same squares and their names on the battlefield.<br />
       Engineers and trucks: B (or Repair / fortify), then right click a building, to mend it;
@@ -906,23 +1408,24 @@ starting…</pre>
       your barracks share the work; each unit is paid for as it starts, so you can order ahead of
       your money. Keep: that many are kept in the field, losses replaced by themselves. Send to: new
       units of that kind go straight to a town instead of the factory's rally point<br />
-      Commanders (M, or the button at the top): select troops and press N, and they get a commander
-      (Alpha to Hotel, eight at most). Open its row and give it a mission, then click the map (or
-      the minimap) for the place. Attack: it forms up, marches as one body, closes up outside the
-      place where the enemy cannot see it (for 20 seconds at most), assaults with smoke and guns,
-      holds what it took, and breaks off and waits for reinforcements when it is losing. Move (or T
-      with its troops selected): goes to the place and stands there, without stopping to fight on
-      the way, going into houses or falling back. Concentrate (or R with its troops selected):
-      everything it has onto the exact spot you click, each unit at its own best speed, with no
-      forming up and no waiting outside; the last stretch is fought, and they stay massed there
-      until you give the mission again. Hold: stays to the last, infantry in the houses. Defend:
-      holds, goes out to meet an enemy nearby, gives ground to one far too strong and comes back.
-      Patrol: back and forth between where it stood and the place. Screen: a thin line of lookouts
-      that pulls back from anything strong. Replace losses: what it loses is ordered again and sent
-      to it. Production's "Send to" can also send every new unit of a kind to a commander. An order
-      you give a unit yourself takes it out of its commander's hands (select it and press + Add on
-      the board to put it back). The board also counts idle units and can hand them to the nearest
-      commander<br />
+      Commanders: select troops and press N, and they get a commander (Alpha to Hotel, eight at
+      most). The board top right lists them all the time: mission, objective and what it is doing,
+      grid square, strength and number of units (M hides and shows the board). Click its row and
+      give it a mission, then click the map (or the minimap) for the place. Attack: it forms up,
+      marches as one body, closes up outside the place where the enemy cannot see it (for 20 seconds
+      at most), assaults with smoke and guns, holds what it took, and breaks off and waits for
+      reinforcements when it is losing. Move (or T with its troops selected): goes to the place and
+      stands there, without stopping to fight on the way, going into houses or falling back.
+      Concentrate (or R with its troops selected): everything it has onto the exact spot you click,
+      each unit at its own best speed, with no forming up and no waiting outside; the last stretch
+      is fought, and they stay massed there until you give the mission again. Hold: stays to the
+      last, infantry in the houses. Defend: holds, goes out to meet an enemy nearby, gives ground to
+      one far too strong and comes back. Patrol: back and forth between where it stood and the
+      place. Screen: a thin line of lookouts that pulls back from anything strong. Replace losses:
+      what it loses is ordered again and sent to it. Production's "Send to" can also send every new
+      unit of a kind to a commander. An order you give a unit yourself takes it out of its
+      commander's hands (select it and press + Add on the board to put it back). The board also
+      counts idle units and can hand them to the nearest commander<br />
       You command red. Drag: select · Double click: all of that type · Shift: add · Ctrl+A: all<br />
       Right click: move (breaks off a fight) · Right click an enemy: attack it · C then click or
       Alt+right click: attack-move · X: stop · H: hold position · G: hold fire · . (full stop): idle
@@ -942,20 +1445,21 @@ starting…</pre>
       pointer, which blinds both sides<br />
       Y: see through the buildings between you and the street you are looking at (close up only; off
       until you press it, and remembered)<br />
-      Weather (Menu, Weather): in rain everyone sees 85% as far, in snow 80%, in fog 55%, scouts and
-      drones included. No dust in rain or snow<br />
-      Free-for-all (Menu, Armies: 3 or 4): every army for itself on the four corners map. You are
-      red, bottom left; blue, gold and green are computers that fight you and each other. You win
-      when the last enemy headquarters has fallen<br />
-      Armies (Menu, Army and Enemy): the Western alliance has fewer, better and dearer units, the
-      toughest tank, long sight and a precise long gun, but no jammer. Russia has cheap fast-firing
-      tanks, rocket batteries, long-armed air defence and the strongest jammer, but no transport
-      helicopter. China has the cheapest infantry, swarm drones at well under the usual price, fast
-      wheeled carriers that seat three squads and hardy engineers, but no paratroopers<br />
-      Night battles (Menu, Time: night): troops see six tenths as far, scouts and their drone as far
-      as by day. Whatever is lit is seen at daytime range: a unit that has just fired, anyone near a
-      burning vehicle, and everything under a flare. I: the nearest selected gun puts a flare over
-      the pointer for 30 seconds (it lights your own troops too)<br />
+      Weather (New battle screen): in rain everyone sees 85% as far, in snow 80%, in fog 55%, scouts
+      and drones included. No dust in rain or snow<br />
+      Free-for-all (New battle screen, Armies: 3 or 4): every army for itself on the four corners
+      map. You are red, bottom left; blue, gold and green are computers that fight you and each
+      other. You win when the last enemy headquarters has fallen<br />
+      Armies (New battle screen, Your army and Enemy): the Western alliance has fewer, better and
+      dearer units, the toughest tank, long sight and a precise long gun, but no jammer. Russia has
+      cheap fast-firing tanks, rocket batteries, long-armed air defence and the strongest jammer,
+      but no transport helicopter. China has the cheapest infantry, swarm drones at well under the
+      usual price, fast wheeled carriers that seat three squads and hardy engineers, but no
+      paratroopers<br />
+      Night battles (New battle screen, Time: night): troops see six tenths as far, scouts and their
+      drone as far as by day. Whatever is lit is seen at daytime range: a unit that has just fired,
+      anyone near a burning vehicle, and everything under a flare. I: the nearest selected gun puts
+      a flare over the pointer for 30 seconds (it lights your own troops too)<br />
       Field works: select trucks or engineers (Barracks), pick a work at the bottom and drag a line
       on the ground. Walls and gates stop everything (gates open for you), barbed wire stops men,
       tank obstacles stop vehicles, trenches and sandbags are cover: right click them with infantry
