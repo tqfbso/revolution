@@ -1,4 +1,4 @@
-import { civiliansShelled, civiliansShot, updateCivilians } from './civilians';
+import { civiliansBuried, civiliansShelled, civiliansShot, updateCivilians } from './civilians';
 import {
   HUNGRY_RELOAD,
   HUNGRY_SPEED,
@@ -26,6 +26,7 @@ import {
 import { applyEconomyCommand, updateEconomy } from './economy';
 import { applyCommanderCommand } from './commanders';
 import { applyAirCommand, updateAir } from './air';
+import { applyDemolishCommand, updateFelling } from './demolish';
 import { applyUrbanCommand, fortified, spillRubble, updateEntrench } from './urban';
 import {
   HIT_CHARGE,
@@ -333,6 +334,11 @@ const STRIKE_HOLD_SQ = (STRIKE_RING + fx(1)) * (STRIKE_RING + fx(1));
 const jammers = new Int32Array(MAX_UNITS);
 let jammerCount = 0;
 const structDamage = new Int32Array(MAX_STRUCTS);
+/**
+ * The army whose fire or charges hit each structure this tick (the last one, if several
+ * did), or -1: whoever brings a house down on the people in it pays for them.
+ */
+const structBy = new Int8Array(MAX_STRUCTS).fill(-1);
 /** Damage of the tick to the walls of buildings, four faces each. */
 const wallDamage = new Int32Array(MAX_STRUCTS * 4);
 /**
@@ -351,6 +357,11 @@ let plotTaken = false;
 
 /** Set when only field works changed: the cheaper update of the routes will do. */
 let worksChanged = false;
+
+/** The ground itself changed (trees felled): routes must be recomputed. */
+export function markGround(): void {
+  topologyChanged = true;
+}
 
 /** A base building was placed: routes must be recomputed and its plot cleared of units. */
 export function markTopology(): void {
@@ -402,6 +413,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateLogistics(w);
   updateWorks(w);
   updateEntrench(w);
+  updateFelling(w);
   updateEyes(w);
   updateJamming(w);
   updateSpotters(w);
@@ -463,6 +475,7 @@ function applyCommand(w: World, cmd: Command): void {
   }
   if (applyEconomyCommand(w, cmd) || applyWorkCommand(w, cmd)) return;
   if (applyUrbanCommand(w, cmd)) return;
+  if (applyDemolishCommand(w, cmd)) return;
   if (applyAirCommand(w, cmd)) return;
   if (applyCommanderCommand(w, cmd)) return;
   // Any other order takes a truck off its job.
@@ -852,7 +865,15 @@ const THROUGH = [25, 35, 45, 50];
  * and does half of its damage to the structure (a quarter until decision 095, which left
  * a lone tank six minutes on a house). Bridges and base buildings take it whole.
  */
-function shootStructure(w: World, s: number, x: number, y: number, siege: number): void {
+function shootStructure(
+  w: World,
+  s: number,
+  x: number,
+  y: number,
+  siege: number,
+  team: number,
+): void {
+  structBy[s] = team;
   if (w.map.sKind[s] !== S_BUILDING) {
     structDamage[s] += siege;
     return;
@@ -915,6 +936,7 @@ function strayFire(w: World, i: number, t: number, dx: number, dy: number, d2: n
   const drone = KINDS[w.kind[i]].kamikaze;
   const face = 4 * s + faceToward(w.map, s, drone ? tx : w.posX[i], drone ? ty : w.posY[i]);
   wallTouched[s] = 1;
+  structBy[s] = w.team[i];
   if (stray >= BLAST_STRAY) {
     wallDamage[face] += stray;
     structDamage[s] += stray;
@@ -933,11 +955,19 @@ const blastDist = new Int32Array(16);
  * the burst reaches takes its share, half at the rim, like the men in the open. A bridge
  * is only hurt by a shell that lands on it.
  */
-function blastStructures(w: World, x: number, y: number, siege: number, R: number): void {
+function blastStructures(
+  w: World,
+  x: number,
+  y: number,
+  siege: number,
+  R: number,
+  team: number,
+): void {
   const map = w.map;
   const cell = cellOfPos(x, y);
   if (map.type[cell] === T_BRIDGE && w.sHp[map.structAt[cell]] > 0) {
     structDamage[map.structAt[cell]] += siege;
+    structBy[map.structAt[cell]] = team;
   }
   const r = (R >> CELL_SHIFT) + 1;
   const cx = x >> CELL_SHIFT;
@@ -966,6 +996,7 @@ function blastStructures(w: World, x: number, y: number, siege: number, R: numbe
   }
   for (let k = 0; k < n; k++) {
     structDamage[blastStruct[k]] += Math.trunc((siege * (2 * R - blastDist[k])) / (2 * R));
+    structBy[blastStruct[k]] = team;
   }
 }
 
@@ -1122,7 +1153,10 @@ function resolveStorms(w: World): void {
     stormAtk[s] = Math.trunc((stormAtk[s] * 4) / (edge * STORM_ROUNDS));
     stormDef[s] = Math.trunc((stormDef[s] * edge) / (4 * STORM_ROUNDS));
     if (w.tick % (2 * STORM_PERIOD) === 0) w.events.push(EV_STORM, s, w.team[stormBy[s]]);
-    if (map.sKind[s] === S_BUILDING) structDamage[s] += STORM_WRECK;
+    if (map.sKind[s] === S_BUILDING) {
+      structDamage[s] += STORM_WRECK;
+      structBy[s] = w.team[stormBy[s]];
+    }
   }
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
@@ -2207,7 +2241,7 @@ function resolveShells(w: World): void {
     w.shSmoke[k] = w.shSmoke[last];
     w.events.push(EV_IMPACT, packPoint(x, y), 0);
     // Masonry cracks further out than splinters kill (decision 104).
-    blastStructures(w, x, y, kind.siege, (kind.blast * 3) >> 1);
+    blastStructures(w, x, y, kind.siege, (kind.blast * 3) >> 1, w.team[owner]);
     blastWorks(w, x, y, kind.siege, kind.blast);
     civiliansShelled(w, x, y, kind.blast, w.team[owner]);
     const R = kind.blast;
@@ -2326,8 +2360,10 @@ function fire(w: World): void {
         seesStructure(w, i, s)
       ) {
         // A demolition charge is laid against what holds the house up; a gun hits a wall.
-        if (kind.engineer) structDamage[s] += kind.siege;
-        else shootStructure(w, s, w.posX[i], w.posY[i], kind.siege);
+        if (kind.engineer) {
+          structDamage[s] += kind.siege;
+          structBy[s] = w.team[i];
+        } else shootStructure(w, s, w.posX[i], w.posY[i], kind.siege, w.team[i]);
         w.cooldown[i] = reloadOf(w, i, kind);
         w.events.push(EV_SIEGE, i, s);
         continue;
@@ -2395,7 +2431,7 @@ function fire(w: World): void {
       // Sandbagged windows and loopholes take another quarter off.
       dmg = Math.trunc((dmg * THROUGH[step] * (fortified(w, cover) ? 3 : 4)) / 400) || 1;
       if (!kind.engineer && kind.siege > 0) {
-        shootStructure(w, cover, w.posX[i], w.posY[i], kind.siege);
+        shootStructure(w, cover, w.posX[i], w.posY[i], kind.siege, w.team[i]);
       }
     } else if (KIND_CLASS[w.kind[t]] === CLASS_FOOT) {
       // Rubble halves what reaches the men in it; a trench or sandbags stop two thirds.
@@ -2437,7 +2473,7 @@ function resolveDamage(w: World): void {
       }
       // Fuel and ammunition go up: a vehicle killed in a street takes the house fronts with it.
       if (KIND_CLASS[w.kind[i]] === CLASS_VEHICLE) {
-        blastStructures(w, w.posX[i], w.posY[i], WRECK_SIEGE, WRECK_BLAST);
+        blastStructures(w, w.posX[i], w.posY[i], WRECK_SIEGE, WRECK_BLAST, w.team[killer[i]]);
       }
       kill(w, i, killer[i]);
     } else if (state === STATE_WRECK && --w.cooldown[i] <= 0) {
@@ -2534,6 +2570,8 @@ function resolveStructures(w: World): void {
         if (left <= hit) w.events.push(EV_WALL, s, f);
       }
     }
+    const by = structBy[s];
+    structBy[s] = -1;
     if (w.sHp[s] <= 0 || d === 0) continue;
     const before = stageOf(w, s);
     // A fortified building is braced and shored: a quarter of the damage is lost on it.
@@ -2548,6 +2586,12 @@ function resolveStructures(w: World): void {
       }
       if (after === STAGE_GUTTED) w.events.push(EV_GUTTED, s, 0);
     }
+    // And the people who live there and had not got out (decision 118).
+    if (
+      map.sKind[s] === S_BUILDING &&
+      (w.sHp[s] <= 0 || (before < STAGE_GUTTED && after >= STAGE_GUTTED))
+    )
+      civiliansBuried(w, s, by);
     if (w.sHp[s] > 0) continue;
     w.sRepair[s] = 0;
     const bridge = map.sKind[s] === S_BRIDGE;

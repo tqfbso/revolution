@@ -179,6 +179,8 @@ export interface Snapshot {
    * the maximum for a finished one and the work done as 0..100 for a planned one.
    */
   works?: Int32Array;
+  /** Every cell whose trees engineers have felled so far, sent whenever one more came down. */
+  felled?: Int32Array;
   /** Wall-clock cost of the last sim tick, in milliseconds. */
   simMs: number;
   /** Only in a shared game. */

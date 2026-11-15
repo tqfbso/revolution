@@ -105,6 +105,11 @@ export class Fog {
     this.plain = sum / CELLS;
   }
 
+  /** The trees on a cell are down: it no longer blocks the view. */
+  clearForest(cell: number): void {
+    if (this.block[cell] === SEE_FOREST) this.block[cell] = 0;
+  }
+
   /** Smoke stands around world point (x, z), `cells` cells wide each way, until `until`. */
   addSmoke(x: number, z: number, cells: number, until: number): void {
     const N = MAP_CELLS;

@@ -432,6 +432,8 @@ From the proposal in the "Design tactical attack formations" thread.
 
 - Helicopters fight helicopters and hunt when left alone. BUILT (decision 116)
 - Concentrate: a commander's troops on one exact spot, key R. BUILT (decision 117)
+- Demolish for engineers, key O: charges on buildings, felling woods; people still in a
+  house that is brought down die. BUILT (decision 118)
 
 ## M10 Factions
 

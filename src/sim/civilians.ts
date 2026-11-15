@@ -300,3 +300,18 @@ export function civiliansShelled(w: World, x: number, y: number, R: number, team
     else leave(w, k);
   }
 }
+
+/**
+ * House `s` has had its floors brought down, or has fallen altogether, with people still
+ * in it: nobody had fired near enough to warn them (charges laid by engineers, a tank
+ * taking the house apart from up the street). Half of them die under it and the rest run.
+ * `team` is the army that did it; with nobody to blame (-1) they get out.
+ */
+export function civiliansBuried(w: World, s: number, team: number): void {
+  if (w.civCount === 0) return;
+  for (let k = 0; k < w.civCount; k++) {
+    if (w.civState[k] !== CIV_HOME || w.civHome[k] !== s) continue;
+    if (team >= 0 && nextInt(w.rng, 2) === 0) die(w, k, team);
+    else leave(w, k);
+  }
+}

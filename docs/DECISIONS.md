@@ -2320,3 +2320,41 @@ commanders in it: unchanged.
 
 Not done: a concentration does not split a commander (all of it goes); the computer does
 not use it.
+
+## 118. Demolish: engineers fell woods, and a house brought down kills who is in it (2026-11-15)
+
+Fabio: "could we add the idea for engineers to destroy scenarios? like trees, buildings,
+etc? Collateral damage to civilians would be big when destroying buildings, but that's a
+great gameplay feature."
+
+Engineers could already lay charges against a building or a bridge (Ctrl+right click) and
+breach field works; nothing said so, trees could not be touched, and the people in a house
+taken apart without a shot fired near it walked out unharmed. Three changes:
+
+- **One order, one button.** Demolish (O with engineers selected, or the card button),
+  then a right click on the target. A building or a bridge: charges, as before (a squad
+  does 90 every 2.5 seconds; two squads bring an average city house down in about ten).
+  A wood: felling. A wall, wire, an obstacle, street rubble: charges and cutters; one of
+  your own works is simply taken down.
+- **Felling** (`sim/demolish.ts`, `CMD_FELL` 38, `JOB_FELL`). Every forest cell within
+  two cells of the one clicked becomes open ground, two seconds of work a cell for one
+  squad: a patch about 20 m across in 40 seconds, half that with two squads. Open ground
+  is open ground: vehicles cross it, nothing hides in it, the view goes through. A lane
+  through a wood for the tanks, a field of fire in front of a position, an ambush taken
+  away. Trees do not grow back. The cells are world state (`felled`, in the hash once
+  there are any) and reach the client in the snapshot, so a player who rejoins sees the
+  same map.
+- **The people inside** (`civiliansBuried`). When the floors of a house come down
+  (gutted) or it falls, half of those still at home die and the rest run, and the army
+  that did it pays for each as for any other civilian. Civilians leave a house when there
+  is shooting near it, so in an ordinary street fight most are gone by then; charges give
+  no warning, and neither does a tank taking a house apart from up the street on a Ctrl
+  click. To know whose it was, every hit on a structure now carries its army (`structBy`).
+  A house that falls with nobody to blame kills nobody.
+
+Golden hash unchanged. Tests: `tests/demolish.test.ts`. Checked in a headless browser on
+the ridge map: before and after in `/mnt/project-files/nov15-fixes/fell-*.png`.
+
+Not done: shells and tank guns do not knock trees down; the computer's engineers do not
+fell or demolish on their own; street trees, fences and lamps on the city maps are
+drawing only and stay.

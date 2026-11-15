@@ -2,11 +2,14 @@ import { ME } from './me';
 import * as THREE from 'three/webgpu';
 import {
   CMD_ASSIST,
+  CMD_ATTACK_STRUCTURE,
+  CMD_BREACH,
   CMD_BUILD,
   CMD_CANCEL,
   CMD_REPEAT,
   CMD_DEMOLISH,
   CMD_ENTRENCH,
+  CMD_FELL,
   CMD_FORTIFY,
   CMD_GATHER,
   CMD_HOLD,
@@ -31,7 +34,8 @@ import {
   type Price,
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
-import { MAP_CELLS, S_BUILDING, canPlace, type GameMap } from '../sim/map';
+import { FELL_CELLS } from '../sim/demolish';
+import { MAP_CELLS, S_BUILDING, T_FOREST, canPlace, type GameMap } from '../sim/map';
 import {
   CAMERA_COST,
   KINDS,
@@ -321,6 +325,7 @@ export class CommandCard {
     else if (act === 'fire') this.toggleFire();
     else if (act === 'camera') this.placeCamera();
     else if (act === 'entrench') this.armEntrench();
+    else if (act === 'demolish') this.armDemolish();
     else if (act === 'amove') this.arm(this.armed === 'attack' ? '' : 'attack');
     else if (act === 'smoke') this.arm(this.armed === 'smoke' ? '' : 'smoke');
     else if (act === 'flare') this.arm(this.armed === 'flare' ? '' : 'flare');
@@ -348,7 +353,65 @@ export class CommandCard {
 
   armEntrench(): void {
     this.entrench = !this.entrench && this.builders().length > 0;
+    this.demolish = false;
     this.html = '';
+  }
+
+  /**
+   * "Demolish" is in hand: the next right click sends the selected engineers to bring
+   * down what is under the pointer. A building or a bridge: charges. A wood: they fell a
+   * patch of it. A field work: the enemy's is breached, your own is taken down.
+   */
+  demolish = false;
+
+  armDemolish(): void {
+    this.demolish = !this.demolish && this.sappers().length > 0;
+    this.entrench = false;
+    this.html = '';
+  }
+
+  /** Your selected engineer squads. */
+  private sappers(): number[] {
+    const u = this.units;
+    return u.selectedIds().filter((id) => u.isMine(id) && KINDS[u.kindOf(id)].engineer);
+  }
+
+  /** Is there a wood within an order's reach of the cell under (x, z)? */
+  private woodAt(x: number, z: number): boolean {
+    const cx = Math.floor(x / CELL);
+    const cy = Math.floor(z / CELL);
+    for (let j = cy - FELL_CELLS; j <= cy + FELL_CELLS; j++) {
+      for (let i = cx - FELL_CELLS; i <= cx + FELL_CELLS; i++) {
+        if (i < 0 || j < 0 || i >= MAP_CELLS || j >= MAP_CELLS) continue;
+        if ((i - cx) ** 2 + (j - cy) ** 2 > FELL_CELLS * FELL_CELLS + 1) continue;
+        if (this.map.type[j * MAP_CELLS + i] === T_FOREST) return true;
+      }
+    }
+    return false;
+  }
+
+  /** The demolition order on what is under the pointer. False if there is nothing to bring down. */
+  private bringDown(x: number, z: number, structure: number): boolean {
+    const units = this.sappers();
+    if (units.length === 0) return false;
+    if (structure >= 0) {
+      this.send({ type: CMD_ATTACK_STRUCTURE, units, structure });
+      return true;
+    }
+    const work = this.works.workAt(x, z);
+    if (work && work.team === ME) {
+      this.send({ type: CMD_DEMOLISH, team: ME, cells: [work.cell] });
+      return true;
+    }
+    if (work && work.done) {
+      this.send({ type: CMD_BREACH, units, x: fx(x), y: fx(z) });
+      return true;
+    }
+    if (this.woodAt(x, z)) {
+      this.send({ type: CMD_FELL, units, x: fx(x), y: fx(z) });
+      return true;
+    }
+    return false;
   }
 
   /** Each selected engineer squad of yours leaves a surveillance camera where it stands. */
@@ -515,6 +578,13 @@ export class CommandCard {
       const rx = site >= 0 ? this.map.siteX[site] : fx(x);
       const ry = site >= 0 ? this.map.siteY[site] : fx(z);
       this.send({ type: CMD_RALLY, structure: this.building, x: rx, y: ry });
+      return true;
+    }
+    if (this.demolish) {
+      // Stays in hand after a click on nothing, so the next one can be better aimed.
+      if (!this.bringDown(x, z, structure)) return true;
+      this.demolish = false;
+      this.html = '';
       return true;
     }
     // Builders on a planned work of yours: go and build it.
@@ -781,6 +851,18 @@ export class CommandCard {
           'B',
         );
       } else this.entrench = false;
+      if (has((k) => KINDS[k].engineer)) {
+        special += this.button(
+          'demolish',
+          0,
+          'Demolish',
+          null,
+          this.demolish ? 'right click a target' : 'then right click',
+          this.demolish,
+          'Right click what the engineers should bring down. A building or a bridge: they walk up and lay charges (a house takes two squads about ten seconds). A wood: they fell a patch about 20 m across, which opens a lane for vehicles and a field of fire. A wall, wire, obstacle or street rubble: charges and cutters. People still inside a house that comes down are killed, and your army pays for them: charges give no warning.',
+          'O',
+        );
+      } else this.demolish = false;
       if (has((k) => KINDS[k].indirect)) {
         special += this.button(
           'smoke',

@@ -291,6 +291,18 @@ export interface EntrenchCommand {
 }
 
 /**
+ * Engineers fell the trees round the cell under (x, y): every forest cell within FELL_CELLS
+ * of it becomes open ground (see src/sim/demolish.ts).
+ */
+export const CMD_FELL = 38;
+export interface FellCommand {
+  type: typeof CMD_FELL;
+  units: number[];
+  x: number;
+  y: number;
+}
+
+/**
  * Drop the paratroops `team` has in reserve at a point: a transport plane comes in over
  * the army's own edge of the map with up to PARA_PLANE_LOAD squads (see src/sim/air.ts).
  */
@@ -397,6 +409,7 @@ export interface ReinforceCommand {
  * he plays alone. Orders a staff or the computer gives carry none.
  */
 export type Command = (
+  | FellCommand
   | EntrenchCommand
   | ParadropCommand
   | AssignCommand

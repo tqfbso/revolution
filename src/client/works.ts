@@ -2,7 +2,7 @@ import { ME } from './me';
 import type { Clutter } from './clutter';
 import * as THREE from 'three/webgpu';
 import { attribute, float, mix } from 'three/tsl';
-import { MAP_CELLS, NO_OWNER, T_FORD, T_OPEN, isWork, type GameMap } from '../sim/map';
+import { MAP_CELLS, NO_OWNER, T_FORD, T_FOREST, T_OPEN, isWork, type GameMap } from '../sim/map';
 import {
   WORKS,
   WORK_COUNT,
@@ -304,6 +304,9 @@ export class WorksView {
     return out;
   }
 
+  /** How many of the snapshot's felled cells have been taken off the map here. */
+  private felledSeen = 0;
+
   applySnapshot(s: Snapshot): void {
     for (let e = 0; e < s.events.length; e += 3) {
       if (s.events[e] !== EV_WORK_LOST) continue;
@@ -311,6 +314,21 @@ export class WorksView {
       const x = ((c % MAP_CELLS) + 0.5) * CELL;
       const z = (Math.floor(c / MAP_CELLS) + 0.5) * CELL;
       if (this.fog.sees(x, z)) this.effects.squadHit(x, this.terrain.heightAt(x, z) + 0.6, z);
+    }
+    if (s.felled && s.felled.length > this.felledSeen) {
+      // Trees engineers have cut: open ground from now on, for the eye and for the map.
+      for (let k = this.felledSeen; k < s.felled.length; k++) {
+        const c = s.felled[k];
+        if (this.map.type[c] === T_FOREST) this.map.type[c] = T_OPEN;
+        this.map.baseType[c] = T_OPEN;
+        this.fog.clearForest(c);
+        this.terrain.fell(c);
+        const x = ((c % MAP_CELLS) + 0.5) * CELL;
+        const z = (Math.floor(c / MAP_CELLS) + 0.5) * CELL;
+        if (this.fog.sees(x, z)) this.effects.squadHit(x, this.terrain.heightAt(x, z) + 0.6, z);
+      }
+      this.felledSeen = s.felled.length;
+      this.version++;
     }
     const works = s.works;
     if (!works) return;
