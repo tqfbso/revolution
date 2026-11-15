@@ -5,7 +5,7 @@ import { createStaff, staffThink, type Staff } from '../sim/staff';
 import { CMD_FACTION, CMD_NIGHT, CMD_WEATHER, type Command } from '../sim/commands';
 import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
 import { fromFx } from '../sim/fixed';
-import { S_BUILDING, generateMap } from '../sim/map';
+import { CELL_SHIFT, S_BUILDING, generateMap } from '../sim/map';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, unitPrice } from '../sim/economy';
 import { kindOf } from '../sim/factions';
 import {
@@ -25,6 +25,8 @@ import {
   NO_TARGET,
   NO_TEAM,
   QUEUE_MAX,
+  BUILD_QUEUE,
+  JOB_BUILD,
   STATE_ALIVE,
   TICK_MS,
   TICK_RATE,
@@ -254,6 +256,20 @@ function postSnapshot(w: World, simMs: number): void {
     for (let k = 0; k < r.pts.length; k += 3)
       routes.push(fromFx(r.pts[k + 1]), fromFx(r.pts[k + 2]));
   }
+  // Trucks with a list of buildings to put up: the one in hand, then the list.
+  const { map } = w;
+  const plot = (s: number) =>
+    routes.push(
+      fromFx(((2 * map.sX[s] + map.sW[s]) << CELL_SHIFT) >> 1),
+      fromFx(((2 * map.sY[s] + map.sH[s]) << CELL_SHIFT) >> 1),
+    );
+  for (let i = 0; i < n; i++) {
+    const len = w.buildLen[i];
+    if (len === 0 || w.state[i] !== STATE_ALIVE || w.job[i] !== JOB_BUILD) continue;
+    routes.push(1, 1 + len, i);
+    plot(w.jobStruct[i]);
+    for (let q = 0; q < len; q++) plot(w.buildNext[i * BUILD_QUEUE + q]);
+  }
   const positions = new Float32Array(n * 2);
   const info = new Uint8Array(n);
   const hp = new Uint8Array(n);
@@ -289,7 +305,6 @@ function postSnapshot(w: World, simMs: number): void {
     }
     if (w.state[i] === STATE_ALIVE) alive[w.team[i]]++;
   }
-  const map = w.map;
   const structHp = new Uint8Array(map.structCount);
   const structStage = new Uint8Array(map.structCount);
   for (let s = 0; s < map.structCount; s++) {

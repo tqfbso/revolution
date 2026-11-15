@@ -158,6 +158,12 @@ export interface BuildCommand {
   building: number;
   x: number;
   y: number;
+  /**
+   * One more for the list: trucks that are at work on a building finish it first, then
+   * come on to this one (and to any queued after it), in the order given. The plot is
+   * taken and paid for at once all the same. Trucks with nothing to build start on it.
+   */
+  queue?: boolean;
 }
 
 /** Trucks work on a base building of their own army: finish it, or repair it. */
@@ -165,6 +171,8 @@ export interface AssistCommand {
   type: typeof CMD_ASSIST;
   units: number[];
   structure: number;
+  /** After what they are building now, as for a build. */
+  queue?: boolean;
 }
 
 /** Put a unit on a building's production queue. Paid for at once. */

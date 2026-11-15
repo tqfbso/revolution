@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CMD_ASSIST,
   CMD_BUILD,
   CMD_CANCEL,
   CMD_FOUND,
@@ -179,6 +180,51 @@ describe('construction', () => {
     step(w, [{ type: CMD_BUILD, units: trucks, building: B_DEPOT, x: 80, y: 80 }]);
     expect(w.map.structCount).toBe(count);
     expect(w.supplies[0]).toBe(100);
+  });
+
+  it('builds a list one after the other: the trucks finish one, then go on to the next', () => {
+    const w = base(2);
+    const trucks = unitsOf(w, KIND_TRUCK);
+    w.supplies[0] = 5000;
+    w.credits[0] = 5000;
+    const first = w.map.structCount;
+    step(w, [{ type: CMD_BUILD, units: trucks, building: B_DEPOT, x: 70, y: 56, queue: true }]);
+    step(w, [{ type: CMD_BUILD, units: trucks, building: B_DEPOT, x: 80, y: 56, queue: true }]);
+    step(w, [{ type: CMD_BUILD, units: trucks, building: B_DEPOT, x: 90, y: 56, queue: true }]);
+    // All three plots are taken and paid for at once; the trucks are at work on the first.
+    expect(w.map.structCount).toBe(first + 3);
+    expect(trucks.every((i) => w.jobStruct[i] === first && w.buildLen[i] === 2)).toBe(true);
+    const ticks = BUILDINGS[B_DEPOT].ticks;
+    const done = (s: number) => w.sBuild[s] >= ticks;
+    const order: number[] = [];
+    for (let t = 0; t < 12000 && order.length < 3; t++) {
+      step(w, []);
+      for (let s = first; s < first + 3; s++) if (done(s) && !order.includes(s)) order.push(s);
+      // Nothing is begun before the one ahead of it is finished.
+      if (!done(first)) expect(w.sBuild[first + 1]).toBe(0);
+      if (!done(first + 1)) expect(w.sBuild[first + 2]).toBe(0);
+    }
+    expect(order).toEqual([first, first + 1, first + 2]);
+    for (let t = 0; t < 40; t++) step(w, []);
+    expect(trucks.every((i) => w.job[i] === 0 && w.buildLen[i] === 0)).toBe(true);
+  });
+
+  it('a build that is not queued, or any other order, drops the list', () => {
+    const w = base(2);
+    const trucks = unitsOf(w, KIND_TRUCK);
+    w.supplies[0] = 5000;
+    w.credits[0] = 5000;
+    const first = w.map.structCount;
+    step(w, [{ type: CMD_BUILD, units: trucks, building: B_DEPOT, x: 70, y: 56, queue: true }]);
+    step(w, [{ type: CMD_BUILD, units: trucks, building: B_DEPOT, x: 80, y: 56, queue: true }]);
+    step(w, [{ type: CMD_BUILD, units: trucks, building: B_DEPOT, x: 90, y: 56 }]);
+    expect(trucks.every((i) => w.jobStruct[i] === first + 2 && w.buildLen[i] === 0)).toBe(true);
+    // Back onto the first, with the second behind it; then sent away.
+    step(w, [{ type: CMD_ASSIST, units: trucks, structure: first, queue: true }]);
+    step(w, [{ type: CMD_ASSIST, units: trucks, structure: first + 1, queue: true }]);
+    expect(trucks.every((i) => w.jobStruct[i] === first + 2 && w.buildLen[i] === 2)).toBe(true);
+    step(w, [{ type: CMD_MOVE, units: trucks, x: cell(40), y: cell(40) }]);
+    expect(trucks.every((i) => w.job[i] === 0 && w.buildLen[i] === 0)).toBe(true);
   });
 
   it('never leaves a unit inside the walls', () => {

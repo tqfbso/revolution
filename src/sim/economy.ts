@@ -69,6 +69,7 @@ import {
   EV_TRAINED,
   FLAG_AMOVE,
   FLAG_MOVING,
+  BUILD_QUEUE,
   JOB_BUILD,
   JOB_GATHER,
   JOB_LOAD,
@@ -362,6 +363,50 @@ function startGather(w: World, i: number, site: number): void {
   sendTo(w, i, w.map.siteX[site], w.map.siteY[site]);
 }
 
+/** A building of its army that still wants work: unfinished, or damaged. */
+function wantsWork(w: World, s: number): boolean {
+  if (s < 0 || w.sHp[s] <= 0 || w.sTeam[s] === NO_TEAM) return false;
+  const b = BUILDINGS[w.sType[s]];
+  return w.sBuild[s] < b.ticks || w.sHp[s] < b.hp;
+}
+
+/**
+ * Truck `i` is told to work on building `s`. Queued, and at work on another that still
+ * wants it: `s` goes on the truck's list (dropped when the list is full, and not twice).
+ * Otherwise it starts on `s` now; a list is kept only by a queued order.
+ */
+function build(w: World, i: number, s: number, queue: boolean): void {
+  const at = i * BUILD_QUEUE;
+  if (!queue) w.buildLen[i] = 0;
+  else if (w.job[i] === JOB_BUILD && w.jobStruct[i] !== s && wantsWork(w, w.jobStruct[i])) {
+    const n = w.buildLen[i];
+    for (let q = 0; q < n; q++) if (w.buildNext[at + q] === s) return;
+    if (n < BUILD_QUEUE) w.buildNext[at + w.buildLen[i]++] = s;
+    return;
+  }
+  startBuild(w, i, s);
+}
+
+/** The next building on truck `i`'s list that still wants work: it goes there. False if none. */
+function nextBuild(w: World, i: number): boolean {
+  const at = i * BUILD_QUEUE;
+  while (w.buildLen[i] > 0) {
+    const s = w.buildNext[at];
+    const n = --w.buildLen[i];
+    for (let q = 0; q < n; q++) w.buildNext[at + q] = w.buildNext[at + q + 1];
+    if (s < w.map.structCount && w.sTeam[s] === w.team[i] && wantsWork(w, s)) {
+      startBuild(w, i, s);
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Any order that is not one more for the list empties it (see applyCommand in sim.ts). */
+export function dropBuilds(w: World, ids: readonly number[]): void {
+  for (const id of ids) if (id >= 0 && id < w.count) w.buildLen[id] = 0;
+}
+
 function startBuild(w: World, i: number, s: number): void {
   const map = w.map;
   w.job[i] = JOB_BUILD;
@@ -393,13 +438,15 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       const s = place(w, team, type, cmd.x | 0, cmd.y | 0, false);
       if (s < 0) return true;
       pay(w, team, b, 1);
-      for (const id of crew) if (w.team[id] === team) startBuild(w, id, s);
+      for (const id of crew) if (w.team[id] === team) build(w, id, s, cmd.queue === true);
       return true;
     }
     case CMD_ASSIST: {
       const s = cmd.structure;
       if (!ownBase(w, s, false)) return true;
-      for (const id of trucks(w, cmd.units)) if (w.team[id] === w.sTeam[s]) startBuild(w, id, s);
+      for (const id of trucks(w, cmd.units)) {
+        if (w.team[id] === w.sTeam[s]) build(w, id, s, cmd.queue === true);
+      }
       return true;
     }
     case CMD_TRAIN: {
@@ -617,8 +664,11 @@ function updateTrucks(w: World): void {
       const s = w.jobStruct[i];
       const b = BUILDINGS[w.sType[s]];
       if (w.sHp[s] <= 0 || (w.sBuild[s] >= b.ticks && w.sHp[s] >= b.hp)) {
-        w.job[i] = JOB_NONE;
-        halt(w, i);
+        // Done here (or it is gone): on to the next on its list, if it has one.
+        if (!nextBuild(w, i)) {
+          w.job[i] = JOB_NONE;
+          halt(w, i);
+        }
         continue;
       }
       if (structDist2(w, s, x, y) > DROP_REACH * DROP_REACH) {

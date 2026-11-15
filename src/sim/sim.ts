@@ -9,7 +9,9 @@ import {
 } from './logistics';
 import {
   CMD_ATTACK,
+  CMD_ASSIST,
   CMD_ATTACK_MOVE,
+  CMD_BUILD,
   CMD_BOMBARD,
   CMD_ATTACK_STRUCTURE,
   CMD_GARRISON,
@@ -26,7 +28,7 @@ import {
   type Command,
   type SpawnCommand,
 } from './commands';
-import { applyEconomyCommand, updateEconomy } from './economy';
+import { applyEconomyCommand, dropBuilds, updateEconomy } from './economy';
 import { applyCommanderCommand } from './commanders';
 import { applyAirCommand, updateAir } from './air';
 import { applyDemolishCommand, updateFelling } from './demolish';
@@ -470,6 +472,14 @@ export function step(w: World, commands: readonly Command[]): void {
 }
 
 function applyCommand(w: World, cmd: Command): void {
+  // Any order to a truck that is not one more building for its list empties the list.
+  if (
+    'units' in cmd &&
+    cmd.type !== CMD_CAMERA &&
+    !((cmd.type === CMD_BUILD || cmd.type === CMD_ASSIST) && cmd.queue === true)
+  ) {
+    dropBuilds(w, cmd.units);
+  }
   // Any order that is not itself a way point takes its units off the route they were on.
   if (
     w.routes.length > 0 &&
@@ -1501,6 +1511,7 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.group[id] = 0;
   w.flags[id] = 0;
   w.routeOf[id] = 0;
+  w.buildLen[id] = 0;
   w.job[id] = JOB_NONE;
   w.jobSite[id] = 0;
   w.jobStruct[id] = -1;

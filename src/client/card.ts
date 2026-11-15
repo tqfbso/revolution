@@ -474,6 +474,8 @@ export class CommandCard {
       building: this.placing,
       x: this.plotX,
       y: this.plotY,
+      // With Shift it is one more for the list: built after those placed before it.
+      ...(keep ? { queue: true } : {}),
     });
     if (!keep) this.placing = -1;
     this.plotOk = false;
@@ -597,7 +599,7 @@ export class CommandCard {
    * A right click with this card's context. Returns true if it used the click: a rally
    * point for the selected building, or trucks sent to a site or to work on a building.
    */
-  order(x: number, z: number, structure: number): boolean {
+  order(x: number, z: number, structure: number, queue = false): boolean {
     if (this.building >= 0 && this.units.selectedCount === 0) {
       const site = this.structures.siteAt(x, z);
       const rx = site >= 0 ? this.map.siteX[site] : fx(x);
@@ -633,7 +635,7 @@ export class CommandCard {
     const crew = this.trucks();
     if (crew.length === 0) return false;
     if (structure >= 0 && this.structures.baseTeam[structure] === this.units.teamOf(crew[0])) {
-      this.send({ type: CMD_ASSIST, units: crew, structure });
+      this.send({ type: CMD_ASSIST, units: crew, structure, ...(queue ? { queue: true } : {}) });
       return true;
     }
     const site = this.structures.siteAt(x, z);
@@ -796,7 +798,7 @@ export class CommandCard {
         html += '</div>';
         html +=
           this.placing >= 0
-            ? `<div class="hint">Click to place the ${BUILDINGS[this.placing].name.toLowerCase()} (Shift: place several) · right click or Esc: cancel</div>`
+            ? `<div class="hint">Click to place the ${BUILDINGS[this.placing].name.toLowerCase()} (Shift: place several, built one after the other) · right click or Esc: cancel</div>`
             : `<div class="hint">Right click a stockpile or a well: haul from it · right click one of your buildings: build or repair it<br />Supply: a depot feeds troops within 150 m, a held town a little past its edge, and a truck the 50 m around it while it is within 260 m of a depot or town of yours. The lighter ground on the minimap is your supply.</div>`;
       }
       if (mine && this.builders().length > 0) {

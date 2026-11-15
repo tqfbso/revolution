@@ -423,7 +423,7 @@ export class Input {
   ): void {
     const { ground, structure } = this.structureAt(clientX, clientY);
     // The card first: a rally point for a building, or trucks sent to haul or to build.
-    if (ground && !shell && this.card.order(ground.x, ground.z, structure)) {
+    if (ground && !shell && this.card.order(ground.x, ground.z, structure, queue)) {
       this.mark(ground.x, ground.y + 0.15, ground.z);
       return;
     }

@@ -2728,3 +2728,27 @@ see. Nothing is drawn for troops that are not selected.
 **Hash.** Routes are mixed into the hash only while there are any, so the golden hash
 holds. Not done: way points on the minimap, queued orders other than moves (attack this,
 then that; garrison), and the computer does not use them.
+
+## 131. Trucks build a list of buildings one after the other (2026-11-15)
+
+Fabio: several buildings in one command; the trucks follow on and build them in sequence.
+
+**What was there.** Shift kept the building in hand so that several could be placed, but
+every placement sent the whole crew to the newest plot at once: the first ones were left
+as foundations nobody was working on.
+
+**Now.** A placement with Shift is `queue: true` on the build order. The plot is taken and
+paid for at once, as before (the player sees what is spent and where it will stand), but
+trucks that are at work on a building finish it and then go on to the next on their list,
+in the order placed (`buildNext`, `buildLen` per truck, `BUILD_QUEUE` 8). Trucks with
+nothing in hand start at once. The same for Shift + right click on a building of one's
+own that wants work (unfinished or damaged). A building on the list that is already done,
+or gone, when its turn comes is skipped. A placement without Shift, or any other order,
+drops the list.
+
+**On screen.** The selected trucks' list is drawn like a route (decision 130): a line
+from the truck to the building in hand and on to each one waiting.
+
+Not done: paying for a building only when work on it starts, which would let a player
+plan more than can be afforded now. The computer does not use lists. Golden hash unchanged
+(a list is hashed only while a truck has one).

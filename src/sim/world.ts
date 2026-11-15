@@ -414,6 +414,12 @@ export interface World {
   cargo: Int16Array;
   cargoKind: Uint8Array;
   jobTimer: Int16Array;
+  /**
+   * Trucks: the buildings to work on after the one in hand, BUILD_QUEUE slots a truck,
+   * and how many of them are filled.
+   */
+  buildNext: Int16Array;
+  buildLen: Uint8Array;
   /** STANCE_*. Unlike an order, a stance stays until it is changed. */
   stance: Uint8Array;
   /** Builders: the cell of the field work a JOB_WORK refers to. */
@@ -593,6 +599,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     cargo: new Int16Array(MAX_UNITS),
     cargoKind: new Uint8Array(MAX_UNITS),
     jobTimer: new Int16Array(MAX_UNITS),
+    buildNext: new Int16Array(MAX_UNITS * BUILD_QUEUE),
+    buildLen: new Uint8Array(MAX_UNITS),
     stance: new Uint8Array(MAX_UNITS),
     jobCell: new Int32Array(MAX_UNITS),
     workCount: 0,
@@ -636,6 +644,9 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
   placeCivilians(world, seed);
   return world;
 }
+
+/** Buildings a truck can have waiting behind the one it is at work on. */
+export const BUILD_QUEUE = 8;
 
 /** The most way points one route holds; more are refused. */
 export const ROUTE_MAX = 16;
@@ -822,6 +833,8 @@ export function hashWorld(w: World): number {
     mix(w.goal[i]);
     mix(w.job[i] | (w.stance[i] << 4) | (w.cargoKind[i] << 8) | (w.cargo[i] << 16));
     mix((w.jobSite[i] & 0xff) | ((w.jobStruct[i] & 0xfff) << 8) | (w.jobTimer[i] << 20));
+    // (Only while a truck has a list, so that hashes taken before there were lists hold.)
+    for (let q = 0; q < w.buildLen[i]; q++) mix(w.buildNext[i * BUILD_QUEUE + q] ^ (q << 16));
   }
   // Routes are part of the hash only while there are any, so that every hash taken before
   // they existed still holds.
