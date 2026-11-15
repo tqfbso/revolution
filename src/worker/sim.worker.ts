@@ -99,6 +99,8 @@ let paused = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 /** The state of the field works (World.worksRev) the client was last told about. */
 let worksSent = -1;
+/** How many felled cells (World.felledCount) the client was last told about. */
+let felledSent = 0;
 
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
@@ -411,6 +413,10 @@ function postSnapshot(w: World, simMs: number): void {
       works[2 * k + 1] = w.wKind[c] | (w.wTeam[c] << 4) | (done ? 128 : 0) | (value << 8);
     }
     snapshot.works = works;
+  }
+  if (w.felledCount !== felledSent) {
+    felledSent = w.felledCount;
+    snapshot.felled = w.felled.slice(0, w.felledCount);
   }
   if (w.tick % TICK_RATE === 0) snapshot.hash = hashWorld(w);
   if (mode !== 'solo') {

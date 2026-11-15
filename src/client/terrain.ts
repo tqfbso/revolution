@@ -552,6 +552,19 @@ export class Terrain {
     this.wearTexture.needsUpdate = true;
   }
 
+  /** Where the trees of each forest cell are: the mesh and the first of its instances. */
+  private readonly treeAt = new Map<number, { mesh: THREE.InstancedMesh; at: number }>();
+
+  /** Engineers felled the trees on `cell`: they are gone from the picture. */
+  fell(cell: number): void {
+    const rec = this.treeAt.get(cell);
+    if (!rec) return;
+    this.treeAt.delete(cell);
+    const none = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let k = 0; k < TREES_PER_CELL; k++) rec.mesh.setMatrixAt(rec.at + k, none);
+    rec.mesh.instanceMatrix.needsUpdate = true;
+  }
+
   private buildTrees(shadows: boolean): void {
     const kinds = [conifer(), broadleaf()];
     // Trees are many and small on screen: the cheap lighting model is enough for them.
@@ -585,6 +598,7 @@ export class Terrain {
           );
           let n = 0;
           for (const cell of cells[kind]) {
+            this.treeAt.set(cell, { mesh, at: n });
             const i = cell % GRID;
             const j = (cell - i) / GRID;
             for (let k = 0; k < TREES_PER_CELL; k++) {

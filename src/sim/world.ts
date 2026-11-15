@@ -114,6 +114,8 @@ export const JOB_BUILD = 4;
 export const JOB_WORK = 5;
 /** Mending or fortifying the building `jobStruct`. */
 export const JOB_ENTRENCH = 6;
+/** Engineers felling the trees round the cell `jobCell` (see src/sim/demolish.ts). */
+export const JOB_FELL = 7;
 /** Field works (planned and standing) on the map at once. */
 export const MAX_WORKS = 4096;
 /** Stances: fire at will (the default), or hold fire until told otherwise. */
@@ -189,6 +191,8 @@ export const EV_PLANE = 28;
 export const EV_PARADROP = 29;
 /** A flare has burst over a point: (packed point, ticks it burns). */
 export const EV_FLARE = 30;
+/** a = cell, b = team: engineers felled the trees on a cell (decision 118). */
+export const EV_FELL = 31;
 /** Flares burning at once. */
 export const MAX_FLARES = 16;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
@@ -419,6 +423,9 @@ export interface World {
   wIndex: Int32Array;
   /** Counts changes to the field works, for whoever draws them. Not part of the state. */
   worksRev: number;
+  /** Cells whose trees engineers have felled, in the order they came down. */
+  felled: Int32Array;
+  felledCount: number;
   /**
    * Civilians (see src/sim/civilians.ts): where each is, what it is doing, the house it
    * lives in; how many each army has killed and how many got away; per square of the map
@@ -580,6 +587,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     wBuild: new Int16Array(CELL_COUNT),
     wIndex: new Int32Array(CELL_COUNT),
     worksRev: 0,
+    felled: new Int32Array(CELL_COUNT),
+    felledCount: 0,
     civCount: 0,
     civX: new Int32Array(MAX_CIVILIANS),
     civY: new Int32Array(MAX_CIVILIANS),
@@ -703,6 +712,8 @@ export function hashWorld(w: World): number {
     mix(c | (w.wKind[c] << 16) | (w.wTeam[c] << 24));
     mix((w.wHp[c] & 0xffff) | (w.wBuild[c] << 16));
   }
+  // Only once something was felled, so that worlds without it hash as they always did.
+  if (w.felledCount > 0) mix(w.felledCount ^ (w.felled[w.felledCount - 1] << 12));
   mix(w.civCount ^ (w.civEscaped << 12));
   mix(w.civFieldAt);
   for (let t = 0; t < MAX_TEAMS; t++) mix(w.civKilled[t]);
