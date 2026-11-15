@@ -94,7 +94,7 @@ const HINT = [
   'Jammer. Enemy drones in its ring crash; enemy cameras in it are blinded and revealed. Works by itself.',
   'Logistics truck. Hauls supplies and fuel, builds and repairs base buildings and field works.',
   "Engineer squad. Builds field works, blows up the enemy's, and leaves surveillance cameras (V).",
-  'Attack helicopter. Rockets from above the roofs: hunts vehicles and squads in the open. No armour: air defence takes it apart, massed rifles wear it down. Each helipad holds three helicopters.',
+  'Attack helicopter. Rockets from above the roofs: hunts vehicles and squads in the open, and shoots down other helicopters. Left alone it flies at enemies your army has found nearby and comes back; Hold (H) keeps it where it is. No armour: air defence takes it apart, massed rifles wear it down. Each helipad holds three helicopters.',
   'Transport helicopter. Lifts four squads over rivers, walls and front lines (L to board, U to set down). Unarmed. Each helipad holds three helicopters.',
   'Paratroopers. Trained into a reserve that waits off the map. Press J and click the map: a transport plane drops up to eight squads there. Air defence can shoot the plane down with everyone aboard.',
   'Transport plane.',

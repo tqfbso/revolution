@@ -374,13 +374,15 @@ const BASE_KINDS: readonly UnitKind[] = [
     // Hovers out of rifle range of most things and works over what it finds: a tank in six
     // salvos, a squad in four. No armour at all, so a pair of air-defence vehicles or a
     // street full of rifles sends it home in pieces. It never needs supplying, only a pad.
+    // It is also the only thing in the air that fights in the air: another helicopter is
+    // down in five salvos, and it goes for one before anything on the ground (decision 116).
     name: 'Attack helicopter',
     cls: CLASS_AIR,
     hp: 150,
     speed: fx(0.62),
     range: fx(28),
     reload: 40,
-    damage: [80, 40, 40, 70, 70, 40, 0, 0, 70, 70, 70, 40, 0, 0, 40, 0],
+    damage: [80, 40, 40, 70, 70, 40, 0, 0, 70, 70, 70, 40, 35, 35, 40, 0],
     siege: 20,
     stray: 20,
     garrison: false,
@@ -528,6 +530,15 @@ export const CAMERA_PULL = fx(5);
 export const CAMERA_HEIGHT = fx(2);
 /** A camera a jammer has found stays known to the enemy for this long after it drives off. */
 export const CAMERA_REVEAL_TICKS = 600;
+/**
+ * An attack helicopter left to itself hunts (decision 116): it flies at any enemy its army
+ * knows of within HUNT_GROUND of where it was left, or any enemy helicopter within HUNT_AIR,
+ * and comes back when there is nothing left. Told to hold, it stays.
+ */
+export const HUNT_GROUND = fx(110);
+export const HUNT_AIR = fx(220);
+/** How often a hunting helicopter looks again, in ticks. */
+export const HUNT_PERIOD = 20;
 /** Helicopters an army can keep per finished helipad: landing space is what limits them. */
 export const HELIS_PER_PAD = 3;
 /** Paratroop squads that can wait in reserve, and the most one plane takes. */

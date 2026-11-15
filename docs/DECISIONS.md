@@ -2257,3 +2257,26 @@ the sim changed. `?quality=low` gets none of it, as before.
 Left for a later pass, seen in the same screenshots: the river banks follow the map cells
 and so run in a zigzag; trees are still the simple low-poly crowns; large flat roofs are
 plain from above.
+
+## 116. Helicopters fight helicopters, and hunt when left alone (2026-11-15)
+
+Fabio: "helicopters are not very proactive and dont engage other helicopters... maybe they
+should."
+
+- **They could not.** The attack helicopter's damage against anything that flies was 0, so
+  two of them hovered side by side. It now does 35 a salvo to an attack or a transport
+  helicopter (five salvos, about ten seconds, to bring one down), and picks a helicopter in
+  reach before a ground target unless that one is some 30 nearer. Drones and the transport
+  plane are still out of its reach: drones are air defence's and the jammer's business.
+- **They waited.** A helicopter only engaged what came within 44 of it. One that stands
+  without orders now hunts (`huntHelis` in `sim/sim.ts`): every second it looks for the
+  nearest enemy its army knows of within 110 of where it was left (an enemy helicopter:
+  within 220, and before anything else), flies there fighting, and goes back to where it
+  was left when nothing is known any more. Where it was left is kept in `aimX/aimY` under
+  the new `FLAG_HUNT`; any order ends the hunt, and Hold (H) or hold fire keeps it at home.
+  The computer's helicopters do the same.
+- A helicopter and an air-defence vehicle are an even fight one against one, so a hunt into
+  air defence costs helicopters: the leash is short of the usual distance between two
+  armies' lines, and Hold is the player's answer.
+
+Golden hash unchanged (no helicopters in it). Tests in `tests/air.test.ts`.

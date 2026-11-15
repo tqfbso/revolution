@@ -58,6 +58,11 @@ export const FLAG_BREACH = 2048;
 export const FLAG_STORM = 4096;
 /** With FLAG_BOMBARD: one illuminating shell per gun (decision 113). */
 export const FLAG_FLARE = 8192;
+/**
+ * A helicopter out hunting by itself (decision 116): (`aimX`, `aimY`) is where it was left
+ * and goes back to. Any order ends it.
+ */
+export const FLAG_HUNT = 16384;
 /** Cells that can hold smoke at once. */
 export const MAX_SMOKE = 4096;
 
