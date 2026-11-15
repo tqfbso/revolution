@@ -106,36 +106,31 @@ const MISSIONS = [
     tip: 'A thin line of lookouts through the place you click, across the way from your base. It warns you and pulls back from anything strong.',
   },
 ];
-/** The mission as the board's first column has it. */
-const MISSION_SHORT = [
-  'No orders',
-  'Attack',
-  'Hold',
-  'Defend',
-  'Patrol',
-  'Screen',
-  'Move',
-  'Concentrate',
-];
 /** The keys that give a mission without the board. */
 const MISSION_KEY: Record<number, string> = { [M_MOVE]: 'T', [M_FOCUS]: 'R' };
-const STATUS: Record<number, string> = {
-  [ST_IDLE]: 'Awaiting orders',
-  [ST_MARCH]: 'On the march',
-  [ST_ATTACK]: 'Attacking',
-  [ST_SECURED]: 'Objective taken, holding',
-  [ST_HOLD]: 'Holding',
-  [ST_DEFEND]: 'Defending',
-  [ST_PATROL]: 'On patrol',
-  [ST_SCREEN]: 'Screening',
-  [ST_FALLBACK]: 'Falling back',
-  [ST_REGROUP]: 'Regrouping',
-  [ST_GATHER]: 'Closing up out of sight, then going in',
-  [ST_MOVE]: 'Moving',
-  [ST_ARRIVED]: 'In place, awaiting orders',
-  [ST_FOCUS]: 'Concentrating',
-  [ST_MASSED]: 'Massed on the spot',
+/**
+ * What a commander is doing, as the middle of its sentence on the board: "Alpha attacking
+ * City Centre". The place follows where there is a `*`.
+ */
+const DOING: Record<number, string> = {
+  [ST_IDLE]: 'waiting',
+  [ST_MARCH]: 'marching on *',
+  [ST_ATTACK]: 'attacking *',
+  [ST_SECURED]: 'took *, holding it',
+  [ST_HOLD]: 'holding *',
+  [ST_DEFEND]: 'defending *',
+  [ST_PATROL]: 'patrolling to *',
+  [ST_SCREEN]: 'screening *',
+  [ST_FALLBACK]: 'falling back from *',
+  [ST_REGROUP]: 'regrouping outside *',
+  [ST_GATHER]: 'closing up out of sight of *, then going in',
+  [ST_MOVE]: 'moving to *',
+  [ST_ARRIVED]: 'in place at *, awaiting orders',
+  [ST_FOCUS]: 'concentrating on *',
+  [ST_MASSED]: 'massed at *',
 };
+/** Strength as five pips. */
+const PIPS = 5;
 
 export interface CommanderInfo {
   slot: number;
@@ -192,8 +187,10 @@ export class MissionBoard {
   /** The button at the top that shows whether the board is up. */
   button: HTMLElement | null = null;
   readonly info: CommanderInfo[] = [];
-  /** The commander whose row is opened up, or -1. */
+  /** The commander whose card is opened up, or -1. */
   private focus = -1;
+  /** The open card also shows its rarely used orders (More). */
+  private more = false;
   private html = '';
   /**
    * Co-op: several players share the commanders. Each hears the ones they gave the last
@@ -245,8 +242,21 @@ export class MissionBoard {
     }
     el.style.display = this.open ? 'block' : 'none';
     // Act on press: the board is redrawn under the pointer.
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('pointerdown', (e) => {
-      const button = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
+      const at = e.target as HTMLElement;
+      if (e.button === 2) {
+        // A right click on a commander hands it the selection, as one on the ground moves it.
+        const card = at.closest('.card') as HTMLElement | null;
+        const slot = Number(card?.dataset.s ?? -1);
+        if (!card || this.joining(slot) === 0) return;
+        e.preventDefault();
+        this.act('add', slot, NaN);
+        this.render();
+        return;
+      }
+      if (e.button !== 0) return;
+      const button = at.closest('[data-act]') as HTMLElement | null;
       if (!button) return;
       e.preventDefault();
       this.act(button.dataset.act ?? '', Number(button.dataset.s ?? -1), Number(button.dataset.m));
@@ -318,6 +328,14 @@ export class MissionBoard {
     const out: number[] = [];
     for (let i = 0; i < u.count; i++) if (u.isMine(i) && u.cmdr[i] === slot) out.push(i);
     return out;
+  }
+
+  /** How many of the selected units commander `slot` would gain: those not already its own. */
+  private joining(slot: number): number {
+    const u = this.units;
+    let n = 0;
+    for (const id of u.selectedIds()) if (u.cmdr[id] !== slot) n++;
+    return n;
   }
 
   /** Fighting units standing about with no commander and nothing to do. */
@@ -402,8 +420,10 @@ export class MissionBoard {
     const c = this.info[slot];
     if (act === 'close') this.toggle(false);
     else if (act === 'new') this.newFromSelection();
+    else if (act === 'more') this.more = !this.more;
     else if (act === 'open') {
       this.focus = this.focus === slot ? -1 : slot;
+      this.more = false;
       const ids = this.members(slot);
       u.setSelected(ids, false);
     } else if (act === 'jump') this.hooks.lookAt(c.cx, c.cz);
@@ -469,76 +489,93 @@ export class MissionBoard {
     for (const [slot, units] of lists) this.send({ type: CMD_ASSIGN, units, slot });
   }
 
+  /** The sentence of a commander's card after its name: what it is doing, and where. */
+  private doing(c: CommanderInfo): string {
+    if (c.mission === M_NONE) return c.count > 0 ? 'waiting' : 'no troops';
+    const place = this.place(c.x, c.z);
+    return (DOING[c.status] ?? 'waiting').replace('*', place);
+  }
+
   private render(): void {
     if (!this.open) return;
     const u = this.units;
     const active = this.info.filter((c) => c.count > 0 || c.mission !== M_NONE);
-    const picked = u.selectedIds();
+    const picked = u.selectedCount;
     const free = this.info.some((c) => c.count === 0);
     let html = '';
     if (active.length === 0) {
       html +=
         '<p class="hint">No commanders yet. Select troops and press <kbd>N</kbd>: they get a commander. Give it a mission and it runs them for you: it marches, attacks, holds, falls back and asks for more by itself.</p>';
-    } else {
-      html +=
-        '<div class="cols"><span></span><span>Mission</span><span>Objective and state</span><span>Grid</span><span>Strength</span><span class="r">Units</span></div>';
     }
+    // One card per commander, always in the same order. Line one is the sentence: who,
+    // doing what, where. Line two is its health: strength, numbers, and a tag only when
+    // something is wrong. With troops selected every card has the button that hands them over.
     for (const c of active) {
-      const pct = c.best > 0 ? Math.min(100, Math.round((c.power * 100) / c.best)) : 0;
-      const tone = c.status === ST_FALLBACK || pct < 45 ? 'bad' : c.need ? 'warn' : 'ok';
-      const notes = [(STATUS[c.status] ?? '').toLowerCase()];
-      if (c.fighting && c.status !== ST_ATTACK) notes.push('in contact');
-      if (c.need) notes.push(c.auto ? 'replacements on order' : 'needs reinforcements');
+      // No strength on record to measure against yet: troops it has are all it ever had.
+      const whole = c.count > 0 ? 100 : 0;
+      const pct = c.best > 0 ? Math.min(100, Math.round((c.power * 100) / c.best)) : whole;
+      const tone =
+        c.status === ST_FALLBACK || pct < 45 ? 'bad' : c.need || pct < 70 ? 'warn' : 'ok';
+      const lit = c.count > 0 ? Math.max(1, Math.round((pct * PIPS) / 100)) : 0;
+      let pips = '';
+      for (let i = 0; i < PIPS; i++) pips += i < lit ? '<i class="lit"></i>' : '<i></i>';
+      let tag = '';
+      if (c.count === 0) tag = '<em class="tag bad">No troops</em>';
+      else if (c.need) {
+        tag = c.auto
+          ? '<em class="tag warn">Replacements coming</em>'
+          : '<em class="tag bad">Needs reinforcements</em>';
+      } else if (c.fighting && c.status !== ST_ATTACK) tag = '<em class="tag warn">In contact</em>';
+      else if (c.mission === M_NONE) tag = '<em class="tag warn">No orders</em>';
       // Where it is going if it has orders, where it stands if it has none.
       const ordered = c.mission !== M_NONE;
-      const place = ordered ? this.place(c.x, c.z).replace(/^grid /, 'Grid ') : '';
       const sq = ordered ? gridRef(c.x, c.z) : c.count > 0 ? gridRef(c.cx, c.cz) : '';
       const rgb = COMMANDER_RGB[c.slot].map((v) => Math.round(v * 255)).join(',');
+      const open = this.focus === c.slot;
+      const gain = picked > 0 ? this.joining(c.slot) : 0;
       html +=
-        `<div class="cmd ${tone}${this.focus === c.slot ? ' open' : ''}" data-act="open" data-s="${c.slot}" title="${c.name}. Click: select its troops and show its orders. The colour is the pennant its troops carry">` +
+        `<div class="card${open ? ' open' : ''}" data-s="${c.slot}">` +
+        `<div class="cmd ${tone}${picked > 0 ? ' adding' : ''}" data-act="open" data-s="${c.slot}" title="${c.name}. Click: select its troops and ${open ? 'close' : 'show'} its orders${gain > 0 ? '. Right click: add the selected units' : ''}. The colour is the pennant its troops carry">` +
         `<i class="chip" style="background:rgb(${rgb})">${c.name[0]}</i>` +
-        `<b>${MISSION_SHORT[c.mission]}</b>` +
-        tickHtml(`cmd${c.slot}`, `${place} <i>${notes.filter((n) => n !== '').join(', ')}</i>`) +
-        `<span class="sq">${sq}</span>` +
-        `<span class="str"><span class="bar"><i style="width:${pct}%"></i></span><em>${pct}%</em></span>` +
-        `<span class="n">${c.count}</span>` +
-        `</div>`;
-    }
-    // The orders of the commander whose row is open, under the table.
-    const c = active.find((a) => a.slot === this.focus);
-    if (c) {
-      html += `<div class="orders first"><span>${c.name}</span>`;
-      for (const d of MISSIONS) {
-        const key = MISSION_KEY[d.m] ? ` <kbd>${MISSION_KEY[d.m]}</kbd>` : '';
-        html += `<button data-act="mission" data-s="${c.slot}" data-m="${d.m}" title="${d.tip}"${c.mission === d.m ? ' class="on"' : ''}>${d.name}${key}</button>`;
-      }
-      html +=
-        `</div><div class="orders">` +
-        `<button data-act="jump" data-s="${c.slot}" title="Look at its troops">Go to</button>` +
-        `<button data-act="style" data-s="${c.slot}" title="${STYLES[c.style].tip} Click to change.">Attack: ${STYLES[c.style].name}</button>` +
-        `<button data-act="auto" data-s="${c.slot}" title="Replace losses: what ${c.name} loses is ordered again from your factories and sent to it, as money allows">Replace losses: ${c.auto ? 'on' : 'off'}</button>` +
-        `<button data-act="stand" data-s="${c.slot}" title="Stop where it is and wait for orders">Stand down</button>` +
-        `<button data-act="disband" data-s="${c.slot}" title="Its troops go back under your own orders">Disband</button>` +
-        `</div>`;
-    }
-    // Troops selected that are not some commander's: one click puts them under it.
-    const joinable = active.filter((a) => picked.some((id) => u.cmdr[id] !== a.slot));
-    if (picked.length > 0 && joinable.length > 0) {
-      html += `<div class="orders"><span>Add ${picked.length} selected to</span>`;
-      for (const a of joinable) {
-        html += `<button data-act="add" data-s="${a.slot}" title="Put the selected units under ${a.name}. New arrivals join its body when they catch up with it">${a.name}</button>`;
+        `<span class="two">` +
+        tickHtml(`cmd${c.slot}`, `<b>${c.name}</b> ${this.doing(c)}`) +
+        `<span class="health"><span class="pips">${pips}</span><span>${c.count} unit${c.count === 1 ? '' : 's'}</span>${tag}</span>` +
+        `</span>` +
+        `<span class="sq">${sq}</span>`;
+      if (gain > 0) {
+        html += `<button class="add" data-act="add" data-s="${c.slot}" title="Put the ${gain} selected unit${gain === 1 ? '' : 's'} under ${c.name}. New arrivals join its body when they catch up with it">+ ${gain}</button>`;
+      } else if (picked > 0) html += '<span></span>';
+      html += '</div>';
+      // The orders of the open card, inside it: missions first, the rest after.
+      if (open) {
+        html += '<div class="orders first">';
+        for (const d of MISSIONS) {
+          const key = MISSION_KEY[d.m] ? ` <kbd>${MISSION_KEY[d.m]}</kbd>` : '';
+          html += `<button data-act="mission" data-s="${c.slot}" data-m="${d.m}" title="${d.tip}"${c.mission === d.m ? ' class="on"' : ''}>${d.name}${key}</button>`;
+        }
+        html +=
+          `</div><div class="orders rest">` +
+          `<button data-act="jump" data-s="${c.slot}" title="Look at its troops">Go to</button>` +
+          `<button data-act="auto" data-s="${c.slot}" title="Replace losses: what ${c.name} loses is ordered again from your factories and sent to it, as money allows">Replace losses: ${c.auto ? 'on' : 'off'}</button>` +
+          `<button data-act="style" data-s="${c.slot}" title="${STYLES[c.style].tip} Click to change.">Attack: ${STYLES[c.style].name}</button>`;
+        if (this.more) {
+          html +=
+            `<button data-act="stand" data-s="${c.slot}" title="Stop where it is and wait for orders">Stand down</button>` +
+            `<button data-act="disband" data-s="${c.slot}" title="Its troops go back under your own orders">Disband</button>`;
+        }
+        html += `<button class="more" data-act="more" title="Stand down and Disband">${this.more ? 'Less' : 'More'}</button></div>`;
       }
       html += '</div>';
     }
+    // One quiet line under the cards: the idle units, and a new commander from the selection.
     const idle = this.idle().length;
-    html += '<div class="foot"><span>';
+    html += `<div class="foot${active.length > 0 ? ' ruled' : ''}"><span>`;
     if (idle > 0) {
       html +=
-        `${idle} idle unit${idle === 1 ? '' : 's'}` +
-        `<button data-act="idle" title="Units with no commander and nothing to do. Select them and look at them">Select</button>` +
-        `<button data-act="absorb" title="Each joins the commander whose troops are nearest"${active.some((a) => a.count > 0) ? '' : ' disabled'}>Give to nearest</button>`;
+        `<button data-act="idle" title="Units with no commander and nothing to do. Select them and look at them">${idle} idle unit${idle === 1 ? '' : 's'}</button>` +
+        `<button class="lead" data-act="absorb" title="Each joins the commander whose troops are nearest"${active.some((a) => a.count > 0) ? '' : ' disabled'}>Give to nearest</button>`;
     }
-    html += `</span><span><button data-act="new" title="The selected units get a commander of their own. An order you give a unit yourself takes it out of its commander's hands; to put it back, select it and add it to the commander"${u.selectedCount === 0 || !free ? ' disabled' : ''}>New commander <kbd>N</kbd></button></span></div>`;
+    html += `</span><span><button data-act="new" title="The selected units get a commander of their own. An order you give a unit yourself takes it out of its commander's hands; to put it back, select it and press the plus on the commander"${picked === 0 || !free ? ' disabled' : ''}><kbd>N</kbd> new commander${picked > 0 && free ? ` from the ${picked}` : ''}</button></span></div>`;
     if (html !== this.html) {
       this.body.innerHTML = this.html = html;
       runTickers(this.body);

@@ -2779,3 +2779,30 @@ of the sky at 13% opacity (was 34%), with less wind, and none nearer the lens th
 where they are largest and fastest. To keep the weather readable without them the ground
 is a little darker and shinier (roughness -0.4, was -0.32). Sight in the sim is unchanged.
 Snow is unchanged: it falls slowly and nobody has complained.
+
+## 134. The commander board is cards, each with its own add button (2026-11-15)
+
+Fabio found the board of decision 127 confusing: six columns of equal weight, and the
+order he gives most, handing the selected units to a commander, sat in a separate row of
+name chips under the table. He chose option 5 of the design canvas.
+
+- One card per commander, always in the same order. Line one is a sentence: name, what
+  it is doing, where ("Charlie falling back from Millbrook"). Line two is its health:
+  five strength pips, its number of units, and a tag only when something is wrong (no
+  troops, needs reinforcements, replacements coming, in contact, no orders). The grid
+  square stands on the right in amber. The mission and percent columns are gone: the
+  sentence says the first, the pips the second.
+- While units are selected, every card that would gain some shows an amber "+ N". One
+  click assigns them. A right click anywhere on the card does the same, as a right click
+  on the ground moves them. With nothing selected the buttons are not there. The row of
+  name chips is gone.
+- A click on a card opens it in place: the missions first, then Go to, Replace losses and
+  Attack style as plain words, with Stand down and Disband behind More.
+- Idle units and New commander share one line at the foot.
+- Not taken from the mock: its line at the top ("9 units selected, press plus...").
+  It would push every card down the moment a selection is made, under the pointer.
+- A commander whose staff has no launch strength on record yet shows full pips, not
+  none: it has lost nothing.
+
+Client only (`src/client/missions.ts`, CSS in `index.html`); the sim and the golden hash
+are untouched. The ticker rule of decision 127 holds for the sentence.
