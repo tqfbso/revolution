@@ -381,6 +381,8 @@ export interface World {
    * a burning wreck. `lit` is per unit, refreshed a few times a second.
    */
   night: number;
+  /** The weather (units.ts WEATHER_*): 0, clear, unless the game set another. */
+  weather: number;
   /** Faction of each army (factions.ts). 0, the plain table, unless the game set one. */
   faction: Uint8Array;
   lit: Uint8Array;
@@ -563,6 +565,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     cAY: new Int32Array(MAX_TEAMS * MAX_COMMANDERS),
     cFlags: new Uint8Array(MAX_TEAMS * MAX_COMMANDERS),
     night: 0,
+    weather: 0,
     faction: new Uint8Array(MAX_TEAMS),
     lit: new Uint8Array(MAX_UNITS),
     flareCount: 0,
@@ -701,6 +704,8 @@ export function hashWorld(w: World): number {
   }
   // Only a game with factions has this, so the hash of one without is what it always was.
   for (let t = 0; t < MAX_TEAMS; t++) if (w.faction[t] !== 0) mix(0xfac0 ^ (t << 8) ^ w.faction[t]);
+  // Only a battle in weather has this.
+  if (w.weather !== 0) mix(0x3ea7 ^ (w.weather << 16));
   // Only a night battle has any of this, so a day's hash is what it always was.
   if (w.night !== 0) {
     mix(w.flareCount + 1);

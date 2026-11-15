@@ -625,6 +625,13 @@ export const TOWN_FUEL = 1;
 // Night (decision 113).
 /** Out of 100: how far ground troops see in the dark. Recon teams and drones see as by day. */
 export const NIGHT_SIGHT_PCT = 60;
+/** The weather of a battle (decision 125). */
+export const WEATHER_CLEAR = 0;
+export const WEATHER_RAIN = 1;
+export const WEATHER_FOG = 2;
+export const WEATHER_SNOW = 3;
+/** How far everyone sees in each weather, percent of a clear day (and of a clear night). */
+export const WEATHER_SIGHT_PCT = [100, 85, 55, 80];
 /** A flare lights this far round where it bursts, for this long. */
 export const FLARE_RADIUS = fx(42);
 export const FLARE_TICKS = 30 * 20;

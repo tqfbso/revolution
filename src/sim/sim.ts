@@ -18,6 +18,7 @@ import {
   CMD_MOVE,
   CMD_SPAWN,
   CMD_NIGHT,
+  CMD_WEATHER,
   CMD_FACTION,
   CMD_STOP,
   CMD_CAMERA,
@@ -156,6 +157,7 @@ import {
   KIND_DRONE,
   KIND_RECON,
   NIGHT_SIGHT_PCT,
+  WEATHER_SIGHT_PCT,
   HUNT_AIR,
   HUNT_GROUND,
   HUNT_PERIOD,
@@ -599,6 +601,9 @@ function applyCommand(w: World, cmd: Command): void {
     }
     case CMD_NIGHT:
       w.night = cmd.on ? 1 : 0;
+      break;
+    case CMD_WEATHER:
+      if (cmd.weather >= 0 && cmd.weather < WEATHER_SIGHT_PCT.length) w.weather = cmd.weather | 0;
       break;
     case CMD_FACTION:
       if (
@@ -1588,6 +1593,8 @@ function acquireTargets(w: World): void {
   const tick = w.tick;
   const map = w.map;
   const night = w.night !== 0;
+  // Rain, fog and snow: everyone sees this much less far (decision 125).
+  const murk = WEATHER_SIGHT_PCT[w.weather] * WEATHER_SIGHT_PCT[w.weather];
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const ki = w.kind[i];
@@ -1614,9 +1621,13 @@ function acquireTargets(w: World): void {
     const t = w.attack[i];
     const phase = tick + i;
     const dmgTable = kindOf(w, i).damage;
-    const day2 = SIGHT_SQ[w.faction[w.team[i]]][ki];
+    let day2 = SIGHT_SQ[w.faction[w.team[i]]][ki];
     // In the dark it sees less far, except what is lit (decision 113).
-    const sight2 = night ? NIGHT_SQ[w.faction[w.team[i]]][ki] : day2;
+    let sight2 = night ? NIGHT_SQ[w.faction[w.team[i]]][ki] : day2;
+    if (murk !== 10000) {
+      day2 = Math.trunc((day2 * murk) / 10000);
+      sight2 = Math.trunc((sight2 * murk) / 10000);
+    }
     const air = IS_AIR[ki];
     const z = eyeZ[i];
     const own = w.inside[i];
@@ -1874,7 +1885,9 @@ function updateSpotters(w: World): void {
     const y = w.posY[i];
     const team = w.team[i];
     const air = IS_AIR[w.kind[i]];
-    const sight2 = kind.sight * kind.sight;
+    // Scouts and their drones see through the dark but not through the weather.
+    const murk = WEATHER_SIGHT_PCT[w.weather];
+    const sight2 = Math.trunc((kind.sight * kind.sight * murk * murk) / 10000);
     const reach = (kind.sight >> COARSE_SHIFT) + 1;
     const cx = x >> COARSE_SHIFT;
     const cy = y >> COARSE_SHIFT;

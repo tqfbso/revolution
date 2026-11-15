@@ -47,14 +47,29 @@ export function makeLook(quality: Quality, shadows: boolean, night = false): Loo
 }
 
 /** A tiny sky (gradient, haze at the horizon, a soft sun) for the reflections to read. */
-export function skyScene(sunDir: THREE.Vector3, night = false): THREE.Scene {
+export function skyScene(
+  sunDir: THREE.Vector3,
+  night = false,
+  overcast?: { sky: number; shine: number },
+): THREE.Scene {
   const size = 256;
   const px = new Uint8Array(size * size * 4);
   // By night: a dark blue vault, a paler horizon and the moon where the sun would be.
   const zenith = night ? [0.035, 0.055, 0.11] : [0.32, 0.47, 0.68];
   const horizon = night ? [0.1, 0.13, 0.19] : [0.78, 0.8, 0.78];
   const ground = night ? [0.03, 0.035, 0.045] : [0.2, 0.19, 0.15];
-  const shine = night ? 0.45 : 1;
+  let shine = night ? 0.45 : 1;
+  if (overcast) {
+    // A lid of cloud: one grey from the zenith to the horizon, and hardly any sun in it.
+    const c = new THREE.Color(overcast.sky);
+    const dim = night ? 0.16 : 1;
+    for (let k = 0; k < 3; k++) {
+      const v = [c.r, c.g, c.b][k] * dim;
+      zenith[k] = v * 0.92;
+      horizon[k] = v * 1.05;
+    }
+    shine *= overcast.shine;
+  }
   // Equirectangular: x is the compass direction, y runs from straight up to straight down.
   const sunU = Math.atan2(sunDir.z, sunDir.x) / (2 * Math.PI) + 0.5;
   const sunV = Math.acos(sunDir.y) / Math.PI;

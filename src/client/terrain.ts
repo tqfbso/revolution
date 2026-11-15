@@ -1,3 +1,4 @@
+import { weathered, weatheredRoughness } from './weather';
 import * as THREE from 'three/webgpu';
 import {
   attribute,
@@ -266,9 +267,9 @@ export class Terrain {
     const m = new THREE.MeshLambertNodeMaterial();
     const xz = positionWorld.xz;
     const patches = texture(this.look.tex.noise, xz.div(420)).r.mul(0.5).add(0.72);
-    m.colorNode = color(this.look.rich ? 0x4f6034 : 0x5a6641)
-      .mul(patches)
-      .mul(this.fog.shade());
+    m.colorNode = weathered(color(this.look.rich ? 0x4f6034 : 0x5a6641).mul(patches)).mul(
+      this.fog.shade(),
+    );
     const mesh = new THREE.Mesh(geometry, m);
     mesh.matrixAutoUpdate = false;
     return mesh;
@@ -289,7 +290,7 @@ export class Terrain {
         color(0x45443f),
         sp.z,
       );
-      m.colorNode = base.mul(shade);
+      m.colorNode = weathered(base).mul(shade);
       return m;
     }
     const tex = this.look.tex;
@@ -334,8 +335,9 @@ export class Terrain {
     const albedo = mix(made, earth, wWorn);
     const detail = mix(mix(mix(mix(G, D, wEarth), R, wRock), P, wPaved), D, wWorn);
     const m = new THREE.MeshStandardNodeMaterial({ metalness: 0 });
-    m.colorNode = albedo.mul(shade);
-    m.roughnessNode = detail.a.sub(damp.mul(wEarthAll).mul(0.3)).clamp(0.25, 1);
+    // Snow lies thin where wheels and boots have been, and on the streets.
+    m.colorNode = weathered(albedo, wWorn.max(wPaved)).mul(shade);
+    m.roughnessNode = weatheredRoughness(detail.a.sub(damp.mul(wEarthAll).mul(0.3)).clamp(0.25, 1));
     // The texture's slopes tilt the surface normal: its u runs east, its v south.
     const tilt = detail.xy.mul(2).sub(1);
     const n = normalWorld.add(vec3(tilt.x, 0, tilt.y).mul(0.9)).normalize();
@@ -579,7 +581,7 @@ export class Terrain {
     const material = new THREE.MeshLambertNodeMaterial();
     // No two trees quite the same green.
     const vary = hash(instanceIndex).mul(0.5).add(0.8);
-    material.colorNode = attribute('color', 'vec3').mul(vary).mul(this.fog.shade());
+    material.colorNode = weathered(attribute('color', 'vec3').mul(vary)).mul(this.fog.shade());
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
