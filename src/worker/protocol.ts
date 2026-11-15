@@ -77,6 +77,8 @@ export type ToWorker =
       team?: number;
       /** A night battle (CMD_NIGHT on the first tick): short sight, flares, fires that show. */
       night?: boolean;
+      /** Armies in the skirmish, 2 to 4: beyond two, each is a computer for itself. */
+      armies?: number;
       /** The faction of each army (CMD_FACTION on the first tick), 0 or absent for none. */
       factions?: number[];
     }

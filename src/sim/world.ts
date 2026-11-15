@@ -624,6 +624,9 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
   return world;
 }
 
+/** How many armies the hash always covered (see hashWorld). */
+const OLD_TEAMS = 3;
+
 /** FNV-1a over the full live state. Equal hashes on two machines means they are in sync. */
 export function hashWorld(w: World): number {
   let h = 0x811c9dc5;
@@ -640,7 +643,8 @@ export function hashWorld(w: World): number {
   mix(w.map.hash);
   mix(w.fieldsFullTick);
   for (let f = 0; f < MAX_FIELDS; f++) mix(w.fieldGoal[f] ^ (w.fieldClass[f] << 24));
-  for (let f = 0; f < CHASE_FIELDS; f++) mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
+  for (let f = 0; f < OLD_TEAMS * CLASS_COUNT; f++)
+    mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
   for (let c = 0; c < MAX_CAMERAS; c++) {
     if (w.camTeam[c] < 0) continue;
     mix(c ^ (w.camTeam[c] << 8));
@@ -664,7 +668,7 @@ export function hashWorld(w: World): number {
     for (let q = 0; q < w.sQueueLen[s]; q++) mix(w.sQueue[s * QUEUE_MAX + q]);
   }
   for (let k = 0; k < w.map.siteCount; k++) mix(w.siteStock[k]);
-  for (let t = 0; t < MAX_TEAMS; t++) {
+  for (let t = 0; t < OLD_TEAMS; t++) {
     mix(w.supplies[t]);
     mix(w.fuel[t]);
     mix(w.tier[t] | (w.pop[t] << 8));
@@ -674,20 +678,20 @@ export function hashWorld(w: World): number {
   for (let t = 0; t < w.map.townCount; t++) {
     mix(w.townOwner[t] | (w.townCapturer[t] << 8) | (w.townProgress[t] << 16));
   }
-  for (let t = 0; t < MAX_TEAMS; t++) mix(w.credits[t]);
-  for (let t = 0; t < MAX_TEAMS; t++) mix(w.orderTurn[t] | (w.orderWait[t] << 8));
-  for (let k = 0; k < MAX_TEAMS * KIND_SLOTS; k++) {
+  for (let t = 0; t < OLD_TEAMS; t++) mix(w.credits[t]);
+  for (let t = 0; t < OLD_TEAMS; t++) mix(w.orderTurn[t] | (w.orderWait[t] << 8));
+  for (let k = 0; k < OLD_TEAMS * KIND_SLOTS; k++) {
     mix((w.orders[k] & 0xffff) | (w.keep[k] << 16));
     mix(w.dest[k]);
   }
-  for (let c = 0; c < MAX_TEAMS * MAX_COMMANDERS; c++) {
+  for (let c = 0; c < OLD_TEAMS * MAX_COMMANDERS; c++) {
     mix(w.cMission[c] | (w.cFlags[c] << 8) | (w.cSeq[c] << 16));
     mix(w.cX[c]);
     mix(w.cY[c]);
     mix(w.cAX[c]);
     mix(w.cAY[c]);
   }
-  for (let k = 0; k < MAX_TEAMS * MAX_COMMANDERS * KIND_SLOTS; k++) mix(w.cEst[k]);
+  for (let k = 0; k < OLD_TEAMS * MAX_COMMANDERS * KIND_SLOTS; k++) mix(w.cEst[k]);
   mix(w.shellCount);
   for (let k = 0; k < w.shellCount; k++) {
     mix(w.shX[k]);
@@ -721,7 +725,7 @@ export function hashWorld(w: World): number {
   if (w.felledCount > 0) mix(w.felledCount ^ (w.felled[w.felledCount - 1] << 12));
   mix(w.civCount ^ (w.civEscaped << 12));
   mix(w.civFieldAt);
-  for (let t = 0; t < MAX_TEAMS; t++) mix(w.civKilled[t]);
+  for (let t = 0; t < OLD_TEAMS; t++) mix(w.civKilled[t]);
   for (let k = 0; k < w.civCount; k++) {
     mix(w.civState[k] | (w.civHome[k] << 8));
     if (w.civState[k] !== CIV_FLEEING) continue;
@@ -730,6 +734,35 @@ export function hashWorld(w: World): number {
   }
   for (let c = 0; c < DANGER_DIM * DANGER_DIM; c++)
     if (w.danger[c] > w.tick) mix(c ^ (w.danger[c] << 12));
+  // The armies after the third (decision 124) are hashed only once they are in the game,
+  // so that a game of two or three hashes as it always did.
+  for (let t = OLD_TEAMS; t < MAX_TEAMS; t++) {
+    if (w.pop[t] === 0 && w.popCap[t] === 0) continue;
+    mix(0xa4000 ^ t);
+    mix(w.supplies[t]);
+    mix(w.fuel[t]);
+    mix(w.tier[t] | (w.pop[t] << 8));
+    mix(w.popCap[t]);
+    mix(w.paraReserve[t] | (w.helis[t] << 8) | (w.heliCap[t] << 16));
+    mix(w.credits[t]);
+    mix(w.orderTurn[t] | (w.orderWait[t] << 8));
+    mix(w.civKilled[t]);
+    for (let k = t * KIND_SLOTS; k < (t + 1) * KIND_SLOTS; k++) {
+      mix((w.orders[k] & 0xffff) | (w.keep[k] << 16));
+      mix(w.dest[k]);
+    }
+    for (let c = t * MAX_COMMANDERS; c < (t + 1) * MAX_COMMANDERS; c++) {
+      mix(w.cMission[c] | (w.cFlags[c] << 8) | (w.cSeq[c] << 16));
+      mix(w.cX[c]);
+      mix(w.cY[c]);
+      mix(w.cAX[c]);
+      mix(w.cAY[c]);
+      for (let k = c * KIND_SLOTS; k < (c + 1) * KIND_SLOTS; k++) mix(w.cEst[k]);
+    }
+    for (let f = t * CLASS_COUNT; f < (t + 1) * CLASS_COUNT; f++) {
+      mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
+    }
+  }
   const n = w.count;
   for (let i = 0; i < n; i++) {
     mix(w.jobCell[i] ^ (w.ration[i] << 24));

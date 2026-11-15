@@ -121,7 +121,9 @@ async function start(): Promise<void> {
   const skirmishGame = scenario === 'skirmish';
   const pickFaction = (key: string, fallback: string): number =>
     skirmishGame ? factionByName(params.get(key) ?? fallback) : 0;
-  const factions = [pickFaction('army', 'nato'), pickFaction('foe', 'russia'), 0];
+  const factions = [pickFaction('army', 'nato'), pickFaction('foe', 'russia'), 0, 0];
+  // The third and fourth armies take the factions that follow the second's, in turn.
+  for (let t = 2; t < 4; t++) factions[t] = factions[1] > 0 ? (factions[t - 1] % 3) + 1 : 0;
   setArmies(factions, myTeam);
   if (night) renderer.toneMappingExposure = 1.15;
   const scene = new THREE.Scene();
@@ -172,15 +174,23 @@ async function start(): Promise<void> {
   }
   // The skirmish is fought in the city unless `?map=euro`, `?map=ridge` or `?map=river` asks
   // for another map; the other scenarios are laid out for the river.
-  const asked = params.get('map');
+  // `?armies=3|4`: a free-for-all (decision 124), every army for itself, on the map with
+  // four corners. Not in a versus game, where the players are the two sides.
+  const armies =
+    scenario === 'skirmish' && !versus
+      ? Math.min(Math.max(Number(params.get('armies') ?? 2) | 0, 2), 4)
+      : 2;
+  const asked = armies > 2 ? 'four' : params.get('map');
   const layout: Layout =
     scenario !== 'skirmish' || asked === 'river'
       ? 'river'
-      : asked === 'ridge'
-        ? 'ridge'
-        : asked === 'euro'
-          ? 'euro'
-          : 'city';
+      : asked === 'four'
+        ? 'four'
+        : asked === 'ridge'
+          ? 'ridge'
+          : asked === 'euro'
+            ? 'euro'
+            : 'city';
   const map = generateMap(seed, layout);
   fog.setMap(map);
   const terrain = new Terrain(map, fog, look);
@@ -417,6 +427,7 @@ async function start(): Promise<void> {
     team: myTeam,
     night,
     factions,
+    armies,
   });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
   const setSpeed = (v: number) => {
@@ -506,11 +517,23 @@ async function start(): Promise<void> {
       location.search = params.toString();
     });
   }
+  const pickArmies = document.getElementById('armies-pick') as HTMLSelectElement | null;
+  if (pickArmies) {
+    pickArmies.value = String(armies);
+    pickArmies.disabled = versus;
+    pickArmies.addEventListener('change', () => {
+      if (pickArmies.value === '2') params.delete('armies');
+      else params.set('armies', pickArmies.value);
+      location.search = params.toString();
+    });
+  }
   const pickMap = document.getElementById('map-pick') as HTMLSelectElement | null;
   if (pickMap) {
     pickMap.value = layout;
     pickMap.addEventListener('change', () => {
       params.set('map', pickMap.value);
+      // Three or four armies need the four corners.
+      if (pickMap.value !== 'four') params.delete('armies');
       location.search = params.toString();
     });
   }
@@ -600,8 +623,8 @@ async function start(): Promise<void> {
   );
   // Towns: who holds what, and what the held ones have paid so far.
   const townsEl = document.getElementById('towns');
-  const TEAM_NAME = ['red', 'blue', 'gold'];
-  const TEAM_CSS = ['#eb4637', '#468cff', '#f0be3c'];
+  const TEAM_NAME = ['red', 'blue', 'gold', 'green'];
+  const TEAM_CSS = ['#eb4637', '#468cff', '#f0be3c', '#5fd273'];
   setInterval(() => {
     if (!townsEl) return;
     let html = `<b>Towns pay ${TOWN_INCOME} credits a second each</b>`;

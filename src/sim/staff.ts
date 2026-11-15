@@ -36,6 +36,7 @@ import {
   order,
   perceive,
   press,
+  fallen,
   setUp,
   strength,
   strongPoints,
@@ -234,6 +235,8 @@ export function staffThink(st: Staff, w: World, out: Command[]): void {
   }
   if (!due && told === 0) return;
   const ai = st.ai;
+  // Its enemy is beaten: on to the next, or carry on as it was when there is none left.
+  if (ai.ready && fallen(ai, w) && !setUp(ai, w)) ai.foeHq = -1;
   if (!ai.ready && !setUp(ai, w)) return;
   let any = false;
   for (const p of st.posts) {

@@ -411,7 +411,8 @@ export class Terrain {
     const from = new Int32Array(N * N);
     // The city has its roads already.
     if (this.map.streets.length > 0) return;
-    for (let side = 0; side < 2; side++) {
+    for (let side = 0; side < map.startX.length; side++) {
+      if (side >= 2 && map.startX[side] < 0) continue;
       const sx = Math.min(N - 1, map.startX[side] + 3);
       const sy = Math.min(N - 1, map.startY[side] + 6);
       const start = sy * N + sx;

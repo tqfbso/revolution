@@ -126,6 +126,7 @@ import {
   MAP_SIZE_FX,
   MAX_UNITS,
   NO_TARGET,
+  MAX_TEAMS,
   NO_TEAM,
   QUEUE_MAX,
   STATE_ALIVE,
@@ -499,6 +500,8 @@ interface Alarm {
 export interface Ai {
   team: number;
   enemy: number;
+  /** The enemy's headquarters: when it falls the next army is the enemy (see setUp). */
+  foeHq: number;
   level: AiLevel;
   tune: Tuning;
   rng: Uint32Array;
@@ -647,6 +650,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
   const ai: Ai = {
     team,
     enemy: team === 0 ? 1 : 0,
+    foeHq: -1,
     level,
     tune: tuningFor(level, humans),
     rng: new Uint32Array(1),
@@ -723,6 +727,8 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
 
 /** The AI's commands for this tick, appended to `out`. Call once per tick, before step(). */
 export function aiThink(ai: Ai, w: World, out: Command[]): void {
+  // Its enemy is beaten: on to the next, or carry on as it was when there is none left.
+  if (ai.ready && fallen(ai, w) && !setUp(ai, w)) ai.foeHq = -1;
   if (!ai.ready && !setUp(ai, w)) return;
   // Without a headquarters the game is lost: nothing more to decide.
   if (w.sHp[ai.hq] <= 0 || w.sTeam[ai.hq] !== ai.team) return;
@@ -900,18 +906,36 @@ function across(ai: Ai, x: number, y: number): boolean {
   return dist(x, y, ai.homeX, ai.homeY) + fx(60) >= dist(x, y, ai.foeX, ai.foeY);
 }
 
+/** The enemy it was fighting has lost its headquarters: time to pick the next one. */
+export function fallen(ai: Ai, w: World): boolean {
+  return ai.foeHq >= 0 && (w.sHp[ai.foeHq] <= 0 || w.sTeam[ai.foeHq] !== ai.enemy);
+}
+
 /** First think: find the two headquarters and read the map. False if there is no base. */
 export function setUp(ai: Ai, w: World): boolean {
   const map = w.map;
   let hq = -1;
   let foe = -1;
+  // With more than two armies each goes for the one before it in the round (0 for 3, 3
+  // for 2, 2 for 1, 1 for 0), and for the next one along when that one has fallen: so
+  // everybody has one army coming at him, and nobody two while there are three others.
+  let rank = MAX_TEAMS;
   for (let s = 0; s < map.structCount; s++) {
     if (map.sKind[s] !== S_BASE || w.sType[s] !== B_HQ || w.sHp[s] <= 0) continue;
-    if (w.sTeam[s] === ai.team && hq < 0) hq = s;
-    else if (w.sTeam[s] !== ai.team && w.sTeam[s] !== NO_TEAM && foe < 0) foe = s;
+    const team = w.sTeam[s];
+    if (team === ai.team) {
+      if (hq < 0) hq = s;
+    } else if (team < MAX_TEAMS) {
+      const r = (ai.team - team + MAX_TEAMS) % MAX_TEAMS;
+      if (r < rank) {
+        rank = r;
+        foe = s;
+      }
+    }
   }
   if (hq < 0 || foe < 0) return false;
   ai.hq = hq;
+  ai.foeHq = foe;
   ai.enemy = w.sTeam[foe];
   ai.homeX = structX(map, hq);
   ai.homeY = structY(map, hq);

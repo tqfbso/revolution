@@ -157,7 +157,7 @@ export class Land {
     for (let t = 0; t < map.townCount; t++) {
       this.take(map.townX[t] / 1024, map.townY[t] / 1024, map.townR[t] / 1024 + 14);
     }
-    for (let side = 0; side < 2; side++) {
+    for (let side = 0; side < map.startX.length; side++) {
       if (map.startX[side] < 0) continue;
       const c = (START_PLOT * CELL) / 2;
       this.take(map.startX[side] * CELL + c, map.startY[side] * CELL + c, 56);
