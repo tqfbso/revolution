@@ -2474,3 +2474,53 @@ Checked in a staged fight of 40 squads a side at camera distance 150 and 190: fl
 and tracers read clearly where before the tracers were dotted hairlines; the dust shows
 as a pale trail behind a marching platoon. How it reads on a real screen at 60 frames a
 second is Fabio's to say; the three numbers above are the levers.
+
+## 123. Factions are versions of one roster, not three rosters (M10, 2026-11-15)
+
+Three armies: the Western alliance, Russia and China (`src/sim/factions.ts`).
+
+**What a faction is.** The same sixteen kinds of unit, each in the faction's own version:
+percent changes to hit points, speed, reload, damage, blast, jamming, price and build
+time, plus or minus a few units of range and sight, its own name, and one kind it does
+not field at all. Everything that read the one table (`KINDS[kind]`) now asks
+`kindOf(w, unit)`; prices come from `unitPrice(w, team, kind)`. Faction 0 is the plain
+table, so every test, scenario and measurement made before M10 is unchanged (golden hash
+3501695057 holds). `CMD_FACTION` sets a team's faction on the first tick; it is part of
+the hash only when set.
+
+**Why versions and not new units.** A unit that only one side has needs a model, a
+counter, a place in the AI, in the commanders' staff and in the co-op roles. Three times
+that is a milestone of its own and would have taken the whole run. Versions give each army
+a different feel and a different best plan for one day's work, and the table is the
+place to add true one-faction units later.
+
+**The three.**
+
+- Western alliance: fewer, better, dearer. Heavy tank (+15% hp, +2 range and sight, +30%
+  price), tougher infantry that sees further, precision gun (+15 range, slower, smaller
+  blast), dear loitering munition that hits harder, the best gunship. No jammer.
+- Russia: mass. Assault tank at 78% price that fires 15% faster with less armour, rocket
+  battery (short, fast, wide), air defence with +8 reach, heavy jammer, armoured gunship.
+  No transport helicopter.
+- China: numbers and drones. Infantry at 85% price and 75% time, swarm drone at 60%,
+  wheeled carrier that is fast and seats three, truck gun, hardy engineers, light cheap
+  gunship. No paratroopers.
+
+The computer builds to its faction: `share` scales how much of each kind it wants.
+
+**Balance.** `tools/factionduel.ts` plays hard computer against hard computer for 25
+minutes. Three rounds of tuning, 132 battles on ridge and city. Last measured round (48
+battles, each faction in 32): alliance 16, Russia 12, China 20, followed by a small nudge
+to Russia up and China down that was not measured again. The side that starts in the
+first corner won 31 of 48, so the map counts for more than the faction. Good enough to
+play; not proof of balance between people.
+
+**On screen.** `?army=nato|russia|china|none` is red, `?foe=` is blue; default alliance
+against Russia. Menu: Army and Enemy. The host's choice goes to guests with the rest of
+the lobby settings. Names and prices in the card and the production panel are the
+faction's; a kind it lacks has no button. Each faction has a base coat (olive drab, dark
+green, sand khaki) carried in the per-instance seed, so no new draw calls. Team colour
+markings stay red and blue: who is whose matters more than which army it is.
+
+Not done: units unique to a faction, faction buildings, voices. Scenarios other than the
+skirmish stay on the plain table.

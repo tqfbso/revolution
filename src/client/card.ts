@@ -1,3 +1,4 @@
+import { myKinds, myPrices } from './army';
 import { ME } from './me';
 import * as THREE from 'three/webgpu';
 import {
@@ -30,7 +31,6 @@ import {
   MAX_TIER,
   TIER_ITEM,
   TIER_PRICE,
-  UNIT_PRICE,
   type Price,
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
@@ -720,7 +720,7 @@ export class CommandCard {
           }
           const item = bases[rec + 8 + q];
           const name = item === TIER_ITEM ? `Tier ${this.tier + 1}` : SHORT[item];
-          html += `<div class="slot" title="${item === TIER_ITEM ? name : KINDS[item].name}">${name}${q === 0 ? `<b style="width:${bases[rec + 7]}%"></b>` : ''}</div>`;
+          html += `<div class="slot" title="${item === TIER_ITEM ? name : myKinds()[item].name}">${name}${q === 0 ? `<b style="width:${bases[rec + 7]}%"></b>` : ''}</div>`;
         }
         html += '</div>';
         const first = bases[rec + 8];
@@ -732,10 +732,18 @@ export class CommandCard {
           type === B_HELIPAD ? `Landing space: ${this.helis} of ${this.heliCap} helicopters` : '';
         html += `<div class="note">${waiting ? 'Army limit reached: build supply depots' : grounded ? `No landing space (${this.helis} of ${this.heliCap}): build another helipad` : full ? 'Paratroop reserve is full: drop them (J)' : pads}</div>`;
         html += '<div class="row">';
-        UNIT_PRICE.forEach((p, kind) => {
+        myPrices().forEach((p, kind) => {
           if (p.from === type) {
             const pts = POINTS[kind] > 1 ? ` ${POINTS[kind]} pts` : '';
-            html += this.button('train', kind, KINDS[kind].name + pts, p, '', false, HINT[kind]);
+            html += this.button(
+              'train',
+              kind,
+              myKinds()[kind].name + pts,
+              p,
+              '',
+              false,
+              HINT[kind],
+            );
           }
         });
         const next = TIER_PRICE[this.tier];

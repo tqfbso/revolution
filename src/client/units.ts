@@ -1,5 +1,7 @@
+import { factionOf, kindIn } from './army';
+import { FACTIONS } from '../sim/factions';
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix, smoothstep, uv, vec3 } from 'three/tsl';
+import { attribute, float, mix, smoothstep, step, uv, vec3 } from 'three/tsl';
 import {
   AIR_HEIGHT,
   BLAST_STRAY,
@@ -153,20 +155,31 @@ const CHUTE_HEIGHT = 15;
  * How far each type lifts the fog, in cells: its sight in the sim plus a little, negative
  * for drones, which look straight down past houses and hills.
  */
-const FOG_SIGHT = KINDS.map(
-  (k) => (Math.ceil(k.sight / 4096) + 1) * (k.cls === CLASS_AIR ? -1 : 1),
+const FOG_SIGHT = FACTIONS.map((f) =>
+  f.kinds.map((k) => (Math.ceil(k.sight / 4096) + 1) * (k.cls === CLASS_AIR ? -1 : 1)),
 );
 /** The same at night (decision 113): six tenths, except the scouts and their drone. */
-const NIGHT_FOG_SIGHT = KINDS.map((k, i) =>
-  i === KIND_RECON || i === KIND_DRONE
-    ? FOG_SIGHT[i]
-    : (Math.ceil((k.sight * NIGHT_SIGHT_PCT) / 100 / 4096) + 1) * (k.cls === CLASS_AIR ? -1 : 1),
+const NIGHT_FOG_SIGHT = FACTIONS.map((f, n) =>
+  f.kinds.map((k, i) =>
+    i === KIND_RECON || i === KIND_DRONE
+      ? FOG_SIGHT[n][i]
+      : (Math.ceil((k.sight * NIGHT_SIGHT_PCT) / 100 / 4096) + 1) * (k.cls === CLASS_AIR ? -1 : 1),
+  ),
 );
 /** What a flare shows, in cells, and how long a muzzle flash and a burning wreck do. */
 const FLARE_CELLS = Math.round(FLARE_RADIUS / 4096);
 const FLASH_SECONDS = FLASH_TICKS / 20;
 const BURN_SECONDS = BURN_TICKS / 20;
-const JAM_RADIUS = KINDS.map((k) => k.jam / 1024);
+/**
+ * The base coat of each faction's vehicles and uniforms, as a multiple of the model's own
+ * olive: none, the alliance's olive drab, Russia's darker green, China's sand khaki.
+ */
+const COATS = [
+  [1, 1, 1],
+  [1, 1, 1],
+  [0.66, 0.9, 0.62],
+  [1.55, 1.38, 1.02],
+];
 
 /** How high a flare hangs: it bursts at 46 m and comes down under its parachute. */
 export function flareHeight(
@@ -276,7 +289,14 @@ export class UnitView {
     const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.82, metalness: 0.08 });
     const tint = attribute('aTint', 'vec4');
     const marking = attribute('teamMask', 'float');
-    const painted = mix(attribute('color', 'vec3'), tint.xyz, marking);
+    // The whole part of tint.w is a number per unit (see SEEDS) plus SEEDS times its faction.
+    const army = tint.w.floor().div(SEEDS).floor();
+    const coat = mix(
+      mix(vec3(1, 1, 1), vec3(...COATS[2]), step(1.5, army)),
+      vec3(...COATS[3]),
+      step(2.5, army),
+    );
+    const painted = mix(attribute('color', 'vec3').mul(coat), tint.xyz, marking);
     // tint.w carries two things: its whole part is a number per unit (see SEEDS), its
     // fraction is "burn", where 1 turns the model into a scorched wreck.
     const burn = tint.w.fract().sub(BURN_BASE).div(BURN_SCALE).clamp(0, 1);
@@ -285,7 +305,7 @@ export class UnitView {
         look,
         painted,
         marking,
-        tint.w.floor(),
+        tint.w.floor().mod(SEEDS),
         burn,
         attribute('aBoxP', 'vec3'),
         attribute('aBoxH', 'vec4'),
@@ -489,7 +509,7 @@ export class UnitView {
     // Sight is refreshed every other tick (10 Hz): plenty for units that move this slowly.
     if (this.fogAge++ % 2 === 0) {
       this.fog.clock = now / 1000;
-      const sights = this.night ? NIGHT_FOG_SIGHT : FOG_SIGHT;
+      const sights = (this.night ? NIGHT_FOG_SIGHT : FOG_SIGHT)[factionOf(this.playerTeam)];
       if (this.night) this.nightLights(n, now / 1000);
       this.fog.update(
         this.curr,
@@ -1038,6 +1058,7 @@ export class UnitView {
       this.lodOf[i] = lod;
 
       const team = TEAM_RGB[teamId] ?? TEAM_RGB[0];
+      const coatOf = factionOf(teamId) * SEEDS;
       if (iconAlpha > 0 && alive) {
         // The same size on screen at any distance; brighter than the paint, to carry far.
         const s = Math.sqrt(d2) * 0.018;
@@ -1083,7 +1104,7 @@ export class UnitView {
       const sin = Math.sin(h);
       const cos = Math.cos(h);
 
-      const jam = JAM_RADIUS[this.kind[i]];
+      const jam = kindIn(teamId, this.kind[i]).jam / 1024;
       if (jam > 0 && alive) {
         const mine = teamId === this.playerTeam;
         const a = 0.35 + 0.15 * Math.sin(seconds * 3 + i);
@@ -1094,6 +1115,7 @@ export class UnitView {
         const jammedNow = IS_DRONE[kindNow] && alive && this.load[i] > 0;
         const burn =
           (i % SEEDS) +
+          coatOf +
           BURN_BASE +
           BURN_SCALE * (alive ? (jammedNow ? 0.45 + 0.4 * Math.sin(seconds * 24 + i) : 0) : 1);
         if (lod === 2) {
@@ -1142,7 +1164,18 @@ export class UnitView {
           }
         }
         if (lod === 2) {
-          squad.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], (i % SEEDS) + BURN_BASE);
+          squad.far.put(
+            x,
+            y,
+            z,
+            sin,
+            cos,
+            1,
+            team[0],
+            team[1],
+            team[2],
+            (i % SEEDS) + coatOf + BURN_BASE,
+          );
         } else {
           if (fall > 0) {
             this.chutes.put(x, y + 3.1, z, sin, cos, 1, team[0], team[1], team[2], BURN_BASE);
@@ -1172,7 +1205,7 @@ export class UnitView {
             const sx = x + f.x * cos + f.z * sin;
             const sz = z - f.x * sin + f.z * cos;
             const sy = this.terrain.heightAt(sx, sz) + fall;
-            const seed = ((i + k * 5) % SEEDS) + BURN_BASE;
+            const seed = ((i + k * 5) % SEEDS) + coatOf + BURN_BASE;
             if (f.batch) {
               f.batch[lod].put(sx, sy, sz, fs, fc, 1, team[0], team[1], team[2], seed);
               continue;

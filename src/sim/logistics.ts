@@ -10,6 +10,7 @@
 // Every ground unit has rations for two minutes. Inside supply they refill fast and the
 // unit mends; outside they run down, and at nothing the unit fires at half its rate and
 // its vehicles crawl.
+import { kindOf } from './factions';
 import { BUILDINGS } from './economy';
 import { FP_SHIFT, fx } from './fixed';
 import { CLASS_AIR, MAP_SIZE, MAX_TEAMS } from './map';
@@ -157,7 +158,7 @@ export function updateLogistics(w: World): void {
       const r = w.ration[i] + RATION_GAIN;
       w.ration[i] = r > RATION_MAX ? RATION_MAX : r;
       // Mending needs quiet: nothing to shoot at, and the rations full.
-      const max = KINDS[kindId].hp;
+      const max = kindOf(w, i).hp;
       if (r >= RATION_MAX && w.hp[i] < max && w.attack[i] < 0) {
         const hp = w.hp[i] + Math.max(1, Math.trunc(max / MEND_SECONDS));
         w.hp[i] = hp > max ? max : hp;

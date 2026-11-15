@@ -2,11 +2,12 @@
 // to the army, not to a building: "20 more rifle squads", "keep 6 tanks in the field",
 // "send the new ones to Ridgetop". The simulation hands them out to whichever factory
 // has room (see dispatchOrders in the economy).
+import { myKinds, myPrices } from './army';
 import { ME } from './me';
 import { CMD_DEST, CMD_KEEP, CMD_ORDER, type Command } from '../sim/commands';
-import { BUILDINGS, TIER_ITEM, UNIT_PRICE } from '../sim/economy';
+import { BUILDINGS, TIER_ITEM } from '../sim/economy';
 import type { GameMap } from '../sim/map';
-import { KINDS, KIND_COUNT, POINTS } from '../sim/units';
+import { KIND_COUNT, POINTS } from '../sim/units';
 import { DEST_COMMANDER, DEST_RALLY, DEST_TOWN, KIND_SLOTS, TICK_RATE } from '../sim/world';
 import { BASE_STRIDE, type Snapshot } from '../worker/protocol';
 import type { UnitView } from './units';
@@ -134,7 +135,7 @@ export class ProductionCentre {
       if (cell.className !== cls) cell.className = cls;
     };
     for (let k = 0; k < KIND_COUNT; k++) {
-      const p = UNIT_PRICE[k];
+      const p = myPrices()[k];
       set(`have${k}`, String(fielded[k]));
       set(`make${k}`, queued[k] > 0 ? String(queued[k]) : '·');
       set(
@@ -193,7 +194,9 @@ export class ProductionCentre {
       options += `<option value="${DEST_TOWN + t}">Town: ${this.map.townName[t]}</option>`;
     }
     BUILDINGS.forEach((building, type) => {
-      const makes = UNIT_PRICE.map((p, kind) => ({ p, kind })).filter(({ p }) => p.from === type);
+      const makes = myPrices()
+        .map((p, kind) => ({ p, kind }))
+        .filter(({ p }) => p.from === type);
       if (makes.length === 0) return;
       const n = factories[type];
       html += `<tr class="group${n === 0 ? ' none' : ''}"><td colspan="9">${building.name} × ${n}${n === 0 ? ' · trucks build one' : ''}</td></tr>`;
@@ -208,7 +211,7 @@ export class ProductionCentre {
         const keep = (count: number, label: string) =>
           `<button data-act="keep" data-k="${kind}" data-n="${count}">${label}</button>`;
         html +=
-          `<tr${dim}><td title="${Math.round(p.ticks / TICK_RATE)} s each, ${POINTS[kind]} army point${POINTS[kind] === 1 ? '' : 's'}">${KINDS[kind].name}${this.whose[kind] === 1 ? ' <b style="color:#78e1ff" title="Your role">◆ yours</b>' : this.whose[kind] === 2 ? ' <span style="color:#8a938f" title="Your partner\'s role">◇ partner</span>' : ''}</td>` +
+          `<tr${dim}><td title="${Math.round(p.ticks / TICK_RATE)} s each, ${POINTS[kind]} army point${POINTS[kind] === 1 ? '' : 's'}">${myKinds()[kind].name}${this.whose[kind] === 1 ? ' <b style="color:#78e1ff" title="Your role">◆ yours</b>' : this.whose[kind] === 2 ? ' <span style="color:#8a938f" title="Your partner\'s role">◇ partner</span>' : ''}</td>` +
           `<td>${cost}</td>` +
           `<td data-cell="have${kind}"></td><td data-cell="make${kind}"></td><td data-cell="order${kind}"></td>` +
           `<td>${add(1, '+1')}${add(5, '+5')}${add(20, '+20')}${add(-5, '−5')}</td>` +

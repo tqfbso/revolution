@@ -1,3 +1,4 @@
+import { FACTIONS, FACTION_COUNT, SIGHT_SQ, kindFor, kindOf } from './factions';
 import { civiliansBuried, civiliansShelled, civiliansShot, updateCivilians } from './civilians';
 import {
   HUNGRY_RELOAD,
@@ -17,6 +18,7 @@ import {
   CMD_MOVE,
   CMD_SPAWN,
   CMD_NIGHT,
+  CMD_FACTION,
   CMD_STOP,
   CMD_CAMERA,
   CMD_UNLOAD,
@@ -284,7 +286,6 @@ const IS_AIR = KINDS.map((k) => k.cls === CLASS_AIR);
 /** Armoured vehicles drive over barbed wire and leave none. */
 const CRUSHES = KINDS.map((k) => k.armour !== null && k.cls !== CLASS_AIR && k.cls !== CLASS_FOOT);
 const ARMED = KINDS.map((k) => k.damage.some((d) => d > 0));
-const SIGHT_SQ = KINDS.map((k) => k.sight * k.sight);
 /**
  * Rifle squads carry shoulder-fired rockets that are useless at range and deadly point
  * blank: against a vehicle within CLOSE_ROCKET of them they do CLOSE_ROCKET_MULT times
@@ -507,7 +508,7 @@ function applyCommand(w: World, cmd: Command): void {
       if (garrison && map.sKind[st] !== S_BUILDING) break;
       const all = validUnits(w, cmd.units);
       const units = all.filter((id) => {
-        const kind = KINDS[w.kind[id]];
+        const kind = kindOf(w, id);
         return garrison ? kind.garrison && w.inside[id] !== st : kind.siege > 0;
       });
       // Everyone heads for the middle of the structure; they stop (or go in) on the way.
@@ -517,7 +518,7 @@ function applyCommand(w: World, cmd: Command): void {
         // Troops with nothing that hurts a wall (rifle squads) are not left standing where
         // they were: they close on the place fighting, and cover whoever can bring it down.
         const escort = all.filter((id) => {
-          const kind = KINDS[w.kind[id]];
+          const kind = kindOf(w, id);
           return kind.siege === 0 && kind.damage.some((d) => d > 0);
         });
         if (escort.length > 0) {
@@ -540,11 +541,7 @@ function applyCommand(w: World, cmd: Command): void {
       for (let k = 0; k < units.length; k++) {
         const id = units[k];
         // Guns do not drive up to the wall: they shell it from wherever they can reach it.
-        const how = garrison
-          ? FLAG_GARRISON
-          : KINDS[w.kind[id]].indirect
-            ? FLAG_BOMBARD
-            : FLAG_SIEGE;
+        const how = garrison ? FLAG_GARRISON : kindOf(w, id).indirect ? FLAG_BOMBARD : FLAG_SIEGE;
         w.aimX[id] = gx;
         w.aimY[id] = gy;
         w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | how;
@@ -552,7 +549,7 @@ function applyCommand(w: World, cmd: Command): void {
       break;
     }
     case CMD_BOMBARD: {
-      const units = validUnits(w, cmd.units).filter((id) => KINDS[w.kind[id]].indirect);
+      const units = validUnits(w, cmd.units).filter((id) => kindOf(w, id).indirect);
       const x = clampInt(cmd.x | 0, 0, POS_MAX);
       const y = clampInt(cmd.y | 0, 0, POS_MAX);
       for (let k = 0; k < units.length; k++) {
@@ -603,6 +600,18 @@ function applyCommand(w: World, cmd: Command): void {
     case CMD_NIGHT:
       w.night = cmd.on ? 1 : 0;
       break;
+    case CMD_FACTION:
+      if (
+        Number.isInteger(cmd.team) &&
+        cmd.team >= 0 &&
+        cmd.team < MAX_TEAMS &&
+        Number.isInteger(cmd.faction) &&
+        cmd.faction >= 0 &&
+        cmd.faction < FACTION_COUNT
+      ) {
+        w.faction[cmd.team] = cmd.faction;
+      }
+      break;
     case CMD_STOP: {
       const units = validUnits(w, cmd.units);
       for (let k = 0; k < units.length; k++) w.flags[units[k]] = 0;
@@ -647,12 +656,12 @@ function orderBoarding(w: World, squads: readonly number[], carriers: readonly n
   for (let k = 0; k < squads.length; k++) {
     const id = squads[k];
     // Whatever can hold a house can ride: infantry and weapon teams.
-    if (!KINDS[w.kind[id]].garrison) continue;
+    if (!kindOf(w, id).garrison) continue;
     let best = -1;
     let bestD = 0;
     for (let c = 0; c < carriers.length; c++) {
       const v = carriers[c];
-      const seats = KINDS[w.kind[v]].carry - w.load[v] - (taken.get(v) ?? 0);
+      const seats = kindOf(w, v).carry - w.load[v] - (taken.get(v) ?? 0);
       if (seats <= 0 || w.team[v] !== w.team[id]) continue;
       const dx = w.posX[v] - w.posX[id];
       const dy = w.posY[v] - w.posY[id];
@@ -742,7 +751,7 @@ function updateTransport(w: World): void {
       ) {
         const dx = w.posX[t] - w.posX[i];
         const dy = w.posY[t] - w.posY[i];
-        const range = KINDS[w.kind[i]].range;
+        const range = kindOf(w, i).range;
         if (dx * dx + dy * dy <= range * range) unload(w, i, true);
       }
     }
@@ -752,7 +761,7 @@ function updateTransport(w: World): void {
       c < 0 ||
       w.state[c] !== STATE_ALIVE ||
       w.team[c] !== w.team[i] ||
-      w.load[c] >= KINDS[w.kind[c]].carry
+      w.load[c] >= kindOf(w, c).carry
     ) {
       w.flags[i] = 0;
       continue;
@@ -827,13 +836,13 @@ function eyeHeight(w: World, i: number): number {
 /** Weapon range of `i` against `t`: longer from upper floors and from higher ground. */
 function rangeTo(w: World, i: number, t: number): number {
   // Height above the ground is not height of ground: no bonus to or from drones.
-  if (IS_AIR[w.kind[i]] || IS_AIR[w.kind[t]]) return KINDS[w.kind[i]].range;
+  if (IS_AIR[w.kind[i]] || IS_AIR[w.kind[t]]) return kindOf(w, i).range;
   let bonus = (eyeZ[i] - eyeZ[t]) >> HEIGHT_RANGE_SHIFT;
   bonus = clampInt(bonus, HEIGHT_RANGE_MIN, HEIGHT_RANGE_MAX);
   if (w.inside[i] >= 0 && bonus < GARRISON_RANGE_BONUS && stageOf(w, w.inside[i]) < STAGE_GUTTED) {
     bonus = GARRISON_RANGE_BONUS;
   }
-  return KINDS[w.kind[i]].range + bonus;
+  return kindOf(w, i).range + bonus;
 }
 
 /** How far gone a structure is: intact, damaged, gutted or a ruin (see STAGE_* in the map). */
@@ -912,7 +921,7 @@ const STORM_WRECK = 4;
  * down: nobody has to order it.
  */
 function strayFire(w: World, i: number, t: number, dx: number, dy: number, d2: number): void {
-  const stray = KINDS[w.kind[i]].stray;
+  const stray = kindOf(w, i).stray;
   if (stray === 0 || IS_AIR[w.kind[t]]) return;
   const tx = w.posX[t];
   const ty = w.posY[t];
@@ -933,7 +942,7 @@ function strayFire(w: World, i: number, t: number, dx: number, dy: number, d2: n
   }
   if (s < 0) return;
   // A strike drone comes down on its target: the wall it meets is the one beside the target.
-  const drone = KINDS[w.kind[i]].kamikaze;
+  const drone = kindOf(w, i).kamikaze;
   const face = 4 * s + faceToward(w.map, s, drone ? tx : w.posX[i], drone ? ty : w.posY[i]);
   wallTouched[s] = 1;
   structBy[s] = w.team[i];
@@ -1351,13 +1360,14 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.velY[id] = 0;
   w.targetX[id] = w.posX[id];
   w.targetY[id] = w.posY[id];
-  w.speed[id] = KINDS[kindId].speed + nextInt(w.rng, 1 + (KINDS[kindId].speed >> 3));
+  const fk = kindFor(w, teamId, kindId);
+  w.speed[id] = fk.speed + nextInt(w.rng, 1 + (fk.speed >> 3));
   w.team[id] = teamId;
   w.kind[id] = kindId;
   w.state[id] = STATE_ALIVE;
-  w.hp[id] = KINDS[kindId].hp;
+  w.hp[id] = fk.hp;
   // Random first reload so a fresh army does not fire in one synchronised volley.
-  w.cooldown[id] = nextInt(w.rng, KINDS[kindId].reload);
+  w.cooldown[id] = nextInt(w.rng, fk.reload);
   w.attack[id] = NO_TARGET;
   w.strikeAt[id] = w.tick - STRIKE_WINDOW_TICKS;
   w.orderSpeed[id] = w.speed[id];
@@ -1450,7 +1460,7 @@ function reachesWork(w: World, i: number, cell: number): boolean {
   const cy = ((cell >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
   const dx = cx - w.posX[i];
   const dy = cy - w.posY[i];
-  const reach = siegeReach(KINDS[w.kind[i]]);
+  const reach = siegeReach(kindOf(w, i));
   if (dx * dx + dy * dy > reach * reach) return false;
   const z = heightAt(map, cx, cy) + EYE_HEIGHT;
   return lineOfSight(map, w.posX[i], w.posY[i], eyeZ[i], cx, cy, z, w.inside[i], -1, cell);
@@ -1603,10 +1613,10 @@ function acquireTargets(w: World): void {
     if (focus) w.attack[i] = w.orderUnit[i];
     const t = w.attack[i];
     const phase = tick + i;
-    const dmgTable = KINDS[ki].damage;
-    const day2 = SIGHT_SQ[ki];
+    const dmgTable = kindOf(w, i).damage;
+    const day2 = SIGHT_SQ[w.faction[w.team[i]]][ki];
     // In the dark it sees less far, except what is lit (decision 113).
-    const sight2 = night ? NIGHT_SQ[ki] : day2;
+    const sight2 = night ? NIGHT_SQ[w.faction[w.team[i]]][ki] : day2;
     const air = IS_AIR[ki];
     const z = eyeZ[i];
     const own = w.inside[i];
@@ -1817,7 +1827,7 @@ function updateJamming(w: World): void {
   const tick = w.tick;
   let count = 0;
   for (let i = 0; i < n; i++) {
-    if (w.state[i] === STATE_ALIVE && KINDS[w.kind[i]].jam > 0) jammers[count++] = i;
+    if (w.state[i] === STATE_ALIVE && kindOf(w, i).jam > 0) jammers[count++] = i;
   }
   jammerCount = count;
   for (let i = 0; i < n; i++) {
@@ -1828,7 +1838,7 @@ function updateJamming(w: World): void {
       if (w.team[e] === w.team[i]) continue;
       const dx = w.posX[e] - w.posX[i];
       const dy = w.posY[e] - w.posY[i];
-      const r = KINDS[w.kind[e]].jam;
+      const r = kindOf(w, e).jam;
       if (dx * dx + dy * dy > r * r) continue;
       hit = 1;
       w.spotted[e] = tick + JAM_REVEAL_TICKS;
@@ -1836,7 +1846,7 @@ function updateJamming(w: World): void {
     w.jammed[i] = hit;
     // What a jammer has hold of it also has a fix on.
     if (hit !== 0 && w.spotted[i] < tick + SPOT_TICKS) w.spotted[i] = tick + SPOT_TICKS;
-    if (hit !== 0 && KINDS[w.kind[i]].kamikaze && (tick + i) % JAM_DRAIN_TICKS === 0) {
+    if (hit !== 0 && kindOf(w, i).kamikaze && (tick + i) % JAM_DRAIN_TICKS === 0) {
       damage[i]++;
       killer[i] = i;
     }
@@ -1858,7 +1868,7 @@ function updateSpotters(w: World): void {
   const map = w.map;
   for (let i = (SPOTTER_MASK + 1 - (tick & SPOTTER_MASK)) & SPOTTER_MASK; i < n; i += 8) {
     if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
-    const kind = KINDS[w.kind[i]];
+    const kind = kindOf(w, i);
     if (!kind.spotter || w.jammed[i] !== 0) continue;
     const x = w.posX[i];
     const y = w.posY[i];
@@ -1901,7 +1911,7 @@ function placeCameras(w: World, ids: readonly number[]): void {
   const units = validUnits(w, ids);
   for (let k = 0; k < units.length; k++) {
     const id = units[k];
-    if (!KINDS[w.kind[id]].engineer || w.inside[id] >= 0) continue;
+    if (!kindOf(w, id).engineer || w.inside[id] >= 0) continue;
     const team = w.team[id];
     if (w.supplies[team] < CAMERA_COST) continue;
     let free = -1;
@@ -1952,7 +1962,7 @@ function updateCameras(w: World): void {
       if (w.team[e] === team) continue;
       const dx = w.posX[e] - x;
       const dy = w.posY[e] - y;
-      const r = KINDS[w.kind[e]].jam;
+      const r = kindOf(w, e).jam;
       if (dx * dx + dy * dy > r * r) continue;
       blind = 1;
       w.spotted[e] = tick + JAM_REVEAL_TICKS;
@@ -2000,7 +2010,7 @@ function updateCameras(w: World): void {
  */
 function acquireIndirect(w: World, i: number): void {
   const tick = w.tick;
-  const kind = KINDS[w.kind[i]];
+  const kind = kindOf(w, i);
   const x = w.posX[i];
   const y = w.posY[i];
   const team = w.team[i];
@@ -2045,9 +2055,7 @@ function acquireIndirect(w: World, i: number): void {
       const d2 = dx * dx + dy * dy;
       if (d2 > max2 || d2 < min2) continue;
       const key =
-        d2 +
-        (KINDS[w.kind[j]].indirect ? 0 : 2 * max2) +
-        ((w.flags[j] & FLAG_MOVING) !== 0 ? max2 : 0);
+        d2 + (kindOf(w, j).indirect ? 0 : 2 * max2) + ((w.flags[j] & FLAG_MOVING) !== 0 ? max2 : 0);
       if (key >= bestKey && (key > bestKey || j >= best)) continue;
       if (checks-- <= 0 || dangerClose(w, w.posX[j], w.posY[j], team)) continue;
       bestKey = key;
@@ -2087,7 +2095,7 @@ function launch(w: World, i: number, tx: number, ty: number, dist: number, load:
   const scatter = SCATTER_MIN + (dist >> SCATTER_SHIFT);
   const x = clampInt(tx - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
   const y = clampInt(ty - scatter + nextInt(w.rng, 2 * scatter + 1), 0, POS_MAX);
-  w.cooldown[i] = reloadOf(w, i, KINDS[w.kind[i]]);
+  w.cooldown[i] = reloadOf(w, i, kindOf(w, i));
   w.spotted[i] = w.tick + COUNTER_BATTERY_TICKS;
   if (w.shellCount >= MAX_SHELLS) return;
   const k = w.shellCount++;
@@ -2095,7 +2103,8 @@ function launch(w: World, i: number, tx: number, ty: number, dist: number, load:
   w.shY[k] = y;
   w.shTick[k] = w.tick + SHELL_BASE_TICKS + (dist >> SHELL_TICKS_SHIFT);
   w.shOwner[k] = i;
-  w.shKind[k] = w.kind[i];
+  // The shell remembers whose gun it left: the faction rides in the high bits.
+  w.shKind[k] = w.kind[i] | (w.faction[w.team[i]] << 4);
   w.shSmoke[k] = load;
   w.events.push(EV_LAUNCH, i, packPoint(x, y));
 }
@@ -2122,11 +2131,15 @@ function lightFlare(w: World, x: number, y: number): void {
 
 const burnX = new Int32Array(64);
 const burnY = new Int32Array(64);
-const NIGHT_SQ = KINDS.map((k, i) => {
-  const s =
-    i === KIND_RECON || i === KIND_DRONE ? k.sight : Math.trunc((k.sight * NIGHT_SIGHT_PCT) / 100);
-  return s * s;
-});
+const NIGHT_SQ = FACTIONS.map((f) =>
+  f.kinds.map((k, i) => {
+    const s =
+      i === KIND_RECON || i === KIND_DRONE
+        ? k.sight
+        : Math.trunc((k.sight * NIGHT_SIGHT_PCT) / 100);
+    return s * s;
+  }),
+);
 
 /**
  * Night: who is lit. A unit that has just fired (its muzzle flash), one under a flare, one
@@ -2147,7 +2160,7 @@ function updateLit(w: World): void {
   let fires = 0;
   for (let i = 0; i < w.count && fires < burnX.length; i++) {
     if (w.state[i] !== STATE_WRECK) continue;
-    const wreck = KINDS[w.kind[i]].wreckTicks;
+    const wreck = kindOf(w, i).wreckTicks;
     if (wreck < BURN_TICKS || w.cooldown[i] <= wreck - BURN_TICKS) continue;
     burnX[fires] = w.posX[i];
     burnY[fires++] = w.posY[i];
@@ -2156,7 +2169,7 @@ function updateLit(w: World): void {
   const burn2 = BURN_RADIUS * BURN_RADIUS;
   for (let i = 0; i < w.count; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
-    const reload = KINDS[w.kind[i]].reload;
+    const reload = kindOf(w, i).reload;
     let lit = w.cooldown[i] > 0 && reload > 0 && reload - w.cooldown[i] < FLASH_TICKS ? 1 : 0;
     const x = w.posX[i];
     const y = w.posY[i];
@@ -2222,7 +2235,7 @@ function resolveShells(w: World): void {
     }
     const x = w.shX[k];
     const y = w.shY[k];
-    const kind = KINDS[w.shKind[k]];
+    const kind = FACTIONS[w.shKind[k] >> 4].kinds[w.shKind[k] & 15];
     const owner = w.shOwner[k];
     const last = --w.shellCount;
     w.shX[k] = w.shX[last];
@@ -2261,7 +2274,7 @@ function resolveShells(w: World): void {
         const dy = w.posY[j] - y;
         const d2 = dx * dx + dy * dy;
         // Splinters do nothing to armour: a tank is only hurt by a shell that all but hits it.
-        const reach = KINDS[w.kind[j]].armour === null ? R : ARMOUR_BLAST(R);
+        const reach = kindOf(w, j).armour === null ? R : ARMOUR_BLAST(R);
         if (d2 >= reach * reach) continue;
         let dmg = Math.trunc((kind.damage[w.kind[j]] * (2 * reach - isqrt(d2))) / (2 * reach));
         if (w.inside[j] >= 0) dmg = Math.trunc((dmg * THROUGH[stageOf(w, w.inside[j])]) / 100);
@@ -2285,7 +2298,7 @@ function resolveShells(w: World): void {
 export function concealed(w: World, j: number): boolean {
   if (w.inside[j] >= 0) return w.reveal[j] <= w.tick;
   if (IS_AIR[w.kind[j]]) return false;
-  if (KINDS[w.kind[j]].stealth) return true;
+  if (kindOf(w, j).stealth) return true;
   if (w.map.smoke[cellOfPos(w.posX[j], w.posY[j])] > w.tick) return true;
   const t = w.map.type[cellOfPos(w.posX[j], w.posY[j])];
   if (t === T_FOREST) return true;
@@ -2327,7 +2340,7 @@ function fire(w: World): void {
       w.cooldown[i]--;
       continue;
     }
-    const kind = KINDS[w.kind[i]];
+    const kind = kindOf(w, i);
     if (kind.indirect) {
       // A gun fires standing still: at the point it was given, or at its spotted target.
       const flags = w.flags[i];
@@ -2415,7 +2428,7 @@ function fire(w: World): void {
       dmg *= CLOSE_ROCKET_MULT;
     }
     const cover = w.inside[t];
-    const armour = KINDS[w.kind[t]].armour;
+    const armour = kindOf(w, t).armour;
     if (armour !== null && d2 > 0 && !kind.kamikaze) {
       // Which plate the shot meets: the angle between the target's nose and the shooter.
       const cos = Math.trunc((-dx * w.faceX[t] - dy * w.faceY[t]) / isqrt(d2));
@@ -2488,7 +2501,7 @@ function score(w: World, i: number, by: number): void {
   const team = w.team[i];
   const points = POINTS[w.kind[i]];
   // A strike drone that went in is spent, not lost.
-  if (!(by === i && KINDS[w.kind[i]].kamikaze)) {
+  if (!(by === i && kindOf(w, i).kamikaze)) {
     if (team < STAT_TEAMS) {
       st[STAT_STRIDE * team + STAT_LOST]++;
       st[STAT_STRIDE * team + STAT_LOST_POINTS] += points;
@@ -2536,7 +2549,7 @@ function kill(w: World, i: number, by: number): void {
   score(w, i, by);
   w.hp[i] = 0;
   w.state[i] = STATE_WRECK;
-  w.cooldown[i] = KINDS[w.kind[i]].wreckTicks;
+  w.cooldown[i] = kindOf(w, i).wreckTicks;
   w.flags[i] = 0;
   w.velX[i] = 0;
   w.velY[i] = 0;
@@ -2648,7 +2661,7 @@ function updateTowns(w: World): void {
       const dy = y - map.townY[t];
       if (dx * dx + dy * dy <= map.townR[t] * map.townR[t]) townCount[t * MAX_TEAMS + team]++;
     }
-    if (cut === 0 || !KINDS[w.kind[i]].garrison) continue;
+    if (cut === 0 || !kindOf(w, i).garrison) continue;
     if ((w.flags[i] & FLAG_MOVING) !== 0 || w.attack[i] !== NO_TARGET) continue;
     for (let s = 0; s < map.structCount; s++) {
       if (map.sKind[s] !== S_BRIDGE || w.sHp[s] > 0) continue;
@@ -2735,7 +2748,7 @@ function steer(w: World): void {
     const cell = cellOfPos(x, y);
     // Out of rations a vehicle is out of fuel too: it crawls.
     const s =
-      w.ration[i] === 0 && KINDS[w.kind[i]].armour !== null && NEEDS_SUPPLY[w.kind[i]]
+      w.ration[i] === 0 && kindOf(w, i).armour !== null && NEEDS_SUPPLY[w.kind[i]]
         ? (w.speed[i] * HUNGRY_SPEED) >> 8
         : w.speed[i];
     let vx = 0;
@@ -2744,7 +2757,7 @@ function steer(w: World): void {
     if ((flags & FLAG_SIEGE) !== 0) {
       // Close enough to shell the structure and able to see it: stop here.
       const st = w.orderStruct[i];
-      const reach = siegeReach(KINDS[w.kind[i]]) - fx(1);
+      const reach = siegeReach(kindOf(w, i)) - fx(1);
       if (structDist2(w, st, x, y) <= reach * reach && seesStructure(w, i, st)) {
         w.velX[i] = 0;
         w.velY[i] = 0;
@@ -2756,7 +2769,7 @@ function steer(w: World): void {
       if (
         !workStands(w, bc) ||
         w.wTeam[bc] === w.team[i] ||
-        !canBreach(KINDS[w.kind[i]], w.wKind[bc])
+        !canBreach(kindOf(w, i), w.wKind[bc])
       ) {
         // It is down (or was never ours to bring down): on with whatever comes next.
         flags &= ~FLAG_BREACH;
@@ -2775,7 +2788,7 @@ function steer(w: World): void {
       // Driving up to shell a point: close enough is where the gun can reach it from.
       const dx = w.aimX[i] - x;
       const dy = w.aimY[i] - y;
-      const reach = KINDS[w.kind[i]].range - fx(4);
+      const reach = kindOf(w, i).range - fx(4);
       if (dx * dx + dy * dy <= reach * reach) {
         flags &= ~(FLAG_MOVING | FLAG_DIRECT);
         w.flags[i] = flags;
@@ -2784,7 +2797,7 @@ function steer(w: World): void {
     const t = w.attack[i];
     if (
       t !== NO_TARGET &&
-      !KINDS[w.kind[i]].indirect &&
+      !kindOf(w, i).indirect &&
       ((flags & FLAG_MOVING) === 0 || (flags & (FLAG_AMOVE | FLAG_WANDER)) !== 0)
     ) {
       const dx = w.posX[t] - x;
@@ -2890,8 +2903,8 @@ function steer(w: World): void {
               vx = 0;
               vy = 0;
             } else if (
-              canBreach(KINDS[w.kind[i]], w.wKind[next]) &&
-              !KINDS[w.kind[i]].indirect &&
+              canBreach(kindOf(w, i), w.wKind[next]) &&
+              !kindOf(w, i).indirect &&
               w.stance[i] !== STANCE_HOLD_FIRE
             ) {
               w.aimX[i] = ((next & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
@@ -2916,7 +2929,7 @@ function steer(w: World): void {
     }
     w.velX[i] = vx;
     w.velY[i] = vy;
-    const turn = KINDS[w.kind[i]].turn;
+    const turn = kindOf(w, i).turn;
     if (turn === 0) continue;
     // The hull turns toward where it is driving, or, standing, toward what it is shooting.
     let hx = vx;

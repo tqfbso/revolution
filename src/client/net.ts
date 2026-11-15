@@ -46,6 +46,9 @@ interface Config {
   ai: string;
   /** 'night' for a night battle. */
   time?: string;
+  /** The factions of red and of blue (`?army=`, `?foe=`). */
+  army?: string;
+  foe?: string;
   /** Players in the game: the computer is given more to fight three or four with. */
   humans: number;
   /** Versus (decision 114): the players fight each other, no computer. */
@@ -920,6 +923,8 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           map: params.get('map') ?? 'city',
           ai: params.get('ai') ?? '',
           time: params.get('time') ?? '',
+          army: params.get('army') ?? '',
+          foe: params.get('foe') ?? '',
           humans: guests.length + 1,
           versus,
         };
@@ -1006,6 +1011,11 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       else params.delete('ai');
       if (answer.cfg.time) params.set('time', answer.cfg.time);
       else params.delete('time');
+      for (const k of ['army', 'foe'] as const) {
+        const v = answer.cfg[k];
+        if (v) params.set(k, v);
+        else params.delete(k);
+      }
       // Nobody lifts the fog on the other side.
       if (answer.teams) params.delete('fog');
       ui.hide();

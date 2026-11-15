@@ -7,11 +7,11 @@
 //
 // Buildings, bridges and field works are brought down with charges (FLAG_SIEGE and
 // FLAG_BREACH in sim.ts); who dies in a house that is brought down is in civilians.ts.
+import { kindOf } from './factions';
 import { CMD_FELL, type Command } from './commands';
 import { clampInt, fx } from './fixed';
 import { CELL_FX, CELL_SHIFT, MAP_CELLS, T_FOREST, T_OPEN, cellOfPos } from './map';
 import { leaveHouse, markGround, sendTo, validUnits } from './sim';
-import { KINDS } from './units';
 import {
   EV_FELL,
   FLAG_AMOVE,
@@ -67,7 +67,7 @@ export function applyDemolishCommand(w: World, cmd: Command): boolean {
   const at = cellOfPos(x, y);
   if (nextTree(w, at, x, y) < 0) return true;
   for (const id of validUnits(w, cmd.units)) {
-    if (!KINDS[w.kind[id]].engineer) continue;
+    if (!kindOf(w, id).engineer) continue;
     leaveHouse(w, id);
     w.job[id] = JOB_FELL;
     w.jobCell[id] = at;

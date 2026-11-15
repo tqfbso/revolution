@@ -2,11 +2,12 @@
 // never waits on game logic and game logic never waits on rendering.
 import { aiThink, createAi, type Ai } from '../sim/ai';
 import { createStaff, staffThink, type Staff } from '../sim/staff';
-import { CMD_NIGHT, type Command } from '../sim/commands';
+import { CMD_FACTION, CMD_NIGHT, type Command } from '../sim/commands';
 import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
 import { fromFx } from '../sim/fixed';
 import { S_BUILDING, generateMap } from '../sim/map';
-import { BUILDINGS, TIER_ITEM, TIER_PRICE, UNIT_PRICE } from '../sim/economy';
+import { BUILDINGS, TIER_ITEM, TIER_PRICE, unitPrice } from '../sim/economy';
+import { kindOf } from '../sim/factions';
 import {
   assaultCommands,
   battleCommands,
@@ -116,6 +117,9 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
             ? assaultCommands(world.map, msg.units)
             : skirmishCommands(world.map);
     if (msg.night) pending.unshift({ type: CMD_NIGHT, on: true });
+    (msg.factions ?? []).forEach((faction, team) => {
+      if (faction > 0) pending.unshift({ type: CMD_FACTION, team, faction });
+    });
     ais = [];
     const versus = msg.versus === true && msg.scenario === 'skirmish';
     me = versus && msg.team === 1 ? 1 : 0;
@@ -259,7 +263,7 @@ function postSnapshot(w: World, simMs: number): void {
       (w.carrier[i] >= 0 ? INFO_CARRIED : 0) |
       (w.spotted[i] > w.tick ? INFO_SPOTTED : 0) |
       (w.reveal[i] > w.tick ? INFO_REVEALED : 0);
-    hp[i] = Math.ceil((w.hp[i] * 255) / KINDS[kind].hp);
+    hp[i] = Math.ceil((w.hp[i] * 255) / kindOf(w, i).hp);
     aim[i] = w.attack[i] === NO_TARGET ? NO_AIM : w.attack[i];
     if (w.jammed[i] !== 0) load[i] = 1;
     // A truck shows what it carries: 1 supplies, 2 fuel.
@@ -312,7 +316,7 @@ function postSnapshot(w: World, simMs: number): void {
         ? 1
         : item === TIER_ITEM
           ? (TIER_PRICE[w.tier[w.sTeam[s]]]?.ticks ?? 1)
-          : UNIT_PRICE[item].ticks;
+          : unitPrice(w, w.sTeam[s], item).ticks;
     bases.push(
       s,
       w.sType[s],

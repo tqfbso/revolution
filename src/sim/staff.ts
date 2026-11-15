@@ -8,6 +8,7 @@
 //
 // Deterministic like the rest of the sim: integer maths, no clocks, no Math.random. Two
 // machines that run the same world run the same staff, which is what co-op will need.
+import { kindOf } from './factions';
 import {
   DISMOUNT,
   FOOT,
@@ -251,7 +252,7 @@ export function staffThink(st: Staff, w: World, out: Command[]): void {
     any = true;
     const p = st.posts[c];
     if (w.carrier[i] >= 0) {
-      p.aboard += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / KINDS[w.kind[i]].hp);
+      p.aboard += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / kindOf(w, i).hp);
       p.riders++;
     } else if (st.body[i] === c) p.units.push(i);
     else p.fresh.push(i);
@@ -563,7 +564,7 @@ function begin(
           sy = f.obj.y + Math.trunc(((cy - f.obj.y) * stand) / od);
           let clear = true;
           for (const e of ai.seen) {
-            if (KINDS[w.kind[e]].cls === CLASS_AIR) continue;
+            if (kindOf(w, e).cls === CLASS_AIR) continue;
             if (dist(w.posX[e], w.posY[e], sx, sy) < STAND_CLEAR) {
               clear = false;
               break;
@@ -724,7 +725,7 @@ function breakOff(ai: Ai, w: World, out: Command[], p: Post, cx: number, cy: num
   let foe = -1;
   let foeD = fx(120);
   for (const e of ai.seen) {
-    if (KINDS[w.kind[e]].cls === CLASS_AIR) continue;
+    if (kindOf(w, e).cls === CLASS_AIR) continue;
     const d = dist(w.posX[e], w.posY[e], cx, cy);
     if (d < foeD) {
       foe = e;
@@ -951,7 +952,7 @@ function byPace(
   const air: number[] = [];
   const wheels: number[] = [];
   for (const i of units) {
-    const cls = KINDS[w.kind[i]].cls;
+    const cls = kindOf(w, i).cls;
     (cls === CLASS_FOOT ? foot : cls === CLASS_AIR ? air : wheels).push(i);
   }
   const [gx, gy] = ground(w.map, x, y);
@@ -994,7 +995,7 @@ function focus(
     const flags = w.flags[i];
     const moving = (flags & FLAG_MOVING) !== 0;
     const d = dist(w.posX[i], w.posY[i], x, y);
-    if (KINDS[w.kind[i]].indirect) {
+    if (kindOf(w, i).indirect) {
       // A gun does not drive into the crowd: it comes within easy reach and shells from there.
       if (d < FOCUS_GUNS + fx(30)) up++;
       else if (fresh || !moving) {
@@ -1046,8 +1047,7 @@ function attack(
   const reach = obj.kind === OBJ_TOWN ? map.townR[obj.id] + fx(30) : fx(70);
   let foes = 0;
   for (const e of ai.seen) {
-    if (KINDS[w.kind[e]].cls !== CLASS_AIR && dist(w.posX[e], w.posY[e], obj.x, obj.y) < reach)
-      foes++;
+    if (kindOf(w, e).cls !== CLASS_AIR && dist(w.posX[e], w.posY[e], obj.x, obj.y) < reach) foes++;
   }
   f.quiet = foes === 0 && dist(cx, cy, obj.x, obj.y) < reach ? f.quiet + 1 : 0;
   const points = strongPoints(ai, w, obj);
@@ -1171,7 +1171,7 @@ function dig(w: World, out: Command[], p: Post, foot: readonly number[]): void {
   const map = w.map;
   const free = p.units.filter(
     (i) =>
-      KINDS[w.kind[i]].engineer &&
+      kindOf(w, i).engineer &&
       w.job[i] === JOB_NONE &&
       w.attack[i] === NO_TARGET &&
       (w.flags[i] & FLAG_MOVING) === 0,
@@ -1241,7 +1241,7 @@ function defend(
     sx += w.posX[e] >> 4;
     sy += w.posY[e] >> 4;
     n++;
-    threat += Math.trunc((POWER[kind] * w.hp[e]) / KINDS[kind].hp) + 1;
+    threat += Math.trunc((POWER[kind] * w.hp[e]) / kindOf(w, e).hp) + 1;
   }
   p.status = ST_DEFEND;
   if (n === 0) {
@@ -1292,10 +1292,10 @@ function pickets(
 function unload(ai: Ai, w: World, out: Command[], p: Post): void {
   const down: number[] = [];
   for (const i of p.units) {
-    if (w.load[i] === 0 || KINDS[w.kind[i]].carry === 0) continue;
+    if (w.load[i] === 0 || kindOf(w, i).carry === 0) continue;
     let danger = false;
     for (const e of ai.seen) {
-      if (KINDS[w.kind[e]].cls === CLASS_AIR || POWER[w.kind[e]] <= 2) continue;
+      if (kindOf(w, e).cls === CLASS_AIR || POWER[w.kind[e]] <= 2) continue;
       if (dist(w.posX[e], w.posY[e], w.posX[i], w.posY[i]) < DISMOUNT) {
         danger = true;
         break;

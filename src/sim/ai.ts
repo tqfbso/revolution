@@ -11,6 +11,7 @@
 //   production what to build next, from the army it wants and the enemy it has seen
 //   military   town garrisons, scouts, a reserve that answers alarms, and a field army
 //              that picks an objective, picks the crossing to reach it by, and assaults
+import { FACTIONS, kindOf } from './factions';
 import { hungryPoints } from './logistics';
 import {
   CMD_ASSIST,
@@ -46,7 +47,7 @@ import {
   POP_MAX,
   TIER_ITEM,
   TIER_PRICE,
-  UNIT_PRICE,
+  unitPrice,
   type Price,
 } from './economy';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
@@ -999,7 +1000,7 @@ export function perceive(ai: Ai, w: World): void {
       const r = ai.role[i];
       if (r === R_ARMY || raiding(r)) {
         const which = r === R_ARMY ? 0 : r === R_RAID ? 1 : 2 + r - R_PROBE;
-        ai.aboard[which] += Math.trunc((POWER[kind] * w.hp[i]) / KINDS[kind].hp);
+        ai.aboard[which] += Math.trunc((POWER[kind] * w.hp[i]) / kindOf(w, i).hp);
       }
       continue;
     }
@@ -1043,7 +1044,7 @@ export function perceive(ai: Ai, w: World): void {
     const kind = w.kind[i];
     ai.seen.push(i);
     mixNow[kind]++;
-    let p = Math.trunc((POWER[kind] * w.hp[i]) / KINDS[kind].hp) + 1;
+    let p = Math.trunc((POWER[kind] * w.hp[i]) / kindOf(w, i).hp) + 1;
     if (w.inside[i] >= 0) {
       // Troops in a house are worth twice their number to whoever has to get them out.
       p *= 2;
@@ -1118,7 +1119,7 @@ export function strength(w: World, units: readonly number[]): number {
   let sum = 0;
   for (let k = 0; k < units.length; k++) {
     const i = units[k];
-    sum += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / KINDS[w.kind[i]].hp);
+    sum += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / kindOf(w, i).hp);
   }
   return sum;
 }
@@ -1330,10 +1331,10 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     trucksAll < truckTarget &&
     w.sQueueLen[ai.hq] < 2 &&
     w.pop[team] + POINTS[KIND_TRUCK] <= w.popCap[team] &&
-    canPay(w, team, UNIT_PRICE[KIND_TRUCK], 0, 0, 0)
+    canPay(w, team, unitPrice(w, team, KIND_TRUCK), 0, 0, 0)
   ) {
     out.push({ type: CMD_TRAIN, structure: ai.hq, kind: KIND_TRUCK });
-    s0 += UNIT_PRICE[KIND_TRUCK].supplies;
+    s0 += unitPrice(w, team, KIND_TRUCK).supplies;
   }
 
   // Building sites and damaged buildings get trucks; nothing new goes up meanwhile.
@@ -1524,8 +1525,11 @@ function wantedMix(ai: Ai, w: World): void {
     want[KIND_AD] += Math.ceil(want[KIND_TANK] / 4);
     if (tier >= 3) want[KIND_EW] += 1;
   }
+  // Each faction leans its own way, and wants nothing it cannot build.
+  const share = FACTIONS[w.faction[ai.team]].share;
   for (let k = 0; k < KIND_COUNT; k++) {
-    if (want[k] < 0 || UNIT_PRICE[k].tier > tier) want[k] = 0;
+    if (want[k] < 0 || unitPrice(w, ai.team, k).tier > tier) want[k] = 0;
+    else if (share[k] !== 100) want[k] = Math.trunc((want[k] * share[k]) / 100);
   }
 }
 
@@ -1572,7 +1576,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
     let best = -1;
     let bestScore = 0;
     for (let k = 0; k < KIND_COUNT; k++) {
-      const p = UNIT_PRICE[k];
+      const p = unitPrice(w, team, k);
       if (p.from !== w.sType[s] || p.tier > tier || !canPay(w, team, p, s0, f0, c0)) continue;
       if (POINTS[k] > room) continue;
       let score = want[k] * (total + 10) - have[k] * sumWant;
@@ -1596,7 +1600,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
     // Nothing it is short of: still spend a full purse rather than sit on it.
     if (best < 0 || (bestScore <= 0 && w.supplies[team] - s0 < 700)) continue;
     out.push({ type: CMD_TRAIN, structure: s, kind: best });
-    const p = UNIT_PRICE[best];
+    const p = unitPrice(w, team, best);
     s0 += p.supplies;
     f0 += p.fuel;
     c0 += p.credits;
@@ -1690,7 +1694,7 @@ function dismount(ai: Ai, w: World, out: Command[]): void {
     // Enemy ground troops close by: out, before a missile finds the vehicle full.
     let danger = false;
     for (const e of ai.seen) {
-      if (KINDS[w.kind[e]].cls === CLASS_AIR || POWER[w.kind[e]] <= 2) continue;
+      if (kindOf(w, e).cls === CLASS_AIR || POWER[w.kind[e]] <= 2) continue;
       if (dist(w.posX[e], w.posY[e], w.posX[i], w.posY[i]) < DISMOUNT) {
         danger = true;
         break;
@@ -2193,7 +2197,7 @@ function findAlarm(ai: Ai, w: World): Alarm | null {
       const dx = x - assets[6 * a];
       const dy = y - assets[6 * a + 1];
       if (dx * dx + dy * dy > r * r) continue;
-      sum[a] += Math.trunc((POWER[kind] * w.hp[e]) / KINDS[kind].hp) + 1;
+      sum[a] += Math.trunc((POWER[kind] * w.hp[e]) / kindOf(w, e).hp) + 1;
       sx[a] += x;
       sy[a] += y;
       num[a]++;
@@ -2581,7 +2585,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
       const party: number[] = [];
       let carrier = -1;
       for (const i of ai.reserve) {
-        if (w.hp[i] * 4 < KINDS[w.kind[i]].hp * 3) continue;
+        if (w.hp[i] * 4 < kindOf(w, i).hp * 3) continue;
         if (FOOT(w.kind[i]) && party.length < tune.probeSize) party.push(i);
         else if (w.kind[i] === KIND_IFV && carrier < 0) carrier = i;
       }
@@ -2599,7 +2603,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
     } else if (raid) {
       if (tune.raids === 0 || tick < tune.raids || tick - ai.lastRaid < 3 * MINUTE) return;
       const ifvs = ai.reserve.filter(
-        (i) => w.kind[i] === KIND_IFV && w.hp[i] * 2 > KINDS[KIND_IFV].hp,
+        (i) => w.kind[i] === KIND_IFV && w.hp[i] * 2 > kindOf(w, i).hp,
       );
       if (ifvs.length < tune.raidParty) return;
       const obj = raidTarget(ai, w);
@@ -2688,7 +2692,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
       if (dist(w.posX[i], w.posY[i], cx, cy) < fx(50)) {
         ai.role[i] = R_ARMY;
         units.push(i);
-        f.launch += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / KINDS[w.kind[i]].hp);
+        f.launch += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / kindOf(w, i).hp);
       } else if ((w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET) lagging.push(i);
     }
     order(out, CMD_ATTACK_MOVE, lagging, cx, cy);
@@ -2753,8 +2757,8 @@ export function mount(w: World, out: Command[], f: Force, units: number[]): Set<
   let sx = 0;
   let sy = 0;
   for (const i of units) {
-    const free = KINDS[w.kind[i]].carry - w.load[i];
-    if (free <= 0 || w.hp[i] * 2 < KINDS[w.kind[i]].hp) continue;
+    const free = kindOf(w, i).carry - w.load[i];
+    if (free <= 0 || w.hp[i] * 2 < kindOf(w, i).hp) continue;
     carriers.push(i);
     seats += free;
     sx += w.posX[i];
@@ -2918,8 +2922,7 @@ function assault(
   const reach = obj.kind === OBJ_TOWN ? map.townR[obj.id] + fx(30) : fx(70);
   let foes = 0;
   for (const e of ai.seen) {
-    if (KINDS[w.kind[e]].cls !== CLASS_AIR && dist(w.posX[e], w.posY[e], obj.x, obj.y) < reach)
-      foes++;
+    if (kindOf(w, e).cls !== CLASS_AIR && dist(w.posX[e], w.posY[e], obj.x, obj.y) < reach) foes++;
   }
   f.quiet = foes === 0 && dist(cx, cy, obj.x, obj.y) < reach ? f.quiet + 1 : 0;
   const points = strongPoints(ai, w, obj);
@@ -3089,7 +3092,7 @@ export function press(
     const near: number[] = [];
     let going = 0;
     for (const i of units) {
-      if (!FOOT(w.kind[i]) || !KINDS[w.kind[i]].garrison || w.inside[i] >= 0) continue;
+      if (!FOOT(w.kind[i]) || !kindOf(w, i).garrison || w.inside[i] >= 0) continue;
       if ((w.flags[i] & FLAG_GARRISON) !== 0 && w.orderStruct[i] === point) going++;
       else if (dist(w.posX[i], w.posY[i], tx, ty) < fx(90)) near.push(i);
     }

@@ -1,6 +1,7 @@
 // Field works: what an army builds on the ground to hold it. One cell each. Walls and gates
 // stop everyone (a gate lets its owner through), wire stops men, obstacles stop vehicles,
 // trenches and sandbags are cover for infantry. See decisions 052 to 056.
+import { kindOf } from './factions';
 import {
   CMD_BREACH,
   CMD_DEMOLISH,
@@ -433,7 +434,7 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
       const gx = centre(cell & (MAP_CELLS - 1));
       const gy = centre(cell >> 8);
       const units = validUnits(w, cmd.units).filter(
-        (id) => w.team[id] !== w.wTeam[cell] && canBreach(KINDS[w.kind[id]], w.wKind[cell]),
+        (id) => w.team[id] !== w.wTeam[cell] && canBreach(kindOf(w, id), w.wKind[cell]),
       );
       for (const id of units) {
         w.job[id] = JOB_NONE;
@@ -444,7 +445,7 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
         w.aimX[id] = gx;
         w.aimY[id] = gy;
         // Guns shell the spot from where they can reach it; the others go for the work itself.
-        w.flags[id] |= KINDS[w.kind[id]].indirect ? FLAG_BOMBARD : FLAG_BREACH;
+        w.flags[id] |= kindOf(w, id).indirect ? FLAG_BOMBARD : FLAG_BREACH;
       }
       return true;
     }
@@ -453,7 +454,7 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
       const y = clampInt(cmd.y | 0, 0, MAP_SIZE_FX - 1);
       const start = cellOfPos(x, y);
       if (!isCover(map.type[start])) return true;
-      const units = validUnits(w, cmd.units).filter((id) => KINDS[w.kind[id]].garrison);
+      const units = validUnits(w, cmd.units).filter((id) => kindOf(w, id).garrison);
       if (units.length === 0) return true;
       // The line outward from the point clicked, breadth first, two squads to a cell.
       const cells = [start];

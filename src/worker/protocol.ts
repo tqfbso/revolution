@@ -77,6 +77,8 @@ export type ToWorker =
       team?: number;
       /** A night battle (CMD_NIGHT on the first tick): short sight, flares, fires that show. */
       night?: boolean;
+      /** The faction of each army (CMD_FACTION on the first tick), 0 or absent for none. */
+      factions?: number[];
     }
   | { type: 'command'; command: Command }
   /** Guest: ticks the host has run, in order. The sim runs these and no others. */

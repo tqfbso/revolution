@@ -448,8 +448,11 @@ From the proposal in the "Design tactical attack formations" thread.
 
 ## M10 Factions
 
-- Three asymmetric factions with distinct units and tech
-- Original names, per-faction equipment and paint, audio
+- [x] Three factions (decision 123): Western alliance, Russia, China. Each is its own
+      version of the same kinds of unit (toughness, reach, rate of fire, price, time to
+      build, names), lacks one kind, and has its own base coat. Chosen in the Menu or with
+      `?army=` and `?foe=`; the computer builds each faction's army to its strengths.
+- [ ] Units only one faction has (new models), per-faction buildings and tech, audio
 
 ## M11 Polish for v1
 
