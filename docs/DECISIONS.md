@@ -2752,3 +2752,18 @@ from the truck to the building in hand and on to each one waiting.
 Not done: paying for a building only when work on it starts, which would let a player
 plan more than can be afforded now. The computer does not use lists. Golden hash unchanged
 (a list is hashed only while a truck has one).
+
+## 132. The Western alliance has a jammer again, a light one (2026-11-15)
+
+Fabio, the day the factions went in: "the jammer unit has disappeared". It had not broken:
+decision 123 gave each faction one kind it does not field, and the alliance's was the
+jammer. The alliance is the default army, so to the player the unit was simply gone, and
+with it the only thing short of air defence that stops drones, which are a large part of
+this game. Asked, Fabio chose a light jammer over the standard one or none.
+
+The alliance's jammer: "Light jammer", three quarters of the ring (jam 75%), a quarter
+dearer (cost 125%), and the computer builds fewer of them (share 70%). Russia keeps the
+strongest (130%). The alliance now lacks no kind; its price is that everything costs more.
+Not measured again with `tools/factionduel.ts`: a jammer that is weaker and dearer than
+the plain one is a small push up for the alliance, which stood in the middle of the last
+measured round.

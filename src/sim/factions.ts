@@ -74,8 +74,8 @@ const SPECS: readonly Spec[] = [
   {
     name: 'Western alliance',
     short: 'nato',
-    line: 'Fewer and better: tougher armour, longer sight, precise guns, the best helicopters. No jammer.',
-    without: [KIND_EW],
+    line: 'Fewer and better: tougher armour, longer sight, precise guns, the best helicopters. Only a light jammer.',
+    without: [],
     tweaks: {
       [KIND_TANK]: {
         name: 'Heavy tank',
@@ -101,6 +101,9 @@ const SPECS: readonly Spec[] = [
       [KIND_DRONE]: { name: 'Surveillance drone', sight: 6 },
       [KIND_STRIKE]: { name: 'Loitering munition', damage: 125, cost: 150, time: 125, share: 70 },
       [KIND_AD]: { name: 'Air-defence vehicle', share: 140 },
+      // It had none at first (decision 123). Drones are too large a part of the game to
+      // leave the army most people play without the one thing that stops them (132).
+      [KIND_EW]: { name: 'Light jammer', jam: 75, cost: 125, share: 70 },
       [KIND_HELI]: { name: 'Gunship', hp: 115, damage: 110, cost: 110 },
       [KIND_LIFT]: { name: 'Transport helicopter' },
       [KIND_PARA]: { name: 'Airborne infantry', hp: 110 },
