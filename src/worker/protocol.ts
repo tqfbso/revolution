@@ -165,6 +165,12 @@ export interface Snapshot {
   commanders: Int32Array;
   /** Per unit: job | stance | moving (see TASK_*). */
   task: Uint8Array;
+  /**
+   * Routes (way points queued behind a move), one after the other: how many units, how
+   * many places, the units' ids, then x and z of each place in world units. The first
+   * place is where the leg under way ends.
+   */
+  routes: Float32Array;
   /** The score so far (STAT_* in sim/world.ts). */
   stats: Int32Array;
   /** Civilians in the open: three numbers each, its number and where it is (x, z). */

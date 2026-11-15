@@ -400,6 +400,13 @@ export interface World {
   ration: Uint8Array;
   supplyMap: Uint8Array;
   supplyTick: number;
+  /**
+   * Routes: way points queued behind a move (Shift + right click). Per unit the route it
+   * is on (0 = none); the routes themselves in the order they were made.
+   */
+  routeOf: Int32Array;
+  routes: Route[];
+  routeSeq: number;
   /** Trucks: the job, the site and the building it refers to, the load and a timer. */
   job: Uint8Array;
   jobSite: Int16Array;
@@ -577,6 +584,9 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     ration: new Uint8Array(MAX_UNITS),
     supplyMap: new Uint8Array(MAX_TEAMS * (MAP_CELLS >> 2) * (MAP_CELLS >> 2)),
     supplyTick: -1,
+    routeOf: new Int32Array(MAX_UNITS),
+    routes: [],
+    routeSeq: 0,
     job: new Uint8Array(MAX_UNITS),
     jobSite: new Int16Array(MAX_UNITS),
     jobStruct: new Int16Array(MAX_UNITS),
@@ -625,6 +635,23 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
   seedRng(world.rng, seed);
   placeCivilians(world, seed);
   return world;
+}
+
+/** The most way points one route holds; more are refused. */
+export const ROUTE_MAX = 16;
+
+/** Way points queued behind the move a body of units is making. */
+export interface Route {
+  id: number;
+  /** Who is on it. A unit given any other order has left it (see World.routeOf). */
+  units: number[];
+  /** The way points still to come: attack-move (1) or move (0), x, y, for each. */
+  pts: number[];
+  /** Where the leg it is on ends. */
+  curX: number;
+  curY: number;
+  /** The tick at which half of it had finished the leg, or -1. */
+  half: number;
 }
 
 /** How many armies the hash always covered (see hashWorld). */
@@ -795,6 +822,14 @@ export function hashWorld(w: World): number {
     mix(w.goal[i]);
     mix(w.job[i] | (w.stance[i] << 4) | (w.cargoKind[i] << 8) | (w.cargo[i] << 16));
     mix((w.jobSite[i] & 0xff) | ((w.jobStruct[i] & 0xfff) << 8) | (w.jobTimer[i] << 20));
+  }
+  // Routes are part of the hash only while there are any, so that every hash taken before
+  // they existed still holds.
+  for (const r of w.routes) {
+    mix(r.id);
+    mix(r.half);
+    for (const u of r.units) mix(u ^ (w.routeOf[u] << 16));
+    for (const v of r.pts) mix(v);
   }
   return h >>> 0;
 }

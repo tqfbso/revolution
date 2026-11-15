@@ -34,6 +34,8 @@ const DOUBLE_MS = 350;
  * of that type on screen. Shift: add. Right click the ground: move (units fire on the way
  * but do not stop, so a fight can always be broken off). Right click an enemy: attack it.
  * C then left click (or Alt + right click): attack-move, fight whatever is met on the way.
+ * Shift + right click the ground: a way point, the troops go there after where they are
+ * going now (and so on: a route).
  * Right click a building: infantry moves in.
  * Ctrl + right click a building or bridge: shell it. Ctrl + right click the ground: guns
  * shell that spot. Right click one of your carriers, or L
@@ -111,7 +113,7 @@ export class Input {
       } else if (e.button === 2) {
         const attackMove = e.altKey || this.attackMoveArmed;
         card.arm('');
-        this.orderMove(e.clientX, e.clientY, attackMove, e.ctrlKey || e.metaKey);
+        this.orderMove(e.clientX, e.clientY, attackMove, e.ctrlKey || e.metaKey, e.shiftKey);
       }
     });
     dom.addEventListener('pointermove', (e) => {
@@ -412,7 +414,13 @@ export class Input {
     return team >= 0 && team !== this.units.playerTeam && !this.controlAll;
   }
 
-  private orderMove(clientX: number, clientY: number, attack: boolean, shell: boolean): void {
+  private orderMove(
+    clientX: number,
+    clientY: number,
+    attack: boolean,
+    shell: boolean,
+    queue = false,
+  ): void {
     const { ground, structure } = this.structureAt(clientX, clientY);
     // The card first: a rally point for a building, or trucks sent to haul or to build.
     if (ground && !shell && this.card.order(ground.x, ground.z, structure)) {
@@ -420,6 +428,11 @@ export class Input {
       return;
     }
     if (this.units.selectedCount === 0) return;
+    // A way point is a place on the ground, whatever stands on it.
+    if (queue && ground && !shell) {
+      this.orderTo(ground.x, ground.z, attack, true);
+      return;
+    }
     const ids = this.units.selectedIds();
     // An enemy base building is attacked on a plain right click; a house or a bridge only
     // with Ctrl held (a plain click on a house sends the infantry in).
@@ -572,7 +585,7 @@ export class Input {
   }
 
   /** Order the selection to a ground point (also used by the minimap). */
-  orderTo(x: number, z: number, attack: boolean): void {
+  orderTo(x: number, z: number, attack: boolean, queue = false): void {
     if (this.units.selectedCount === 0) return;
     // Float -> fixed happens here, once, at the sim boundary. The command carries integers.
     this.send({
@@ -580,6 +593,7 @@ export class Input {
       units: this.units.selectedIds(),
       x: fx(x),
       y: fx(z),
+      ...(queue ? { queue: true } : {}),
     });
     this.mark(x, this.terrain.heightAt(x, z) + 0.15, z);
   }
