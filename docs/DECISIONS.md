@@ -2767,3 +2767,15 @@ strongest (130%). The alliance now lacks no kind; its price is that everything c
 Not measured again with `tools/factionduel.ts`: a jammer that is weaker and dearer than
 the plain one is a small push up for the alliance, which stood in the middle of the last
 measured round.
+
+## 133. Rain is a hint in the air; the wet ground carries it (2026-11-15)
+
+Fabio, after a whole game in the rain: too intense on the eyes, a bit dizzying.
+
+The rain of decision 125 was 2,600 bright streaks falling at 34 through a box round the
+camera: a streak crossed the screen in a few frames, so the whole picture flickered, all
+game long. Now: 520 streaks (a fifth), falling at 19, shorter and thinner, nearly the grey
+of the sky at 13% opacity (was 34%), with less wind, and none nearer the lens than 22 m,
+where they are largest and fastest. To keep the weather readable without them the ground
+is a little darker and shinier (roughness -0.4, was -0.32). Sight in the sim is unchanged.
+Snow is unchanged: it falls slowly and nobody has complained.

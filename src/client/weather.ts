@@ -62,14 +62,14 @@ export function weathered(c: V3, bare?: F): V3 {
     if (bare) cover = cover.mul(float(1).sub(bare.mul(0.85)));
     return mix(c, vec3(0.8, 0.83, 0.88), cover);
   }
-  if (now === WEATHER_RAIN) return c.mul(vec3(0.8, 0.82, 0.85));
+  if (now === WEATHER_RAIN) return c.mul(vec3(0.76, 0.79, 0.83));
   if (now === WEATHER_FOG) return c.mul(vec3(0.92, 0.93, 0.94));
   return c;
 }
 
 /** How rough a surface is in this weather: wet ground shines. */
 export function weatheredRoughness(r: F): F {
-  return now === WEATHER_RAIN ? r.sub(0.32).clamp(0.12, 1) : r;
+  return now === WEATHER_RAIN ? r.sub(0.4).clamp(0.1, 1) : r;
 }
 
 /** The sky, the haze and the light of each weather, by day. */
@@ -153,7 +153,9 @@ export class Precipitation {
 
   constructor(kind: number, quality: 'low' | 'normal' | 'high') {
     this.snow = kind === WEATHER_SNOW;
-    const wanted = kind === WEATHER_RAIN ? 2600 : this.snow ? 2000 : 0;
+    // Rain is a hint, not a curtain (decision 133): a whole game behind 2,600 bright fast
+    // streaks made the player dizzy. A fifth as many, and the wet ground carries the mood.
+    const wanted = kind === WEATHER_RAIN ? 520 : this.snow ? 2000 : 0;
     this.count = Math.round(wanted * (quality === 'low' ? 0.4 : quality === 'high' ? 1.4 : 1));
     this.seeds = new Float32Array(this.count * 4);
     for (let i = 0; i < this.count * 4; i++) this.seeds[i] = Math.random();
@@ -162,7 +164,7 @@ export class Precipitation {
     // about the vertical only, which is right for a view from above and to the side.
     const g = this.snow
       ? new THREE.PlaneGeometry(0.24, 0.24).rotateX(-0.7)
-      : new THREE.PlaneGeometry(0.035, 1.5).rotateZ(-0.12);
+      : new THREE.PlaneGeometry(0.028, 1.1).rotateZ(-0.12);
     const m = new THREE.MeshBasicNodeMaterial({ transparent: true, side: THREE.DoubleSide });
     const tint = attribute('aTint', 'vec4');
     m.colorNode = tint.xyz;
@@ -194,15 +196,21 @@ export class Precipitation {
     const yaw = Math.atan2(this.fwd.x, this.fwd.z);
     const sin = Math.sin(yaw);
     const cos = Math.cos(yaw);
-    const fall = this.snow ? 3.2 : 34;
-    const windX = this.snow ? 1.6 : 4.5;
-    const windZ = this.snow ? 0.7 : 1.5;
+    // Slower than real rain: at 34 a streak crossed the screen in a few frames, which reads
+    // as flicker. At 19 the eye can follow it.
+    const fall = this.snow ? 3.2 : 19;
+    const windX = this.snow ? 1.6 : 2.4;
+    const windZ = this.snow ? 0.7 : 0.8;
     const t = this.time;
     const bright = night ? 0.45 : 1;
-    const r = (this.snow ? 0.95 : 0.78) * bright;
-    const g = (this.snow ? 0.96 : 0.82) * bright;
-    const bl = (this.snow ? 0.98 : 0.88) * bright;
-    const alpha = this.snow ? 0.8 : 0.34;
+    // Rain is nearly the grey of its sky, so a streak is a faint change, not a white line.
+    const r = (this.snow ? 0.95 : 0.62) * bright;
+    const g = (this.snow ? 0.96 : 0.66) * bright;
+    const bl = (this.snow ? 0.98 : 0.71) * bright;
+    const alpha = this.snow ? 0.8 : 0.13;
+    // Nothing close to the lens: near streaks are the large fast ones. Snow keeps its 8 m.
+    const clear = this.snow ? 64 : 484;
+    const full = this.snow ? 400 : 1600;
     const s = this.seeds;
     const px = camera.position.x;
     const py = camera.position.y;
@@ -225,8 +233,9 @@ export class Precipitation {
       const dy = y - py;
       const dz = z - pz;
       const near = dx * dx + dy * dy + dz * dz;
-      if (near < 64) continue;
-      b.put(x, y, z, sin, cos, 1, r, g, bl, near < 400 ? (alpha * (near - 64)) / 336 : alpha);
+      if (near < clear) continue;
+      const a = near < full ? (alpha * (near - clear)) / (full - clear) : alpha;
+      b.put(x, y, z, sin, cos, 1, r, g, bl, a);
     }
     b.flush();
   }
