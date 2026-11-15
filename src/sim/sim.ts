@@ -227,6 +227,9 @@ import {
   STATE_FREE,
   STATE_WRECK,
   packPoint,
+  ROUTE_MAX,
+  TICK_RATE,
+  type Route,
   type World,
 } from './world';
 
@@ -406,6 +409,7 @@ const CHASE_LIMIT = 300;
 export function step(w: World, commands: readonly Command[]): void {
   w.map.now = w.tick;
   for (let c = 0; c < commands.length; c++) applyCommand(w, commands[c]);
+  updateRoutes(w);
   updateWander(w);
   bucket(w, CELL_SHIFT, GRID_DIM, cellStart, sorted);
   bucket(w, COARSE_SHIFT, COARSE_DIM, coarseStart, coarseSorted);
@@ -466,6 +470,15 @@ export function step(w: World, commands: readonly Command[]): void {
 }
 
 function applyCommand(w: World, cmd: Command): void {
+  // Any order that is not itself a way point takes its units off the route they were on.
+  if (
+    w.routes.length > 0 &&
+    'units' in cmd &&
+    cmd.type !== CMD_CAMERA &&
+    !((cmd.type === CMD_MOVE || cmd.type === CMD_ATTACK_MOVE) && cmd.queue === true)
+  ) {
+    for (const id of cmd.units) if (id >= 0 && id < w.count) w.routeOf[id] = 0;
+  }
   // Who gave it: the units a player orders himself fight on his account (decision 103).
   // Orders from a staff or from the computer carry no name and change nothing.
   if (cmd.by !== undefined && cmd.by >= 0 && cmd.by < STAT_SEATS && 'units' in cmd) {
@@ -492,13 +505,9 @@ function applyCommand(w: World, cmd: Command): void {
     case CMD_MOVE:
     case CMD_ATTACK_MOVE: {
       const units = validUnits(w, cmd.units);
-      for (let k = 0; k < units.length; k++) leaveBuilding(w, units[k]);
-      orderFormationMove(w, units, cmd.x | 0, cmd.y | 0);
       const attack = cmd.type === CMD_ATTACK_MOVE;
-      for (let k = 0; k < units.length; k++) {
-        const id = units[k];
-        w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | (attack ? FLAG_AMOVE : 0);
-      }
+      if (cmd.queue === true && queueMove(w, units, cmd.x | 0, cmd.y | 0, attack)) break;
+      moveUnits(w, units, cmd.x | 0, cmd.y | 0, attack);
       break;
     }
     case CMD_GARRISON:
@@ -634,6 +643,104 @@ function applyCommand(w: World, cmd: Command): void {
       spawn(w, cmd);
       break;
   }
+}
+
+/** What a move order does: out of the houses, into formation, off whatever they were at. */
+function moveUnits(
+  w: World,
+  units: readonly number[],
+  x: number,
+  y: number,
+  attack: boolean,
+): void {
+  for (let k = 0; k < units.length; k++) leaveBuilding(w, units[k]);
+  orderFormationMove(w, units, x, y);
+  for (let k = 0; k < units.length; k++) {
+    const id = units[k];
+    w.flags[id] = (w.flags[id] & ~ORDER_FLAGS) | (attack ? FLAG_AMOVE : 0);
+  }
+}
+
+/** A route moves on when this share of it has finished the leg, or ROUTE_WAIT after half has. */
+const ROUTE_SHARE = 75;
+const ROUTE_WAIT = 3 * TICK_RATE;
+
+/**
+ * A move given as a way point (Shift + right click). Units that stand still simply go
+ * (false: the caller moves them). Units on the move keep going where they were going, and
+ * the place is queued behind it: on the route they share if they are all of it, otherwise
+ * on a new one of their own.
+ */
+function queueMove(
+  w: World,
+  units: readonly number[],
+  x: number,
+  y: number,
+  attack: boolean,
+): boolean {
+  if (units.length === 0) return true;
+  let moving = false;
+  for (const id of units) if ((w.flags[id] & FLAG_MOVING) !== 0) moving = true;
+  const id = w.routeOf[units[0]];
+  const route = id === 0 ? undefined : w.routes.find((r) => r.id === id);
+  let same = route !== undefined;
+  for (const u of units) if (w.routeOf[u] !== id) same = false;
+  if (route && same && moving) {
+    let on = 0;
+    for (const u of route.units) if (w.state[u] === STATE_ALIVE && w.routeOf[u] === id) on++;
+    if (on === units.length) {
+      if (route.pts.length < 3 * ROUTE_MAX) route.pts.push(attack ? 1 : 0, x, y);
+      return true;
+    }
+  }
+  for (const u of units) w.routeOf[u] = 0;
+  if (!moving) return false;
+  const made: Route = {
+    id: ++w.routeSeq,
+    units: units.slice(),
+    pts: [attack ? 1 : 0, x, y],
+    curX: w.targetX[units[0]],
+    curY: w.targetY[units[0]],
+    half: -1,
+  };
+  for (const u of units) w.routeOf[u] = made.id;
+  w.routes.push(made);
+  return true;
+}
+
+/** Routes whose units have finished a leg start the next; finished and abandoned ones go. */
+function updateRoutes(w: World): void {
+  const routes = w.routes;
+  if (routes.length === 0) return;
+  let kept = 0;
+  for (let k = 0; k < routes.length; k++) {
+    const r = routes[k];
+    const on = r.units.filter(
+      (u) => w.state[u] === STATE_ALIVE && w.routeOf[u] === r.id && w.carrier[u] < 0,
+    );
+    r.units = on;
+    if (on.length === 0) continue;
+    let there = 0;
+    for (const u of on) if ((w.flags[u] & FLAG_MOVING) === 0) there++;
+    if (there * 2 < on.length) r.half = -1;
+    else if (r.half < 0) r.half = w.tick;
+    if (there * 100 < on.length * ROUTE_SHARE && (r.half < 0 || w.tick - r.half <= ROUTE_WAIT)) {
+      routes[kept++] = r;
+      continue;
+    }
+    // The last leg is done: the route is over.
+    if (r.pts.length === 0) {
+      for (const u of on) w.routeOf[u] = 0;
+      continue;
+    }
+    routes[kept++] = r;
+    const [attack, x, y] = r.pts.splice(0, 3);
+    moveUnits(w, on, x, y, attack === 1);
+    r.curX = x;
+    r.curY = y;
+    r.half = -1;
+  }
+  routes.length = kept;
 }
 
 const ORDER_FLAGS =
@@ -1393,6 +1500,7 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.spotted[id] = 0;
   w.group[id] = 0;
   w.flags[id] = 0;
+  w.routeOf[id] = 0;
   w.job[id] = JOB_NONE;
   w.jobSite[id] = 0;
   w.jobStruct[id] = -1;

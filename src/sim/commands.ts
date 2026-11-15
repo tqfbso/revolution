@@ -71,6 +71,12 @@ export interface MoveCommand {
   /** Destination in fixed-point world units. */
   x: number;
   y: number;
+  /**
+   * A way point: units that are on the move finish the leg they are on first, then go
+   * here, and on to any queued after it (see the routes in src/sim/sim.ts). Units that
+   * stand still just go. Any order that is not queued drops the rest of the route.
+   */
+  queue?: boolean;
 }
 
 /** Like move, but the units stop and fight whatever comes into range on the way. */
@@ -79,6 +85,8 @@ export interface AttackMoveCommand {
   units: number[];
   x: number;
   y: number;
+  /** A way point, as for a move. */
+  queue?: boolean;
 }
 
 /** Infantry walks to a building and occupies it. Any later move order brings it out. */

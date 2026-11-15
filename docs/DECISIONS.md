@@ -2702,3 +2702,29 @@ it comes back over the body (`ESCORT_LEASH` 26). The computer player's own gunsh
 through the same code and gain the same.
 
 Not done: they do not look where the air defence is before they go. Golden hash unchanged.
+
+## 130. Way points: Shift + right click queues the next place (2026-11-15)
+
+Fabio: way points for movement, with Shift + right click, to pick a route.
+
+**In the sim, not in the client.** A route has to survive the player looking elsewhere,
+play the same on every machine in co-op and replay from the command log, so it is game
+state (`World.routes`, `routeOf` per unit), fed by `queue: true` on a move or attack-move.
+
+**The rule.** Troops that stand still just go. Troops on the move finish the leg they are
+on, then go to the queued place, and so on, up to `ROUTE_MAX` (16) places. A route belongs
+to the body it was given to: it moves on when three quarters of it have finished the leg
+(or three seconds after half have), so the quick wait for the slow at each corner and the
+formation is made again for each leg. Part of the body given its own way point leaves and
+gets its own route. Any order that is not a way point (move, stop, attack, mount, a
+commander taking the unit) drops the rest of the route. A queued attack-move becomes one
+when its turn comes: Alt + Shift + right click.
+
+**On screen** (`src/client/routes.ts`). While troops on a route are selected, a green line
+runs over the ground from them through the place they are making for to every way point,
+with a diamond on each. It is drawn through buildings: in a city the route is the thing to
+see. Nothing is drawn for troops that are not selected.
+
+**Hash.** Routes are mixed into the hash only while there are any, so the golden hash
+holds. Not done: way points on the minimap, queued orders other than moves (attack this,
+then that; garrison), and the computer does not use them.

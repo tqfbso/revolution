@@ -31,6 +31,7 @@ import { Decks } from './client/decks';
 import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { GridOverlay, gridRef } from './client/grid';
+import { RouteView } from './client/routes';
 import { Minimap } from './client/minimap';
 import { ProductionCentre } from './client/production';
 import { COMMANDER_NAMES, MissionBoard } from './client/missions';
@@ -244,6 +245,7 @@ async function start(): Promise<void> {
   structures.clutter = clutter;
   works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
+  const routes = new RouteView(units, (x, z) => terrain.heightAt(x, z));
   units.night = effects.night = night;
   // No dust off wet ground or snow.
   if (weather === WEATHER_RAIN || weather === WEATHER_SNOW) effects.dustiness = 0;
@@ -343,6 +345,7 @@ async function start(): Promise<void> {
     debrief?.applySnapshot(e.data);
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
+    routes.applySnapshot(e.data);
     production.applySnapshot(e.data);
     board.applySnapshot(e.data);
     supply.applySnapshot(e.data);
@@ -656,6 +659,7 @@ async function start(): Promise<void> {
     input.marker,
     card.group,
     grid.group,
+    routes.group,
   );
   // Flags: who holds what, at a glance, and what the fighting has cost the people who
   // live here (decision 102). Each square is a town; the pointer names it.
@@ -983,6 +987,7 @@ async function start(): Promise<void> {
     const c3 = performance.now();
     terrain.update(dt);
     input.update(dt);
+    routes.update(dt);
     card.update();
     if (coop) {
       // Tell the others where we look, three times a second, and show where they look.
@@ -1070,6 +1075,7 @@ async function start(): Promise<void> {
     camera: rts.camera,
     cameras,
     coop,
+    routes,
   };
   document.getElementById('loading')?.remove();
 }

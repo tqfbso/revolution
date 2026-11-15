@@ -248,6 +248,12 @@ function pump(): void {
 
 function postSnapshot(w: World, simMs: number): void {
   const n = w.count;
+  const routes: number[] = [];
+  for (const r of w.routes) {
+    routes.push(r.units.length, 1 + r.pts.length / 3, ...r.units, fromFx(r.curX), fromFx(r.curY));
+    for (let k = 0; k < r.pts.length; k += 3)
+      routes.push(fromFx(r.pts[k + 1]), fromFx(r.pts[k + 2]));
+  }
   const positions = new Float32Array(n * 2);
   const info = new Uint8Array(n);
   const hp = new Uint8Array(n);
@@ -399,6 +405,7 @@ function postSnapshot(w: World, simMs: number): void {
     cmdr: w.cmdr.slice(0, n),
     commanders,
     task,
+    routes: Float32Array.from(routes),
     stats: w.stats.slice(),
     civilians: Float32Array.from(civs),
     civStats: Int32Array.from([w.civCount, civHome, w.civEscaped, ...w.civKilled]),
