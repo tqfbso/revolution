@@ -2659,3 +2659,26 @@ of a game are the same glass; the end screen has a column per army in a free-for
 
 Not done: the score counts three armies (`STAT_TEAMS`), so a fourth shows dashes. Changing
 that moves the score's layout in the sim state and wants its own change.
+
+## 128. A commander falls back a short way, and goes in again by itself (2026-11-15)
+
+Fabio: the fall back is too aggressive, the troops end up too far from the objective.
+
+**Why it was far.** A commander that broke off went to the nearest friendly town or to the
+base (`anchor` in `src/sim/staff.ts`). On the city maps that is minutes of marching, so a
+commander that lost a fight left the battle. And an attack only went in again at 75% of
+the strength it started with; it breaks off at 45%, so without reinforcements it never
+did.
+
+**Now.** It falls back `FALL_BACK` (110) past the edge of its objective: out of what the
+place sees (44) and shoots (40), close enough to go again. The way back is the way it
+came, if it stood well outside the place when the order was given, otherwise toward the
+nearest friendly ground. A known enemy on that spot moves it `FALL_STEP` (40) further, up
+to three times, then to friendly ground as before. An attack that is not reinforced goes
+in again after `REGROUP_WAIT` (a minute) when what it knows of the place is something it
+can take on, and after a minute and a half with no enemy in sight it goes to look, as the
+other missions always did. Each time it goes back in on its own and is thrown out again it
+waits twice as long (up to four times), so a place it cannot take does not eat it a bite
+at a time. A new order resets that.
+
+Golden hash unchanged: the staff is not part of the sim state.

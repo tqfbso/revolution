@@ -131,6 +131,16 @@ const JOIN_WAIT = 45 * TICK_RATE;
 const STAND_OFF = fx(75);
 /** No known enemy this close to the place where it closes up, or it closes up further back. */
 const STAND_CLEAR = fx(60);
+/**
+ * A commander that breaks off falls back this far past the edge of its objective (a town's
+ * edge, or the point itself), and FALL_STEP further at a time, FALL_STEPS times at most,
+ * while a known enemy stands on the place.
+ */
+const FALL_BACK = fx(110);
+const FALL_STEP = fx(40);
+const FALL_STEPS = 3;
+/** A commander that fell back and is not reinforced goes in again after this, the odds allowing. */
+const REGROUP_WAIT = 60 * TICK_RATE;
 /** A march that is close to its way point but cannot get half its line onto it moves on after this. */
 const MARCH_WAIT = 30 * TICK_RATE;
 
@@ -171,6 +181,8 @@ export interface Post {
   fighting: boolean;
   /** It has fallen back and is waiting to be fit to go again. */
   regroup: boolean;
+  /** How often it has gone in again on its own since its last order: each time it waits longer. */
+  again: number;
   /** The tick at which half of an attack had closed up short of the objective, or -1. */
   gather: number;
   /** Houses its infantry holds at the objective, the nearest first. */
@@ -210,6 +222,7 @@ export function createStaff(team: number, seed = 1): Staff {
       need: false,
       fighting: false,
       regroup: false,
+      again: 0,
       gather: -1,
       houses: [],
       turn: false,
@@ -324,7 +337,10 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
   p.power = power;
   p.cx = cx;
   p.cy = cy;
-  if (p.seq !== w.cSeq[k]) begin(st, w, out, c, power, cx, cy);
+  if (began) {
+    p.again = 0;
+    begin(st, w, out, c, power, cx, cy);
+  }
   if (power > f.launch) f.launch = power;
   p.need = power * 100 < f.launch * WEAK;
   p.fighting = false;
@@ -670,8 +686,13 @@ function housesAt(ai: Ai, w: World, obj: Objective): number[] {
 }
 
 /**
- * Where to fall back to: the nearest of the army's towns and its base that is not the
- * objective itself and is not known to have the enemy in it.
+ * Where to fall back to. It used to be the nearest of the army's towns or its base, which
+ * on a large map is minutes away: a commander that broke off left the battle altogether.
+ * Now it is a short way back from the objective, FALL_BACK past its edge: out of what the
+ * place sees and shoots, near enough to go in again. Back is the way the body came from
+ * if it stood well outside the place when the order was given, otherwise toward the
+ * nearest friendly ground. With a known enemy on that spot it is further back, a step at a
+ * time, and at the furthest the friendly town or base itself.
  */
 function anchor(
   ai: Ai,
@@ -697,7 +718,35 @@ function anchor(
       by = y;
     }
   }
-  return ground(map, bx, by);
+  const obj = objectiveAt(w, tx, ty);
+  const edge = obj.kind === OBJ_TOWN ? map.townR[obj.id] : 0;
+  const near = edge + FALL_BACK;
+  const safe = dist(obj.x, obj.y, bx, by);
+  // Already that close to friendly ground: fall back onto it.
+  if (safe <= near + FALL_STEP) return ground(map, bx, by);
+  // The way back: where the body came from, or toward friendly ground.
+  const from = dist(obj.x, obj.y, cx, cy);
+  const ox = from > near ? cx : bx;
+  const oy = from > near ? cy : by;
+  const od = from > near ? from : safe;
+  for (let step = 0; step <= FALL_STEPS; step++) {
+    const r = near + step * FALL_STEP;
+    if (r >= od) break;
+    const x = clampInt(obj.x + Math.trunc(((ox - obj.x) * r) / od), fx(8), MAP_SIZE_FX - fx(8));
+    const y = clampInt(obj.y + Math.trunc(((oy - obj.y) * r) / od), fx(8), MAP_SIZE_FX - fx(8));
+    let clear = true;
+    for (const e of ai.seen) {
+      if (kindOf(w, e).cls === CLASS_AIR) continue;
+      if (dist(w.posX[e], w.posY[e], x, y) < STAND_CLEAR) {
+        clear = false;
+        break;
+      }
+    }
+    if (clear) return ground(map, x, y);
+  }
+  return from > near && od <= near + FALL_STEPS * FALL_STEP
+    ? ground(map, cx, cy)
+    : ground(map, bx, by);
 }
 
 /** Fewer than half of them stand together. */
@@ -771,8 +820,9 @@ function fallingBack(w: World, out: Command[], p: Post): void {
 
 /**
  * Back where it fell back to. An attack goes in again when the commander is back near the
- * strength it had (which takes reinforcements, or a new order); the other missions are
- * taken up again once the place looks like something it can deal with.
+ * strength it had, or after REGROUP_WAIT with what it has left, as long as what it knows
+ * of the place is something it can take on; the other missions are taken up again once
+ * the place looks like something it can deal with.
  */
 function regrouping(
   st: Staff,
@@ -792,7 +842,10 @@ function regrouping(
   // on. What it remembers of the enemy there grows stale: after a minute and a half with
   // no enemy in sight around the place, it goes to look.
   const obj = f.obj!;
-  const waited = w.tick - f.since;
+  // Each time it has gone back in on its own and been thrown out again it waits twice as
+  // long, so that a place it cannot take does not eat it a bite at a time.
+  const patience = Math.min(p.again, 2);
+  const waited = (w.tick - f.since) >> patience;
   let there = expect(ai, w, obj.x, obj.y, 2, 0);
   if (waited > 90 * TICK_RATE) {
     there = 0;
@@ -803,11 +856,13 @@ function regrouping(
   const fit =
     waited > 45 * TICK_RATE &&
     (w.cMission[k] === M_ATTACK
-      ? power * 100 >= f.launch * RALLIED && there * 10 <= power * ODDS
+      ? (power * 100 >= f.launch * RALLIED || waited > REGROUP_WAIT) && there * 10 <= power * ODDS
       : there * 10 < power * 8);
   p.need = true;
   if (fit) {
+    const again = p.again + 1;
     begin(st, w, out, c, power, cx, cy);
+    p.again = again;
     return;
   }
   const far = p.units.filter(
