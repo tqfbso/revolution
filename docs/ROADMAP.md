@@ -446,6 +446,12 @@ From the proposal in the "Design tactical attack formations" thread.
 - Infantry easier to find from mid zoom: flashes and tracers with a floor on their size on
   screen, dust behind marching squads, a soft shade under each. BUILT (decision 122)
 
+## Free-for-all (decision 124)
+
+- [x] Three or four armies, each for itself, on a map with four corners (`?armies=3|4`,
+      Menu: Armies). The others are computers; co-op players share red.
+- [ ] People against people in a free-for-all (the lobby knows two sides only)
+
 ## M10 Factions
 
 - [x] Three factions (decision 123): Western alliance, Russia, China. Each is its own

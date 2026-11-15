@@ -115,7 +115,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
           ? battleCommands(msg.units)
           : msg.scenario === 'assault'
             ? assaultCommands(world.map, msg.units)
-            : skirmishCommands(world.map);
+            : skirmishCommands(world.map, msg.versus ? 2 : (msg.armies ?? 2));
     if (msg.night) pending.unshift({ type: CMD_NIGHT, on: true });
     (msg.factions ?? []).forEach((faction, team) => {
       if (faction > 0) pending.unshift({ type: CMD_FACTION, team, faction });
@@ -125,6 +125,10 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     me = versus && msg.team === 1 ? 1 : 0;
     if (msg.scenario === 'skirmish' && msg.ai !== 'off' && !versus) {
       ais.push(createAi(1, msg.ai, msg.seed, msg.humans ?? 1));
+      // Free-for-all (decision 124): every further army is a computer on its own side.
+      for (let t = 2; t < Math.min(msg.armies ?? 2, MAX_TEAMS); t++) {
+        if (world.map.startX[t] >= 0) ais.push(createAi(t, msg.ai, msg.seed, msg.humans ?? 1));
+      }
       // `?demo=1`: the AI plays red as well, to watch it at work.
       if (msg.demo) ais.push(createAi(0, msg.ai, msg.seed));
     }

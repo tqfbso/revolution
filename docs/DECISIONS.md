@@ -2524,3 +2524,44 @@ markings stay red and blue: who is whose matters more than which army it is.
 
 Not done: units unique to a faction, faction buildings, voices. Scenarios other than the
 skirmish stay on the plain table.
+
+## 124. Free-for-all: up to four armies, a map with four corners (2026-11-15)
+
+**What.** `?armies=3` or `4` (Menu: Armies) starts a skirmish in which every army is on
+its own side: red is the player (and co-op partners), blue, gold and green are computers
+that fight the player and each other. It is played on a new map, `four` ("four
+corners"), which can also be played with two.
+
+**The map** (`generateFour` in map.ts). One eighth of the ground is made and mirrored, so
+it is the same seen from every corner. A base in each corner; a village for each army
+between its base and the middle; a settlement half way along each edge, between two
+neighbours; the largest settlement on a low hill in the middle: nine flags. Copses
+everywhere, cleared round the bases and settlements, on the two tracks that cross in the
+middle and on each diagonal, so every base can be reached several ways. Each army has
+the same seven sites near home; the edges and the middle hold the rest.
+
+**The sim.** `MAX_TEAMS` is 4. Nothing else in the sim needed to change: it never knew
+two sides, only "not my team". `skirmishCommands(map, armies)` founds as many bases as
+asked for and as the map has corners for. Games of two or three armies hash as they
+always did (golden 3501695057 holds): the fourth army's state goes into the hash only
+when it is in the game.
+
+**Who fights whom.** The computer was written for one enemy: it has a front, a far bank,
+a base to take. It keeps that, and picks the enemy: the army before it in the round (0
+for 3, 3 for 2, 2 for 1, 1 for 0), so everyone has exactly one army coming for him. Its
+units still shoot whoever comes near. When that enemy's headquarters falls it picks the
+next (`fallen` in ai.ts), and the player's commanders do the same. With three armies one
+pair shares a west or east edge, and the computer's sense of "forward" is east-west, so
+that one forms up beside its base, not in front of it; it still attacks.
+
+**Winning.** You lose when your headquarters falls, and win when the last enemy one
+does. A banner says when one enemy is out and how many are left.
+
+**Checked.** `tools/ffa.ts`: four hard computers for 30 minutes run at 21 times real time
+on a container core; armies of 300 to 800 points fight over all nine flags, and in the
+three-army game the survivor of the first fight turned on the next army when its enemy
+fell. tests/ffa.test.ts: four corners, equal sites, every base and flag reachable on foot
+and by vehicle, four headquarters, determinism.
+
+**Not done.** People against people in a free-for-all: the lobby and Versus know red and
+blue only. Factions for gold and green follow blue's in turn and cannot be picked.

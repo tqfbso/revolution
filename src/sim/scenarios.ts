@@ -1,7 +1,7 @@
 import { CMD_FOUND, CMD_SPAWN, type Command } from './commands';
 import { B_HQ } from './economy';
-import { fx } from './fixed';
-import { CELL_SHIFT, type GameMap } from './map';
+import { clampInt, fx } from './fixed';
+import { CELL_SHIFT, MAP_CELLS, type GameMap } from './map';
 import {
   KIND_AD,
   KIND_ARTILLERY,
@@ -25,12 +25,12 @@ export function stressTestCommands(total: number): Command[] {
     [half + 150, half + 110],
     [half, half - 150],
   ];
-  const per = Math.floor(total / MAX_TEAMS);
+  const per = Math.floor(total / centres.length);
   const cmds: Command[] = [];
-  for (let team = 0; team < MAX_TEAMS; team++) {
+  for (let team = 0; team < centres.length; team++) {
     cmds.push({
       type: CMD_SPAWN,
-      count: team === 0 ? total - per * (MAX_TEAMS - 1) : per,
+      count: team === 0 ? total - per * (centres.length - 1) : per,
       team,
       x: fx(centres[team][0]),
       y: fx(centres[team][1]),
@@ -159,15 +159,18 @@ export function assaultCommands(map: GameMap, total: number): Command[] {
  * rifle squads, four carriers, two recon teams), and nobody holds a town. Red is the
  * player; blue is played by the AI (see src/sim/ai.ts), which builds its own fortress.
  */
-export function skirmishCommands(map: GameMap): Command[] {
+export function skirmishCommands(map: GameMap, armies = 2): Command[] {
   if (map.startX[0] < 0 || map.startX[1] < 0) return assaultCommands(map, 600);
+  // Three or four armies only where the map has a corner for each (the four corners map).
+  let n = clampInt(armies | 0, 2, MAX_TEAMS);
+  while (n > 2 && map.startX[n - 1] < 0) n--;
   const cmds: Command[] = [];
-  for (let team = 0; team < 2; team++) {
+  for (let team = 0; team < n; team++) {
     cmds.push({ type: CMD_FOUND, team, building: B_HQ, x: map.startX[team], y: map.startY[team] });
   }
-  for (let team = 0; team < 2; team++) {
-    // The patrol stands on the side of the base that faces the river.
-    const dir = team === 0 ? 1 : -1;
+  for (let team = 0; team < n; team++) {
+    // The patrol stands on the side of the base that faces the middle of the map.
+    const dir = map.startX[team] < MAP_CELLS >> 1 ? 1 : -1;
     const hx = (map.startX[team] << CELL_SHIFT) + fx(6);
     const hy = (map.startY[team] << CELL_SHIFT) + fx(6);
     const add = (kind: number, count: number, dx: number, dy: number) =>

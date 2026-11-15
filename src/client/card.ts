@@ -153,7 +153,7 @@ export class CommandCard {
   hungry: () => number[] = () => [];
   private html = '';
   private resHtml = '';
-  private readonly hadHq = [false, false];
+  private readonly hadHq = [false, false, false, false];
   /**
    * An order waiting for a click on the ground: attack-move or a smoke screen. The input
    * handler reads it and carries it out; `arm` is how both sides change it.
@@ -224,23 +224,41 @@ export class CommandCard {
     for (let t = 0; t < s.townOwner.length; t++) if (s.townOwner[t] === ME) flags++;
     this.flags = flags;
     // The game is decided when a headquarters that stood is gone.
-    const standing = [false, false];
+    // With several enemies (decision 124) it is won when the last of them has lost his.
+    const standing = [false, false, false, false];
     for (let o = 0; o < s.bases.length; o += BASE_STRIDE) {
       const team = s.bases[o + 2];
-      if (team < 2 && s.bases[o + 1] === B_HQ && s.structHp[s.bases[o]] > 0) standing[team] = true;
+      if (team < 4 && s.bases[o + 1] === B_HQ && s.structHp[s.bases[o]] > 0) standing[team] = true;
     }
-    for (let t = 0; t < 2; t++) {
-      if (standing[t]) this.hadHq[t] = true;
-      else if (this.hadHq[t] && !this.over) {
-        this.over = true;
-        if (this.onOver) {
-          this.onOver(t !== ME);
-          continue;
-        }
-        this.bannerEl.textContent =
-          t === ME
-            ? 'Defeat: your headquarters has fallen'
-            : 'Victory: the enemy headquarters has fallen';
+    let foes = 0;
+    let fallen = false;
+    let out = -1;
+    for (let t = 0; t < 4; t++) {
+      if (standing[t]) {
+        this.hadHq[t] = true;
+        if (t !== ME) foes++;
+      } else if (this.hadHq[t]) {
+        this.hadHq[t] = false;
+        if (t !== ME) out = t;
+        fallen = true;
+      }
+    }
+    const lost = fallen && !standing[ME];
+    if (out >= 0 && foes > 0 && !lost && !this.over) {
+      // One enemy down, others still in the field: say so, and carry on.
+      this.bannerEl.textContent = `The ${['red', 'blue', 'gold', 'green'][out]} headquarters has fallen: ${foes} ${foes === 1 ? 'army' : 'armies'} left to beat`;
+      this.bannerEl.style.display = 'block';
+      setTimeout(() => {
+        if (!this.over) this.bannerEl.style.display = 'none';
+      }, 7000);
+    }
+    if (fallen && !this.over && (lost || foes === 0)) {
+      this.over = true;
+      if (this.onOver) this.onOver(!lost);
+      else {
+        this.bannerEl.textContent = lost
+          ? 'Defeat: your headquarters has fallen'
+          : 'Victory: the enemy headquarters has fallen';
         this.bannerEl.style.display = 'block';
       }
     }

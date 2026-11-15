@@ -788,6 +788,15 @@
               <option value="none">Enemy: no faction</option>
             </select>
             <select
+              id="armies-pick"
+              aria-label="Armies"
+              title="How many armies. With three or four it is every army for itself, on the four corners map. Changing this starts a new game"
+            >
+              <option value="2">Armies: 2</option>
+              <option value="3">Armies: 3, free-for-all</option>
+              <option value="4">Armies: 4, free-for-all</option>
+            </select>
+            <select
               id="map-pick"
               aria-label="Map"
               title="Battlefield. Changing this starts a new game"
@@ -796,6 +805,7 @@
               <option value="euro">Map: European city</option>
               <option value="ridge">Map: ridge</option>
               <option value="river">Map: river</option>
+              <option value="four">Map: four corners</option>
             </select>
             <select
               id="time-pick"
@@ -920,6 +930,9 @@ starting…</pre>
       destroyed<br />
       Ctrl+right click the ground: guns shell that spot (X to cease fire) · F: guns lay smoke at the
       pointer, which blinds both sides<br />
+      Free-for-all (Menu, Armies: 3 or 4): every army for itself on the four corners map. You are
+      red, bottom left; blue, gold and green are computers that fight you and each other. You win
+      when the last enemy headquarters has fallen<br />
       Armies (Menu, Army and Enemy): the Western alliance has fewer, better and dearer units, the
       toughest tank, long sight and a precise long gun, but no jammer. Russia has cheap fast-firing
       tanks, rocket batteries, long-armed air defence and the strongest jammer, but no transport

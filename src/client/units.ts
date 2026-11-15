@@ -109,6 +109,7 @@ export const TEAM_RGB = [
   [0.52, 0.045, 0.03],
   [0.03, 0.15, 0.62],
   [0.62, 0.36, 0.02],
+  [0.1, 0.4, 0.12],
 ];
 const HULL_TURN = 2.6; // rad/s, visual only
 const TURRET_TURN = 3.2;

@@ -101,7 +101,7 @@ export const CLASS_FOOT = 1;
 /** Flies: goes anywhere, in a straight line. */
 export const CLASS_AIR = 2;
 export const CLASS_COUNT = 3;
-export const MAX_TEAMS = 3;
+export const MAX_TEAMS = 4;
 /**
  * Passability is kept per layer: one per army and movement class, because a gate lets only
  * its owner through. Armies without gates share the tables of their class.
@@ -231,7 +231,7 @@ export interface GameMap {
  * Which battlefield: the river with its fords and bridges, the ridge with its four ways,
  * or the city, a town at every flag and streets between them (see city.ts).
  */
-export type Layout = 'river' | 'ridge' | 'city' | 'euro';
+export type Layout = 'river' | 'ridge' | 'city' | 'euro' | 'four';
 
 /** What a cell is paved with (GameMap.road): nothing, a carriageway, or a yard or square. */
 export const ROAD_NONE = 0;
@@ -291,6 +291,7 @@ export function generateMap(seed: number, layout: Layout = 'river'): GameMap {
   if (layout === 'ridge') return generateRidge(seed);
   if (layout === 'city') return generateCity(seed);
   if (layout === 'euro') return generateEuro(seed);
+  if (layout === 'four') return generateFour(seed);
   const s = seed | 0;
   const heights = new Int32Array(MAP_VERTS * MAP_VERTS);
   const fords: number[] = [];
@@ -597,7 +598,9 @@ export function addSite(map: GameMap, kind: number, stock: number, wx: number, w
       const dy = (map.siteY[k] >> CELL_SHIFT) - y;
       if (dx * dx + dy * dy < 25) return false;
     }
-    for (let t = 0; t < 2; t++) {
+    for (let t = 0; t < map.startX.length; t++) {
+      // (The first two are tested even when unset, as they always were: maps depend on it.)
+      if (t >= 2 && map.startX[t] < 0) continue;
       const dx = x - map.startX[t];
       const dy = y - map.startY[t];
       if (dx >= -3 && dx <= START_PLOT + 2 && dy >= -3 && dy <= START_PLOT + 2) return false;
@@ -725,6 +728,143 @@ function generateRidge(seed: number): GameMap {
     lane(RAVINE_A, RAVINE_MOUTH1 + 30, -1, -1), // the ravine
     lane(430, 330, -1, -1), // the farmland
   ];
+  return map;
+}
+
+// ---------------------------------------------------------------- the four corners map
+//
+// A square field for three or four armies, one in each corner (decision 124). The ground
+// is the same seen from every corner: it is built from one eighth and mirrored. A low
+// hill with the largest settlement stands in the middle, a settlement half way along
+// each edge lies between two neighbours, and each army has a village of its own between
+// its base and the middle. Copses everywhere, cleared round the bases, the settlements
+// and the two tracks that cross in the middle, so there are many ways in to anyone.
+
+/** The four bases, in cells, in the order of the armies: opposite corners first. */
+const FOUR_BASES: readonly (readonly [number, number])[] = [
+  [44, 208],
+  [208, 44],
+  [44, 44],
+  [208, 208],
+];
+
+function fold(v: number, size: number): number {
+  return v <= size >> 1 ? v : size - v;
+}
+
+function fourHeight(vx: number, vy: number, s: number): number {
+  const x = fold(vx, MAP_VERTS - 1);
+  const y = fold(vy, MAP_VERTS - 1);
+  const base = Math.trunc(
+    (symNoise(x, y, 6, s) * 8 +
+      symNoise(x, y, 5, s + 3) * 4 +
+      symNoise(x, y, 4, s + 4) * 2 +
+      symNoise(x, y, 3, s + 5)) /
+      15,
+  );
+  // Rolling ground, flat by the bases; a broad hill in the middle that overlooks the rest.
+  const dx = (MAP_VERTS >> 1) - x;
+  const dy = (MAP_VERTS >> 1) - y;
+  const centre = isqrt(dx * dx + dy * dy) * 4;
+  const bx = x - 44;
+  const by = y - 44;
+  const home = isqrt(bx * bx + by * by) * 4;
+  const roll = clampInt((home - 60) * 8, 0, 1024);
+  let h = fx(4) + (((base - 512) * 8 * roll) >> 10);
+  h += (fx(5.5) * smooth(clampInt(1024 - Math.trunc((centre * 1024) / 170), 0, 1024))) >> 10;
+  return h;
+}
+
+function fourForest(cx: number, cy: number, s: number): boolean {
+  const x = fold(cx, MAP_CELLS - 1);
+  const y = fold(cy, MAP_CELLS - 1);
+  // Nothing round the bases, on the hill, or on the two tracks that cross in the middle.
+  const bx = x - 44;
+  const by = y - 44;
+  if (bx * bx + by * by < 24 * 24) return false;
+  const mx = (MAP_CELLS >> 1) - x;
+  const my = (MAP_CELLS >> 1) - y;
+  if (mx * mx + my * my < 26 * 26) return false;
+  if (mx < 3 || my < 3) return false;
+  // Nor on the diagonal from each base to the middle: the short way is open and watched.
+  if (Math.abs(x - y) < 3 && x > 44) return false;
+  const f = Math.trunc(
+    (symNoise(x, y, 5, s + 21) * 2 + symNoise(x, y, 4, s + 22) + symNoise(x, y, 3, s + 23)) / 4,
+  );
+  return f > 575;
+}
+
+function generateFour(seed: number): GameMap {
+  const s = seed | 0;
+  const heights = new Int32Array(MAP_VERTS * MAP_VERTS);
+  for (let vy = 0; vy < MAP_VERTS; vy++) {
+    for (let vx = 0; vx < MAP_VERTS; vx++) heights[vy * MAP_VERTS + vx] = fourHeight(vx, vy, s);
+  }
+  const type = new Uint8Array(CELL_COUNT);
+  for (let cy = 0; cy < MAP_CELLS; cy++) {
+    for (let cx = 0; cx < MAP_CELLS; cx++) {
+      const v = cy * MAP_VERTS + cx;
+      const a = heights[v];
+      const b = heights[v + 1];
+      const c = heights[v + MAP_VERTS];
+      const d = heights[v + MAP_VERTS + 1];
+      let t = T_OPEN;
+      if (Math.max(a, b, c, d) - Math.min(a, b, c, d) > fx(2.6)) t = T_CLIFF;
+      else if (fourForest(cx, cy, s)) t = T_FOREST;
+      type[cy * MAP_CELLS + cx] = t;
+    }
+  }
+  const map = newMap(heights, type);
+  map.layout = 'four';
+  // The first two are the ones the west and the east armies form up behind (the AI counts
+  // on that order); then the other two edges, a village for each army, the middle last.
+  placeSettlement(map, s, 64, 128, 3, 1, 'Westmark', true);
+  placeSettlement(map, s, 192, 128, 3, 1, 'Eastmark', true);
+  placeSettlement(map, s, 128, 64, 3, 1, 'Northfield', false);
+  placeSettlement(map, s, 128, 192, 3, 1, 'Southfield', false);
+  placeSettlement(map, s, 86, 170, 2, 1, 'Ash Hollow', false);
+  placeSettlement(map, s, 170, 86, 2, 1, 'Birch End', false);
+  placeSettlement(map, s, 86, 86, 2, 1, 'Cold Spring', false);
+  placeSettlement(map, s, 170, 170, 2, 1, 'Dunmore', false);
+  placeSettlement(map, s, 128, 128, 4, 2, 'Crossways', false);
+  finishMap(map);
+
+  for (let t = 0; t < FOUR_BASES.length; t++) {
+    const [bx, by] = FOUR_BASES[t];
+    const c = findCell(bx, by, 30, (x, y) => canPlace(map, x, y, START_PLOT, START_PLOT));
+    if (c < 0) continue;
+    map.startX[t] = c % MAP_CELLS;
+    map.startY[t] = Math.trunc(c / MAP_CELLS);
+  }
+  const site = (kind: number, stock: number, cx: number, cy: number) =>
+    addSite(map, kind, stock, cx << CELL_SHIFT, cy << CELL_SHIFT);
+  for (const [bx, by] of FOUR_BASES) {
+    // Toward the middle of the map from this corner.
+    const ix = bx < 128 ? 1 : -1;
+    const iy = by < 128 ? 1 : -1;
+    // By the headquarters, then by the army's own village, then out along both edges.
+    site(SITE_SUPPLIES, 8000, bx + ix * 9, by - iy * 3);
+    site(SITE_SUPPLIES, 8000, bx - ix * 3, by + iy * 9);
+    site(SITE_FUEL, 200, bx - ix * 8, by - iy * 8);
+    site(SITE_SUPPLIES, 16000, bx + ix * 34, by + iy * 26);
+    site(SITE_FUEL, 200, bx + ix * 26, by + iy * 34);
+    site(SITE_SUPPLIES, 12000, bx + ix * 46, by - iy * 12);
+    site(SITE_SUPPLIES, 12000, bx - ix * 12, by + iy * 46);
+  }
+  // Between neighbours and in the middle: whoever holds the ground has them.
+  for (const [cx, cy] of [
+    [128, 30],
+    [128, 226],
+    [30, 128],
+    [226, 128],
+  ]) {
+    site(SITE_SUPPLIES, 12000, cx, cy);
+    site(SITE_FUEL, 200, cx + (cy === 128 ? 0 : 7), cy + (cy === 128 ? 7 : 0));
+  }
+  site(SITE_SUPPLIES, 16000, 112, 112);
+  site(SITE_SUPPLIES, 16000, 144, 144);
+  site(SITE_FUEL, 300, 144, 112);
+  site(SITE_FUEL, 300, 112, 144);
   return map;
 }
 
@@ -906,8 +1046,8 @@ export function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     siteY: new Int32Array(MAX_SITES),
     siteKind: new Uint8Array(MAX_SITES),
     siteStock: new Int32Array(MAX_SITES),
-    startX: new Int32Array(2).fill(-1),
-    startY: new Int32Array(2).fill(-1),
+    startX: new Int32Array(MAX_TEAMS).fill(-1),
+    startY: new Int32Array(MAX_TEAMS).fill(-1),
     layout: 'river',
     road: new Uint8Array(CELL_COUNT),
     streets: [],
