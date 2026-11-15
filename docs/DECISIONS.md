@@ -2596,3 +2596,30 @@ run. Frame cost on a real card is Fabio's to measure; the levers are the particl
 
 Not done: sound of rain and wind, low sun, light shafts, weather that changes during a
 battle, any effect on movement.
+
+## 126. Far facades, and a see-through for buildings that is off by default (2026-11-15)
+
+The two things left over from U4 (URBAN.md 5.4 and 5.5).
+
+**Far facades.** Each building keeps a second, simplified geometry (`farParts`): walls and
+roofs as they are, every row of windows as one painted band, and nothing smaller than
+2.4 m (chimneys, dormers, roof furniture, signs). The buildings of a 128 m square are
+merged into a far mesh beside the full one, and `StructureView.view` shows one or the
+other by the distance from the camera to the square: far beyond 520 m, with 25 m of
+slack so that a square on the line does not flicker. At that distance a window is two
+pixels. Measured on the city map, whole city in view from 800 m, shadows off: 1.379
+million triangles before, 1.136 million after (18% fewer), same draw calls; with shadows
+the buildings are drawn twice, so the saving is larger. Side by side the two pictures
+cannot be told apart at that distance. `?far=0` turns it off to compare.
+
+**See-through (the "roof fade").** From closer than about 175 m, parts of buildings that
+lie between the camera and the point it looks at (a strip 15 to 19 m either side, up to
+50 m toward the camera) are drawn as a sparse screen of dots above the ground floor. It
+is a discard in the building material, driven by three uniforms; no extra draw calls, no
+change to picking or the sim.
+
+It works, and it is **off by default** (Y turns it on, remembered; `?cutaway=0` removes
+it from the shader altogether). Reason: in this game a half-missing building means a
+damaged one, and a block eaten away by the fade reads as that at first glance. Fabio to
+try it and say whether it should be on, changed (whole building fades, or an outline of
+his own troops through walls instead), or removed. Shadows of faded parts are dotted too.

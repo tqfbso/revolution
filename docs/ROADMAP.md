@@ -447,6 +447,12 @@ From the proposal in the "Design tactical attack formations" thread.
 - Infantry easier to find from mid zoom: flashes and tracers with a floor on their size on
   screen, dust behind marching squads, a soft shade under each. BUILT (decision 122)
 
+## Far facades and see-through buildings (decision 126)
+
+- [x] Squares of the city more than 520 m from the camera are drawn simplified
+- [x] Y: buildings between the camera and the street in view fade above the ground floor
+      (off by default)
+
 ## Free-for-all (decision 124)
 
 - [x] Three or four armies, each for itself, on a map with four corners (`?armies=3|4`,

@@ -7,7 +7,10 @@ import {
   hash,
   mix,
   positionWorld,
+  screenCoordinate,
+  smoothstep,
   step,
+  uniform,
   texture,
   uv,
   vec2,
@@ -218,6 +221,59 @@ function boxOrSlab(size: [number, number, number]): THREE.BufferGeometry {
   g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nor), 3));
   g.setIndex([...Array(12).keys()]);
   return g;
+}
+
+/** Beyond this many metres from the camera a square of the city is drawn simplified. */
+const FAR_AT = 520;
+
+/**
+ * A building as it is drawn from far off (URBAN.md 5.4, "far facades"): its walls and
+ * roofs, with each row of windows painted on as one band and everything smaller than a
+ * car left out. At that distance a window is two pixels and a chimney less, so the eye
+ * gets the same picture from a fraction of the triangles.
+ */
+export function farParts(parts: Part[]): Part[] {
+  const out: Part[] = [];
+  const rows = new Map<string, { lo: number; hi: number; p: Part; along: number }>();
+  for (const p of parts) {
+    const [sx, sy, sz] = p.size;
+    if (p.sign !== undefined) continue;
+    const glass = (p.gloss ?? 0) >= 1 && p.rot === undefined && p.hip === undefined;
+    if (glass && Math.min(sx, sz) <= 0.12 && sy < 2.6) {
+      // A window: thin in x or in z. Its row is every window on that wall at that height.
+      const along = sx > sz ? 0 : 2;
+      const thin = 2 - along;
+      const key = `${along}:${Math.round(p.at[thin] * 8)}:${Math.round(p.at[1] * 8)}:${Math.round(sy * 8)}`;
+      const lo = p.at[along] - p.size[along] / 2;
+      const hi = p.at[along] + p.size[along] / 2;
+      const row = rows.get(key);
+      if (!row) rows.set(key, { lo, hi, p, along });
+      else {
+        // Windows of two houses side by side stay two bands: a gap wider than 5 m splits.
+        if (lo - row.hi > 5 || row.lo - hi > 5) {
+          out.push(band(row));
+          rows.set(key, { lo, hi, p, along });
+        } else {
+          row.lo = Math.min(row.lo, lo);
+          row.hi = Math.max(row.hi, hi);
+        }
+      }
+      continue;
+    }
+    if (Math.max(sx, sy, sz) < 2.4) continue;
+    out.push(p);
+  }
+  for (const row of rows.values()) out.push(band(row));
+  return out;
+}
+
+/** One row of windows as a single dark band, lighter than glass for the wall between them. */
+function band(row: { lo: number; hi: number; p: Part; along: number }): Part {
+  const size: [number, number, number] = [...row.p.size];
+  const at: [number, number, number] = [...row.p.at];
+  size[row.along] = row.hi - row.lo;
+  at[row.along] = (row.hi + row.lo) / 2;
+  return { size, at, color: 0x4b4f50, gloss: 0.45 };
 }
 
 export function build(parts: Part[]): THREE.BufferGeometry {
@@ -1581,7 +1637,20 @@ export class StructureView {
    * when one of them changes state.
    */
   private readonly geoms: (THREE.BufferGeometry | null)[] = [];
+  /** The same building as drawn from far off (farParts). */
+  private readonly farGeoms: (THREE.BufferGeometry | null)[] = [];
   private readonly chunks: (THREE.Mesh | null)[] = new Array(CHUNKS * CHUNKS).fill(null);
+  private readonly farChunks: (THREE.Mesh | null)[] = new Array(CHUNKS * CHUNKS).fill(null);
+  /** Which squares are drawn simplified just now. */
+  private readonly isFar = new Uint8Array(CHUNKS * CHUNKS);
+  /** `?far=0`: never simplify (to compare). */
+  farDetail = true;
+  /** The cutaway: what the camera looks at, the way from there to the camera, how strong. */
+  private readonly cutFocus = uniform(new THREE.Vector3());
+  private readonly cutDir = uniform(new THREE.Vector2(0, 1));
+  private readonly cutStrength = uniform(0);
+  /** Whether buildings in front of the view are seen through from close up (Y). */
+  seeThrough = false;
   private readonly chunkOf: number[][] = Array.from({ length: CHUNKS * CHUNKS }, () => []);
   private readonly dirty = new Set<number>();
   /** Latest state per structure (STAGE_*) and its breached faces, one bit each (FACE_*). */
@@ -1612,6 +1681,29 @@ export class StructureView {
   ) {
     this.shadows = look.shadows;
     this.material = new THREE.MeshStandardNodeMaterial({ roughness: 0.93, metalness: 0 });
+    // The cutaway ("roof fade", URBAN.md 5.5): seen from close up, whatever stands between
+    // the camera and the street it looks at is drawn as a screen of dots above the ground
+    // floor, so the troops behind a six-floor block can be seen and clicked. The walls keep
+    // their footprint and their ground floor; nothing changes in the sim or in picking.
+    const cutaway =
+      typeof location === 'undefined' ||
+      new URLSearchParams(location.search).get('cutaway') !== '0';
+    if (cutaway) {
+      const rel = positionWorld.xz.sub(this.cutFocus.xz);
+      // How far this point is toward the camera from what it looks at, and how far to the side.
+      const toward = rel.dot(this.cutDir);
+      const aside = rel.x.mul(this.cutDir.y).sub(rel.y.mul(this.cutDir.x)).abs();
+      const zone = smoothstep(2.5, 5, toward)
+        .mul(smoothstep(52, 44, toward))
+        .mul(smoothstep(19, 15, aside));
+      const above = smoothstep(3.1, 3.5, positionWorld.y.sub(this.cutFocus.y));
+      const fade = zone.mul(above).mul(this.cutStrength);
+      // A fixed pattern on the screen that spreads the kept dots evenly at any density.
+      const cell = screenCoordinate.xy.floor();
+      const dot = cell.x.mul(0.7548776662).add(cell.y.mul(0.5698402909)).fract();
+      this.material.opacityNode = step(fade.mul(0.94), dot);
+      this.material.alphaTest = 0.5;
+    }
     // Signs: a panel shows its cell of the sign sheet instead of its own colour.
     const signs = makeSigns();
     const tint = attribute('color', 'vec3');
@@ -1773,7 +1865,10 @@ export class StructureView {
         Math.min(CHUNKS - 1, Math.floor((x0 + w / 2) / CHUNK));
       if (this.geoms[s]) this.geoms[s]!.dispose();
       else this.chunkOf[k].push(s);
+      this.farGeoms[s]?.dispose();
       this.geoms[s] = build(parts);
+      const far = farParts(parts);
+      this.farGeoms[s] = far.length > 0 ? build(far) : null;
       this.dirty.add(k);
     } else {
       const mesh = this.mesh(build(parts));
@@ -1804,11 +1899,25 @@ export class StructureView {
         this.group.remove(old);
         old.geometry.dispose();
       }
+      const oldFar = this.farChunks[k];
+      if (oldFar) {
+        this.group.remove(oldFar);
+        oldFar.geometry.dispose();
+        this.farChunks[k] = null;
+      }
       const parts = this.chunkOf[k].map((s) => this.geoms[s]!);
       if (parts.length === 0) continue;
       const mesh = this.mesh(parts.length === 1 ? parts[0].clone() : mergeGeometries(parts));
       this.chunks[k] = mesh;
       this.group.add(mesh);
+      const far = this.chunkOf[k].map((s) => this.farGeoms[s]).filter((g) => g !== null);
+      if (far.length > 0) {
+        const farMesh = this.mesh(far.length === 1 ? far[0].clone() : mergeGeometries(far));
+        this.farChunks[k] = farMesh;
+        this.group.add(farMesh);
+      }
+      mesh.visible = this.isFar[k] === 0 || !this.farChunks[k];
+      if (this.farChunks[k]) this.farChunks[k]!.visible = this.isFar[k] === 1;
     }
   }
 
@@ -1969,6 +2078,36 @@ export class StructureView {
   }
 
   /** Draw the readability layer. Call after the unit view has counted the occupants. */
+  /** Which squares of the city are far enough from the camera to be drawn simplified. */
+  view(camera: THREE.Camera, focus?: THREE.Vector3, distance = 1000): void {
+    const p = camera.position;
+    if (focus) {
+      this.cutFocus.value.copy(focus);
+      const dx = p.x - focus.x;
+      const dz = p.z - focus.z;
+      const len = Math.hypot(dx, dz) || 1;
+      this.cutDir.value.set(dx / len, dz / len);
+      // Only from close up: further out a block hides little, and the icons carry the units.
+      const near = Math.min(1, Math.max(0, (175 - distance) / 45));
+      this.cutStrength.value = this.seeThrough ? near : 0;
+    }
+    for (let k = 0; k < CHUNKS * CHUNKS; k++) {
+      const near = this.chunks[k];
+      const far = this.farChunks[k];
+      if (!near || !far) continue;
+      const dx = ((k % CHUNKS) + 0.5) * CHUNK - p.x;
+      const dz = (Math.floor(k / CHUNKS) + 0.5) * CHUNK - p.z;
+      const d2 = dx * dx + p.y * p.y + dz * dz;
+      // A little slack either way, so a square on the line does not flicker.
+      const edge = FAR_AT + (this.isFar[k] === 1 ? -25 : 25);
+      const want = this.farDetail && d2 > edge * edge ? 1 : 0;
+      if (want === this.isFar[k]) continue;
+      this.isFar[k] = want;
+      near.visible = want === 0;
+      far.visible = want === 1;
+    }
+  }
+
   update(seconds: number, dt: number): void {
     const m = this.map;
     if (this.dirty.size > 0) this.flush(2);
