@@ -77,10 +77,17 @@ function conifer(): THREE.BufferGeometry {
 
 /** A broadleaf tree: a short trunk under a lumpy crown, lighter where the sun reaches it. */
 function broadleaf(): THREE.BufferGeometry {
-  const blob = (r: number, x: number, y: number, z: number, colour: number) => {
+  const blob = (r: number, x: number, y: number, z: number, colour: number, detail = 0) => {
     // Indexed, like the trunk it is merged with.
-    const g = mergeVertices(new THREE.IcosahedronGeometry(r, 0));
+    const g = mergeVertices(new THREE.IcosahedronGeometry(r, detail));
     g.deleteAttribute('normal');
+    g.deleteAttribute('uv');
+    // A crown is lumpy, not a ball.
+    const q = g.getAttribute('position');
+    for (let i = 0; i < q.count; i++) {
+      const k = 1 + 0.16 * Math.sin(q.getX(i) * 9.1 + q.getY(i) * 5.3 + q.getZ(i) * 7.7 + x * 3);
+      q.setXYZ(i, q.getX(i) * k, q.getY(i) * k, q.getZ(i) * k);
+    }
     g.scale(1, 0.8, 1);
     g.translate(x, 0, z);
     return paint(g, y, colour);

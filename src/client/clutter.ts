@@ -22,6 +22,7 @@ import {
   P_SHED,
   P_SHELTER,
   P_STACK,
+  P_TREE,
   P_TUFT,
   type Prop,
 } from './land';
@@ -69,8 +70,9 @@ function blob(
   y: number,
   z: number,
   colour: number,
+  detail = 0,
 ): THREE.BufferGeometry {
-  const g = mergeVertices(new THREE.IcosahedronGeometry(1, 0));
+  const g = mergeVertices(new THREE.IcosahedronGeometry(1, detail));
   g.deleteAttribute('normal');
   g.scale(rx, ry, rz);
   g.translate(x, y, z);
@@ -188,6 +190,16 @@ function shapes(): THREE.BufferGeometry[] {
   g[P_BIN] = merge([
     box(0.6, 1.0, 0.7, 0, 0.5, 0, 0x33473a),
     box(0.64, 0.08, 0.76, 0, 1.03, 0, 0x26352b),
+  ]);
+  // A town tree: a clean trunk and a round crown, small enough for a pavement.
+  const trunk = new THREE.CylinderGeometry(0.1, 0.15, 1.7, 5);
+  trunk.translate(0, 0.85, 0);
+  g[P_TREE] = merge([
+    tint(trunk, 0x40362a),
+    blob(1.25, 1.0, 1.2, 0, 2.5, 0, 0x435628, 1),
+    blob(0.9, 0.75, 0.9, 0.6, 3.0, 0.3, 0x516a30),
+    blob(0.85, 0.7, 0.9, -0.55, 2.8, -0.4, 0x3a4c24),
+    blob(0.75, 0.6, 0.75, 0.05, 3.5, -0.2, 0x5b7335),
   ]);
   return g;
 }

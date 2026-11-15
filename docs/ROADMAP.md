@@ -438,6 +438,11 @@ From the proposal in the "Design tactical attack formations" thread.
   BUILT (decision 119)
 - Buildings a sixth easier to bring down. BUILT (decision 120)
 
+## Big build of 2026-11-15
+
+- Mid-zoom graphics: blocks drawn as rows of houses with courtyards and furnished roofs,
+  the paved ground dressed. BUILT (decision 121)
+
 ## M10 Factions
 
 - Three asymmetric factions with distinct units and tech
