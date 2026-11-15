@@ -31,7 +31,8 @@ export const P_STACK = 10;
 export const P_CAR = 11;
 export const P_VAN = 12;
 export const P_BIN = 13;
-export const P_KINDS = 14;
+export const P_TREE = 14;
+export const P_KINDS = 15;
 
 /** One small thing standing on the land. */
 export interface Prop {
@@ -216,6 +217,7 @@ export class Land {
         ctx.fillRect(i * CELL - 0.05, j * CELL - 0.05, CELL + 0.1, CELL + 0.1);
       }
     }
+    this.forecourts();
     // Round each building: a pavement apron in town, a yard with its fence outside it.
     for (let s = 0; s < map.structCount; s++) {
       if (map.sKind[s] !== S_BUILDING) continue;
@@ -324,6 +326,170 @@ export class Land {
         }
       }
     });
+  }
+
+  /**
+   * The paved ground between the streets and the houses of the city is not one bare slab:
+   * car parks with their bays, small gardens with trees, earth yards, squares of paving in
+   * two tones. Drawn and dressed only; a tank drives through all of it.
+   */
+  private forecourts(): void {
+    const map = this.map;
+    const ctx = this.mc;
+    const st = map.streets;
+    // Cells a street and its pavements run over.
+    const street = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    for (let k = 0; k + 4 < st.length; k += 5) {
+      const i0 = Math.min(st[k], st[k + 2]) - 1;
+      const i1 = Math.max(st[k], st[k + 2]) + 1;
+      const j0 = Math.min(st[k + 1], st[k + 3]) - 1;
+      const j1 = Math.max(st[k + 1], st[k + 3]) + 1;
+      for (let j = Math.max(0, j0); j <= Math.min(MAP_CELLS - 1, j1); j++) {
+        for (let i = Math.max(0, i0); i <= Math.min(MAP_CELLS - 1, i1); i++)
+          street[j * MAP_CELLS + i] = 1;
+      }
+    }
+    // Keep the flags and the resource sites clear.
+    for (let t = 0; t < map.townCount; t++) {
+      const i = Math.floor(map.townX[t] / 1024 / CELL);
+      const j = Math.floor(map.townY[t] / 1024 / CELL);
+      for (let dj = -2; dj <= 2; dj++)
+        for (let di = -2; di <= 2; di++) street[(j + dj) * MAP_CELLS + i + di] = 1;
+    }
+    for (let k = 0; k < map.siteCount; k++) {
+      const i = Math.floor(map.siteX[k] / 1024 / CELL);
+      const j = Math.floor(map.siteY[k] / 1024 / CELL);
+      for (let dj = -3; dj <= 3; dj++)
+        for (let di = -3; di <= 3; di++) street[(j + dj) * MAP_CELLS + i + di] = 1;
+    }
+    const open = (i: number, j: number): boolean => {
+      if (i < 2 || j < 2 || i >= MAP_CELLS - 2 || j >= MAP_CELLS - 2) return false;
+      const c = j * MAP_CELLS + i;
+      return map.road[c] !== 0 && map.structAt[c] < 0 && street[c] === 0 && map.type[c] === T_OPEN;
+    };
+    for (let j = 2; j < MAP_CELLS - 2; j++) {
+      for (let i = 2; i < MAP_CELLS - 2; i++) {
+        if (!open(i, j)) continue;
+        // The biggest clear rectangle from here, up to six cells a side.
+        let w = 1;
+        while (w < 6 && open(i + w, j)) w++;
+        let d = 1;
+        grow: while (d < 6) {
+          for (let q = 0; q < w; q++) if (!open(i + q, j + d)) break grow;
+          d++;
+        }
+        for (let b = 0; b < d; b++)
+          for (let a = 0; a < w; a++) street[(j + b) * MAP_CELLS + i + a] = 1;
+        if (w < 2 || d < 2) continue;
+        const x = i * CELL + 0.7;
+        const z = j * CELL + 0.7;
+        const ww = w * CELL - 1.4;
+        const dd = d * CELL - 1.4;
+        const r = hash(i, j, 131);
+        const along = ww >= dd;
+        const len = along ? ww : dd;
+        const deep = along ? dd : ww;
+        const P = (al: number, ac: number): [number, number] =>
+          along ? [x + al, z + ac] : [x + ac, z + al];
+        const rect = (al: number, ac: number, a: number, b: number): void => {
+          const [px0, pz0] = P(al, ac);
+          if (along) ctx.fillRect(px0, pz0, a, b);
+          else ctx.fillRect(px0, pz0, b, a);
+        };
+        if (r < 0.34) {
+          // A car park: tarmac, bays marked out, half of them taken.
+          ctx.fillStyle = rgba(0x4c4c50, 0.95);
+          rect(0, 0, len, deep);
+          const rows = deep >= 12 ? 2 : 1;
+          const n = Math.floor(len / 2.7);
+          for (let row = 0; row < rows; row++) {
+            const ac0 = row === 0 ? 0.3 : deep - 4.9;
+            ctx.fillStyle = rgba(0xc9c6b6, 0.7);
+            for (let b = 0; b <= n; b++) rect((b / n) * len - 0.09, ac0, 0.18, 4.6);
+            for (let b = 0; b < n; b++) {
+              if (hash(i * 7 + b, j * 5 + row, 133) > 0.5) continue;
+              const [cx, cz] = P(((b + 0.5) / n) * len, ac0 + 2.3);
+              this.props.push({
+                kind: hash(i + b, j + row, 135) < 0.8 ? P_CAR : P_VAN,
+                x: cx,
+                z: cz,
+                rot: (along ? Math.PI / 2 : 0) + (hash(i + b, j, 137) < 0.5 ? Math.PI : 0),
+                scale: 0.94,
+              });
+            }
+          }
+        } else if (r < 0.64) {
+          // A garden: a kerb, grass, a path across, trees and bushes.
+          ctx.fillStyle = rgba(0x66645d, 0.95);
+          rect(0, 0, len, deep);
+          ctx.fillStyle = rgba(hash(i, j, 139) < 0.5 ? 0x55683a : 0x5f6c40, 0.95);
+          rect(0.5, 0.5, len - 1, deep - 1);
+          ctx.fillStyle = rgba(0x8f8a78, 0.9);
+          rect(len * (0.3 + 0.4 * hash(i, j, 141)), 0.5, 1.3, deep - 1);
+          const trees = Math.max(1, Math.round((len * deep) / 55));
+          for (let t = 0; t < trees; t++) {
+            const [tx, tz] = P(
+              1.5 + hash(i + t, j, 143) * (len - 3),
+              1.5 + hash(i, j + t, 145) * (deep - 3),
+            );
+            this.props.push({
+              kind: P_TREE,
+              x: tx,
+              z: tz,
+              rot: t * 2.4,
+              scale: 0.8 + 0.5 * hash(i + t, j + t, 147),
+            });
+          }
+          for (let t = 0; t < trees + 1; t++) {
+            const [tx, tz] = P(
+              1 + hash(i + t, j, 149) * (len - 2),
+              1 + hash(i, j + t, 151) * (deep - 2),
+            );
+            this.props.push({
+              kind: P_BUSH,
+              x: tx,
+              z: tz,
+              rot: t,
+              scale: 0.7 + 0.5 * hash(i + t, j, 153),
+            });
+          }
+          if (hash(i, j, 155) < 0.6) {
+            for (let t = 1.5; t < len - 1; t += 2.6) {
+              const [hx, hz] = P(t, 0.9);
+              this.props.push({
+                kind: P_HEDGE,
+                x: hx,
+                z: hz,
+                rot: along ? 0 : Math.PI / 2,
+                scale: 0.8,
+              });
+            }
+          }
+        } else if (r < 0.8) {
+          // A yard of trodden earth behind a fence, a shed in the corner.
+          ctx.fillStyle = rgba(hash(i, j, 157) < 0.5 ? 0x6f6657 : 0x7b7567, 0.85);
+          ctx.fillRect(x, z, ww, dd);
+          this.yard(i * 131 + j, x, z, ww, dd, z + dd + 20);
+        } else {
+          // A paved square: slabs in two tones, a tree in each corner.
+          for (let b = 0; b * 2 < dd; b++) {
+            for (let a = 0; a * 2 < ww; a++) {
+              ctx.fillStyle = rgba((a + b) % 2 === 0 ? 0x8e8b81 : 0x85827a, 0.9);
+              ctx.fillRect(x + a * 2, z + b * 2, Math.min(2, ww - a * 2), Math.min(2, dd - b * 2));
+            }
+          }
+          for (const [qa, qb] of [
+            [1.4, 1.4],
+            [ww - 1.4, 1.4],
+            [1.4, dd - 1.4],
+            [ww - 1.4, dd - 1.4],
+          ]) {
+            if (hash(i + qa, j + qb, 159) < 0.3) continue;
+            this.props.push({ kind: P_TREE, x: x + qa, z: z + qb, rot: qa + qb, scale: 0.9 });
+          }
+        }
+      }
+    }
   }
 
   /** The main street of each settlement, the yards of its houses and what stands in them. */

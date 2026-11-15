@@ -39,6 +39,7 @@ import {
 import { GARRISON_MAX } from '../sim/units';
 import { BASE_STRIDE, STRUCT_FORTIFIED, type Snapshot } from '../worker/protocol';
 import { Batch } from './batch';
+import { blockMass, flatStuff } from './blocks';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import type { Look } from './look';
@@ -129,11 +130,21 @@ export interface Part {
    * cell of the sign sheet (signs.ts), facing +z before `rot`.
    */
   sign?: number;
+  /** A roof whose ridge runs along x or z whatever its proportions. */
+  ridge?: 'x' | 'z';
+  /** A box whose top is drawn in by this much on each side, in x and in z: a mansard. */
+  taper?: [number, number];
 }
 
 /** A pitched roof as a closed solid: two slopes and two ends, flat-shaded. */
-function roofGeometry(w: number, h: number, d: number, hip: number): THREE.BufferGeometry {
-  const alongX = w >= d;
+function roofGeometry(
+  w: number,
+  h: number,
+  d: number,
+  hip: number,
+  axis?: 'x' | 'z',
+): THREE.BufferGeometry {
+  const alongX = axis ? axis === 'x' : w >= d;
   const L = (alongX ? w : d) / 2;
   const S = (alongX ? d : w) / 2;
   const r = Math.max(0, L - hip);
@@ -171,6 +182,43 @@ function roofGeometry(w: number, h: number, d: number, hip: number): THREE.Buffe
   return g;
 }
 
+/**
+ * A box, or for something as thin as a pane of glass just its two faces: a town has tens
+ * of thousands of windows, and the four edges of each are never seen.
+ */
+function boxOrSlab(size: [number, number, number]): THREE.BufferGeometry {
+  const k = size.findIndex((v) => v <= 0.06);
+  if (k < 0 || size.filter((v) => v <= 0.06).length !== 1) return new THREE.BoxGeometry(...size);
+  const a = size[(k + 1) % 3] / 2;
+  const b = size[(k + 2) % 3] / 2;
+  const t = size[k] / 2;
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const put = (u: number, v: number, w: number, side: number): void => {
+    const q = [0, 0, 0];
+    q[k] = w;
+    q[(k + 1) % 3] = u;
+    q[(k + 2) % 3] = v;
+    pos.push(q[0], q[1], q[2]);
+    const n = [0, 0, 0];
+    n[k] = side;
+    nor.push(n[0], n[1], n[2]);
+  };
+  for (const side of [1, -1]) {
+    // Wound so that each face looks outward.
+    const quad =
+      side === 1
+        ? [-a, -b, a, -b, a, b, -a, -b, a, b, -a, b]
+        : [-a, -b, a, b, a, -b, -a, -b, -a, b, a, b];
+    for (let i = 0; i < 12; i += 2) put(quad[i], quad[i + 1], side * t, side);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nor), 3));
+  g.setIndex([...Array(12).keys()]);
+  return g;
+}
+
 export function build(parts: Part[]): THREE.BufferGeometry {
   const c = new THREE.Color();
   const geometries = parts.map((p) => {
@@ -178,8 +226,19 @@ export function build(parts: Part[]): THREE.BufferGeometry {
       p.sign !== undefined
         ? new THREE.PlaneGeometry(p.size[0], p.size[1])
         : p.hip === undefined
-          ? new THREE.BoxGeometry(...p.size)
-          : roofGeometry(p.size[0], p.size[1], p.size[2], p.hip);
+          ? p.taper
+            ? new THREE.BoxGeometry(...p.size)
+            : boxOrSlab(p.size)
+          : roofGeometry(p.size[0], p.size[1], p.size[2], p.hip, p.ridge);
+    if (p.taper) {
+      const q = g.getAttribute('position');
+      for (let i = 0; i < q.count; i++) {
+        if (q.getY(i) <= 0) continue;
+        q.setX(i, q.getX(i) - Math.sign(q.getX(i)) * p.taper[0]);
+        q.setZ(i, q.getZ(i) - Math.sign(q.getZ(i)) * p.taper[1]);
+      }
+      g.computeVertexNormals();
+    }
     if (p.rot) g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...p.rot)));
     g.translate(...p.at);
     const n = g.getAttribute('position').count;
@@ -213,6 +272,9 @@ export function build(parts: Part[]): THREE.BufferGeometry {
   for (const g of geometries) g.dispose();
   return merged;
 }
+
+/** How far the roof of the building last drawn stands above its counted floors. */
+let crest = 0.9;
 
 /** A house: foundation, walls, rows of windows, a flat roof with a parapet and clutter. */
 function buildingParts(
@@ -446,13 +508,56 @@ function buildingParts(
     }
     return parts;
   }
-  parts.push({
-    size: [w, h, d],
-    at: [cx, base + h / 2, cz],
-    color: wall,
-    shade: wear,
-    surf: wsurf,
-  });
+  // The bigger buildings are drawn as rows of houses (blocks.ts); the rest as one.
+  const mass =
+    cls === BUILD_HALL
+      ? null
+      : blockMass({
+          id,
+          cx,
+          cz,
+          w,
+          d,
+          base,
+          floors,
+          floor: FLOOR,
+          house: cls === BUILD_HOUSE,
+          damaged,
+          wall,
+          wsurf,
+          wear,
+        });
+  crest = mass ? mass.crest : 0.9;
+  if (mass) parts.push(...mass.parts);
+  else
+    parts.push({
+      size: [w, h, d],
+      at: [cx, base + h / 2, cz],
+      color: wall,
+      shade: wear,
+      surf: wsurf,
+    });
+  // A band round the house: one slab, or four strips where a courtyard must stay open.
+  const belt = (y: number, up: number, out: number, color: number, shade: number): void => {
+    if (!mass?.court) {
+      parts.push({ size: [w + out, up, d + out], at: [cx, y, cz], color, shade });
+      return;
+    }
+    for (const s of [-1, 1]) {
+      parts.push({
+        size: [w + out, up, 0.5],
+        at: [cx, y, cz + s * (d / 2 + out / 2 - 0.25)],
+        color,
+        shade,
+      });
+      parts.push({
+        size: [0.5, up, d + out],
+        at: [cx + s * (w / 2 + out / 2 - 0.25), y, cz],
+        color,
+        shade,
+      });
+    }
+  };
   const top = base + h;
   const S = Math.min(w, d);
   const L = Math.max(w, d);
@@ -481,7 +586,7 @@ function buildingParts(
           : rr < 0.5 && S <= 16
             ? 'hip'
             : 'flat';
-  const pitched = roof === 'gable' || roof === 'shed';
+  const pitched = mass !== null || roof === 'gable' || roof === 'shed';
   const stack = (along: number, across: number, tall: number): void => {
     parts.push({
       size: [0.32, tall, 0.32],
@@ -492,7 +597,9 @@ function buildingParts(
     });
     parts.push({ size: [0.4, 0.06, 0.4], at: lay(along, top + tall, across), color: 0x4a4744 });
   };
-  if (roof === 'gable' || roof === 'shed') {
+  if (mass) {
+    // Roofed already, house by house.
+  } else if (roof === 'gable' || roof === 'shed') {
     const sheet = roof === 'shed';
     const tile = sheet
       ? ZINC[Math.floor(rand(id, 7) * ZINC.length)]
@@ -658,35 +765,15 @@ function buildingParts(
         surf: SURF_FELT,
       });
     } else {
-      parts.push({
-        size: [1.3, 0.7, 1.6],
-        at: [cx + (rand(id, 3) - 0.5) * (w - 2.5), top + 0.45, cz + (rand(id, 4) - 0.5) * (d - 3)],
-        color: wall,
-        shade: wear * 0.8,
-        surf: wsurf,
-      });
-      const things = 2 + Math.floor(rand(id, 20) * 4);
-      for (let i = 0; i < things; i++) {
-        const tx = cx + (rand(id, 21 + i) - 0.5) * (w - 1.6);
-        const tz = cz + (rand(id, 27 + i) - 0.5) * (d - 1.6);
-        const r = rand(id, 33 + i);
-        if (r < 0.4) {
-          // A ventilation unit.
-          parts.push({ size: [0.7, 0.32, 0.5], at: [tx, top + 0.28, tz], color: 0x8c8f8c });
-          parts.push({ size: [0.5, 0.05, 0.3], at: [tx, top + 0.46, tz], color: 0x4a4d4d });
-        } else if (r < 0.7) {
-          // A vent pipe.
-          parts.push({ size: [0.12, 0.6, 0.12], at: [tx, top + 0.42, tz], color: 0x5c5f5e });
-        } else if (r < 0.85) {
-          // A water tank on a frame.
-          parts.push({ size: [0.8, 0.5, 0.8], at: [tx, top + 0.62, tz], color: 0x5a6468 });
-          parts.push({ size: [0.7, 0.26, 0.7], at: [tx, top + 0.25, tz], color: 0x3b3d3d });
-        } else {
-          // An aerial.
-          parts.push({ size: [0.04, 1.5, 0.04], at: [tx, top + 0.87, tz], color: 0x777a78 });
-          parts.push({ size: [0.5, 0.03, 0.03], at: [tx, top + 1.4, tz], color: 0x777a78 });
-        }
-      }
+      parts.push(
+        ...flatStuff(
+          { cx, cz, len: L - 0.6, span: S - 0.6, alongX: ridgeX },
+          top + 0.12,
+          id,
+          3,
+          wall,
+        ),
+      );
       if (floors >= 3 && w >= 5.5 && !damaged && rand(id, 76) < 0.24) {
         // A hoarding on the roof, turned to the street.
         const bw = Math.min(w - 1, 4.8);
@@ -734,12 +821,7 @@ function buildingParts(
   }
   // A plinth in darker render, a string course under the top floor, a canopy over the door.
   const trim = TRIM[Math.floor(rand(id, 1) * TRIM.length)];
-  parts.push({
-    size: [w + 0.08, 0.26, d + 0.08],
-    at: [cx, base + 0.13, cz],
-    color: wall,
-    shade: wear * 0.62,
-  });
+  belt(base + 0.13, 0.26, 0.08, wall, wear * 0.62);
   // Shops along the ground floor of one face; a ground floor in dressed render on the
   // taller houses; piers down the panel blocks; drainpipes; a street plate at a corner.
   const shopFace =
@@ -751,12 +833,7 @@ function buildingParts(
   const band = floors >= 3 && cls !== BUILD_HALL && rand(id, 44) < 0.55;
   const proud = band ? 0.035 : 0;
   if (band) {
-    parts.push({
-      size: [w + 0.07, FLOOR * 0.96, d + 0.07],
-      at: [cx, base + FLOOR * 0.48, cz],
-      color: trim,
-      shade: wear * 0.8,
-    });
+    belt(base + FLOOR * 0.48, FLOOR * 0.96, 0.07, trim, wear * 0.8);
   }
   if (wsurf === SURF_PANEL && rand(id, 43) < 0.5) {
     for (let f = 0; f < 4; f++) {
@@ -842,12 +919,9 @@ function buildingParts(
   }
   if (fort) sandbags();
   if (floors >= 2) {
-    parts.push({
-      size: [w + 0.1, 0.06, d + 0.1],
-      at: [cx, base + (floors - 1) * FLOOR + 0.05, cz],
-      color: trim,
-      shade: wear,
-    });
+    belt(base + (floors - 1) * FLOOR + 0.05, 0.06, 0.1, trim, wear);
+    // A cornice where the counted floors end, under whatever each house adds on top.
+    if (mass) belt(top - 0.05, 0.1, 0.16, trim, wear * 0.9);
   }
   if (shopFace !== FACE_SOUTH)
     parts.push({
@@ -939,15 +1013,16 @@ function buildingParts(
       });
     }
     const sag = pitched ? Math.min(w, d) * 0.1 : 0;
-    parts.push({
-      size: [w * 0.45, 0.16 + sag * 1.6, d * 0.5],
-      at: [
-        cx + (rand(id, 5) - 0.5) * w * 0.5,
-        base + h + 0.07 + sag * 0.8,
-        cz + (rand(id, 6) - 0.5) * d * 0.4,
-      ],
-      color: SOOT,
-    });
+    if (!mass)
+      parts.push({
+        size: [w * 0.45, 0.16 + sag * 1.6, d * 0.5],
+        at: [
+          cx + (rand(id, 5) - 0.5) * w * 0.5,
+          base + h + 0.07 + sag * 0.8,
+          cz + (rand(id, 6) - 0.5) * d * 0.4,
+        ],
+        color: SOOT,
+      });
   }
   return parts;
 }
@@ -1519,6 +1594,8 @@ export class StructureView {
    */
   private readonly shown = new Int16Array(MAX_STRUCTS).fill(-1);
   private readonly fellAt = new Float32Array(MAX_STRUCTS).fill(-1e9);
+  /** How far each building's roof stands above its counted floors (chimneys and all). */
+  private readonly crest = new Float32Array(MAX_STRUCTS).fill(0.9);
   private readonly pips: Batch;
   private readonly flags: Batch;
   private readonly shadows: boolean;
@@ -1623,7 +1700,7 @@ export class StructureView {
   topOf(s: number): number {
     const m = this.map;
     if (m.sKind[s] === S_BRIDGE) return Math.max(fromFx(m.sBase[s]), fromFx(m.sEast[s]));
-    return fromFx(m.sBase[s]) + (this.hp[s] === 0 ? 0.8 : m.sFloors[s] * FLOOR + 0.9);
+    return fromFx(m.sBase[s]) + (this.hp[s] === 0 ? 0.8 : m.sFloors[s] * FLOOR + this.crest[s]);
   }
 
   centreOf(s: number): { x: number; z: number } {
@@ -1687,6 +1764,7 @@ export class StructureView {
               fort === 1,
             );
     if (m.sKind[s] === S_BUILDING) {
+      this.crest[s] = state === 0 || state === 1 ? Math.max(0.9, crest) : 0.9;
       const k =
         Math.min(CHUNKS - 1, Math.floor((z0 + d / 2) / CHUNK)) * CHUNKS +
         Math.min(CHUNKS - 1, Math.floor((x0 + w / 2) / CHUNK));

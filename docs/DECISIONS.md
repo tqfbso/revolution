@@ -2414,3 +2414,35 @@ Golden hash 4027169720 to 3501695057.
 
 If it is still short of what Fabio wants, the next step of the same size is 62/125/195
 and 42/75/112; the other levers are in decision 104.
+
+## 121. The town from mid zoom: houses in a row, not crates (2026-11-15)
+
+Fabio: "mid zoom is still boxy", and the night battles showed his machine has room.
+
+Looked at first (city map, camera 150 and 280 out): every big building was one box under
+one dark slab, with roof clutter 0.7 across on a roof 15 across, standing in bare beige
+paving. The camera looks down at 45 to 56 degrees there, so roofs and ground are most of
+what is seen.
+
+- **Blocks are rows of houses** (`src/client/blocks.ts`). A building 10 or more across is
+  drawn as houses side by side, each with its own colour, eaves a little higher or lower
+  than the next, and its own roof: tiled gable with dormers, twin gables with a valley,
+  slate mansard, flat roof, set-back top storey. Firewalls and chimneys stand between
+  them. The deepest (14 and up) are mostly a ring of houses round a courtyard that is
+  really open. The sim knows none of it: footprint, outer walls and counted floors are
+  unchanged, so cover, sight and damage are as they were.
+- **Flat roofs are furnished to their size** (`flatStuff`): a stair head, cooling plant
+  and ducts, skylights, solar panels, tanks, aerials, parapets with a coping.
+- **The paved ground is dressed** (`Land.forecourts`): car parks with marked bays and
+  cars, gardens with town trees and hedges, fenced earth yards, squares in two tones of
+  slab. Drawn and propped only; units go through it as before.
+- **Broadleaf crowns are lumpy**, not balls (same triangle count).
+- **Panes are two faces, not boxes** (`boxOrSlab`): anything 0.06 thin or less. A town
+  has tens of thousands of windows and this pays for everything above.
+
+Measured (headless, camera 280 over the centre, peak triangles a frame with the shadow
+pass): city 1.54M before, 1.25M after; European city 2.28M before, 1.57M after. So the
+richer town is cheaper to draw than the plain one. Real frame rate is Fabio's to report.
+
+Not done here: vehicles and base buildings were left as they are; far facades and the
+roof fade are item 6 of the same run.
