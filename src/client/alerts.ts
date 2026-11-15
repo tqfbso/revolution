@@ -1,6 +1,8 @@
 // Battle alerts: the map is far larger than the screen, so what happens off it has to be
 // announced. A banner with a tone and a spoken line, a ping on the minimap, an arrow at
 // the screen edge pointing at it, and Backspace to jump there.
+import { factionOf, myKinds, nameOf } from './army';
+import { FACTIONS } from '../sim/factions';
 import { KINDS, KIND_DRONE, KIND_TRUCK } from '../sim/units';
 import {
   EV_DEATH,
@@ -111,7 +113,8 @@ export class AlertBook {
 }
 
 /** A group of enemy units reported together, as words: "14 enemy units, 3 tanks". */
-export function contactText(counts: readonly number[]): string {
+export function contactText(counts: readonly number[], team = -1): string {
+  const names = team < 0 ? KINDS : FACTIONS[factionOf(team)].kinds;
   let total = 0;
   let top = -1;
   for (let k = 0; k < counts.length; k++) {
@@ -123,11 +126,11 @@ export function contactText(counts: readonly number[]): string {
   if (top < 0 || counts[top] === total) {
     if (total === 1) {
       const only = counts.findIndex((c) => c > 0);
-      return `Contact: enemy ${KINDS[only].name.toLowerCase()}`;
+      return `Contact: enemy ${names[only].name.toLowerCase()}`;
     }
     return `Contact: ${what}`;
   }
-  const name = KINDS[top].name.toLowerCase();
+  const name = names[top].name.toLowerCase();
   return `Contact: ${what}, ${counts[top]} ${name}${counts[top] === 1 ? '' : 's'}`;
 }
 
@@ -155,7 +158,6 @@ const BANNER_SECONDS = 9;
 const ARROW_SECONDS = 20;
 /** How long an enemy must have been out of everyone's sight to count as found again. */
 const LOST_SECONDS = 25;
-const SIGHT = KINDS.map((k) => k.sight / 1024);
 
 /** Where a ground point is on screen: pixels, and whether it is inside the view. */
 export type Project = (x: number, z: number) => { sx: number; sy: number; on: boolean };
@@ -221,7 +223,7 @@ export class Alerts {
         if (u.teamOf(a) !== me || u.teamOf(b) === me) continue;
         const x = u.renderPos[3 * a];
         const z = u.renderPos[3 * a + 2];
-        const what = KINDS[u.kindOf(a)].name.toLowerCase();
+        const what = nameOf(me, u.kindOf(a)).toLowerCase();
         this.show(this.book.raise(ALERT_DRONES, x, z, `Strike drones over our ${what}`, now));
       } else if (type === EV_PLANE) {
         // Radar has it from the moment it crosses the edge of the map.
@@ -343,10 +345,13 @@ export class Alerts {
     for (let i = 0; i < s.count; i++) {
       // A jammed drone sends nothing back (its load is 1 while jammed).
       if (u.isMine(i) && u.kindOf(i) === KIND_DRONE && u.load[i] === 0) {
-        eyes.push(pos[3 * i], pos[3 * i + 2], SIGHT[KIND_DRONE]);
+        eyes.push(pos[3 * i], pos[3 * i + 2], myKinds()[KIND_DRONE].sight / 1024);
       }
     }
-    const groups = new Map<number, { x: number; z: number; n: number; counts: number[] }>();
+    const groups = new Map<
+      number,
+      { x: number; z: number; n: number; team: number; counts: number[] }
+    >();
     for (let i = 0; i < s.count; i++) {
       if (!u.isAlive(i) || u.teamOf(i) === u.playerTeam) continue;
       if ((s.info[i] & (INFO_INSIDE | INFO_CARRIED)) !== 0) continue;
@@ -368,7 +373,13 @@ export class Alerts {
       const key = Math.floor(x / ALERT_AREA) + 64 * Math.floor(z / ALERT_AREA);
       let g = groups.get(key);
       if (!g) {
-        g = { x: 0, z: 0, n: 0, counts: new Array<number>(KINDS.length).fill(0) };
+        g = {
+          x: 0,
+          z: 0,
+          n: 0,
+          team: u.teamOf(i),
+          counts: new Array<number>(KINDS.length).fill(0),
+        };
         groups.set(key, g);
       }
       g.x += x;
@@ -377,7 +388,9 @@ export class Alerts {
       g.counts[u.kindOf(i)]++;
     }
     for (const g of groups.values()) {
-      this.show(this.book.raise(ALERT_CONTACT, g.x / g.n, g.z / g.n, contactText(g.counts), now));
+      this.show(
+        this.book.raise(ALERT_CONTACT, g.x / g.n, g.z / g.n, contactText(g.counts, g.team), now),
+      );
     }
   }
 

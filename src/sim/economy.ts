@@ -1,6 +1,7 @@
 // The economy: what things cost, the trucks that pay for them, base buildings and what
 // they produce. Three resources with three different shapes (see decision 035):
 // supplies scale with trucks and run out, fuel scales with wells held, credits with towns.
+import { FACTIONS, kindOf } from './factions';
 import {
   CMD_ASSIST,
   CMD_BUILD,
@@ -273,8 +274,41 @@ const SITE_SEARCH = fx(160);
 
 const builders = new Uint8Array(MAX_STRUCTS);
 const IS_HELI = KINDS.map((_, k) => k === KIND_HELI || k === KIND_LIFT);
-const priceOf = (item: number, tier: number): Price | null =>
-  (item === TIER_ITEM ? TIER_PRICE[tier] : UNIT_PRICE[item]) ?? null;
+/** What nobody can build: the transport plane, and whatever a faction does without. */
+const NEVER: UnitPrice = { from: B_COUNT, tier: 99, supplies: 0, fuel: 0, credits: 0, ticks: 1 };
+const factionPrices: (readonly UnitPrice[])[] = [];
+
+/** The price list of a faction: the table's, scaled kind by kind (factions.ts). */
+export function pricesOf(faction: number): readonly UnitPrice[] {
+  if (faction === 0) return UNIT_PRICE;
+  let t = factionPrices[faction];
+  if (!t) {
+    const f = FACTIONS[faction];
+    // Prices stay in fives, so the purse never shows odd change.
+    const five = (n: number, p: number): number =>
+      n === 0 ? 0 : Math.max(5, Math.round((n * p) / 500) * 5);
+    t = factionPrices[faction] = UNIT_PRICE.map((p, k) =>
+      !f.roster[k]
+        ? NEVER
+        : {
+            ...p,
+            supplies: five(p.supplies, f.cost[k]),
+            fuel: five(p.fuel, f.cost[k]),
+            credits: five(p.credits, f.cost[k]),
+            ticks: Math.max(1, Math.round((p.ticks * f.time[k]) / 100)),
+          },
+    );
+  }
+  return t;
+}
+
+/** What a unit of `kind` costs the army of `team`. */
+export function unitPrice(w: World, team: number, kind: number): UnitPrice {
+  return pricesOf(w.faction[team])[kind];
+}
+
+const priceOf = (w: World, team: number, item: number): Price | null =>
+  (item === TIER_ITEM ? TIER_PRICE[w.tier[team]] : unitPrice(w, team, item)) ?? null;
 
 function canPay(w: World, team: number, p: Price): boolean {
   return w.supplies[team] >= p.supplies && w.fuel[team] >= p.fuel && w.credits[team] >= p.credits;
@@ -374,8 +408,8 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       if (!ownBase(w, s, true) || !Number.isInteger(kind) || kind < 0 || kind >= KIND_COUNT) {
         return true;
       }
-      const p = UNIT_PRICE[kind];
       const team = w.sTeam[s];
+      const p = unitPrice(w, team, kind);
       if (p.from !== w.sType[s] || w.tier[team] < p.tier || w.sQueueLen[s] >= QUEUE_MAX)
         return true;
       if (!canPay(w, team, p)) return true;
@@ -392,7 +426,7 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       const s = cmd.structure;
       if (!ownBase(w, s, true) || w.sType[s] !== B_HQ || w.sQueueLen[s] >= QUEUE_MAX) return true;
       const team = w.sTeam[s];
-      const p = priceOf(TIER_ITEM, w.tier[team]);
+      const p = priceOf(w, team, TIER_ITEM);
       if (w.tier[team] >= MAX_TIER || p === null || !canPay(w, team, p)) return true;
       // One step at a time, in one headquarters.
       for (let o = 0; o < w.map.structCount; o++) {
@@ -409,7 +443,7 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       const s = cmd.structure;
       if (!ownBase(w, s, true) || w.sQueueLen[s] === 0) return true;
       const team = w.sTeam[s];
-      const p = priceOf(w.sQueue[s * QUEUE_MAX + --w.sQueueLen[s]], w.tier[team]);
+      const p = priceOf(w, team, w.sQueue[s * QUEUE_MAX + --w.sQueueLen[s]]);
       if (p !== null) pay(w, team, p, -1);
       if (w.sQueueLen[s] === 0) w.sProgress[s] = 0;
       return true;
@@ -612,8 +646,8 @@ function updateTrucks(w: World): void {
 
 /** A building on repeat puts its last unit on the queue again, if the army can pay for it. */
 function repeatTrain(w: World, s: number): void {
-  const p = UNIT_PRICE[w.sLast[s]];
   const team = w.sTeam[s];
+  const p = pricesOf(w.faction[team])[w.sLast[s]];
   if (p === undefined || p.from !== w.sType[s] || w.tier[team] < p.tier) return;
   if (!canPay(w, team, p)) return;
   pay(w, team, p, 1);
@@ -655,15 +689,15 @@ function dispatchOrders(w: World): void {
       let s = -1;
       for (let step = 0; step < KIND_COUNT && kind < 0; step++) {
         const k = (w.orderTurn[team] + step) % KIND_COUNT;
-        if (w.orders[base + k] <= 0 || w.tier[team] < UNIT_PRICE[k].tier) continue;
-        s = freeFactory(w, team, UNIT_PRICE[k].from);
+        if (w.orders[base + k] <= 0 || w.tier[team] < unitPrice(w, team, k).tier) continue;
+        s = freeFactory(w, team, unitPrice(w, team, k).from);
         if (s >= 0) kind = k;
       }
       if (kind < 0) {
         w.orderWait[team] = 0;
         break;
       }
-      const p = UNIT_PRICE[kind];
+      const p = unitPrice(w, team, kind);
       if (!canPay(w, team, p)) {
         w.orderTurn[team] = kind;
         if (++w.orderWait[team] >= DISPATCH_PATIENCE) {
@@ -731,7 +765,7 @@ function updateProduction(w: World): void {
     }
     const team = w.sTeam[s];
     const item = w.sQueue[s * QUEUE_MAX];
-    const p = priceOf(item, w.tier[team]);
+    const p = priceOf(w, team, item);
     if (p === null) {
       w.sQueueLen[s] = 0;
       continue;
@@ -796,7 +830,7 @@ function rally(w: World, id: number, s: number): void {
     }
   }
   sendTo(w, id, rx, ry);
-  if (KINDS[w.kind[id]].damage.some((d) => d > 0)) w.flags[id] |= FLAG_AMOVE;
+  if (kindOf(w, id).damage.some((d) => d > 0)) w.flags[id] |= FLAG_AMOVE;
 }
 
 /** How many units each army has, and how many its buildings let it have. */

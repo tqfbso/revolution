@@ -6,6 +6,7 @@
 // near, then runs for the nearest edge of the map and is gone. On the way a round that
 // passes close, a shell that lands near, or a shell on the house it has not yet left can
 // kill it. No gore: the client lets it fall and fades it out. The army that fired pays.
+import { kindOf } from './factions';
 import { clampInt, fx, isqrt } from './fixed';
 import {
   CELL_FX,
@@ -19,7 +20,7 @@ import {
 } from './map';
 import { DIR_CELL, UNREACHABLE, buildField } from './path';
 import { nextInt, nextU32, seedRng } from './rng';
-import { BLAST_STRAY, KINDS } from './units';
+import { BLAST_STRAY } from './units';
 import { EV_CIVILIAN, packPoint, type World } from './world';
 
 // (This module and world.ts import each other, so nothing here may read a constant of
@@ -285,8 +286,8 @@ export function civiliansShot(w: World, i: number, t: number): void {
   markDanger(w, ax, ay);
   markDanger(w, bx, by);
   if (runningCount === 0) return;
-  const kind = KINDS[w.kind[i]];
-  if (KINDS[w.kind[t]].cls === CLASS_AIR) return;
+  const kind = kindOf(w, i);
+  if (kindOf(w, t).cls === CLASS_AIR) return;
   const team = w.team[i];
   if (kind.kamikaze || kind.stray >= BLAST_STRAY) {
     burst(w, bx, by, BURST_REACH, team);

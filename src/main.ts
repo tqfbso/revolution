@@ -1,3 +1,5 @@
+import { myKinds, setArmies } from './client/army';
+import { FACTIONS, factionByName } from './sim/factions';
 import * as THREE from 'three/webgpu';
 import { CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
@@ -113,6 +115,14 @@ async function start(): Promise<void> {
   // `?time=night`: a night battle (decision 113). A moonlit night, not a black one: the
   // ground and the troops stay readable, and fire is what stands out.
   const night = params.get('time') === 'night';
+  // `?army=nato|russia|china` is red's faction and `?foe=` blue's (M10, decision 123): the
+  // alliance against Russia unless chosen. Only the skirmish has factions; the measuring
+  // scenarios keep the plain table their numbers were taken on (`none` gives it here too).
+  const skirmishGame = scenario === 'skirmish';
+  const pickFaction = (key: string, fallback: string): number =>
+    skirmishGame ? factionByName(params.get(key) ?? fallback) : 0;
+  const factions = [pickFaction('army', 'nato'), pickFaction('foe', 'russia'), 0];
+  setArmies(factions, myTeam);
   if (night) renderer.toneMappingExposure = 1.15;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(night ? NIGHT_SKY : SKY);
@@ -406,6 +416,7 @@ async function start(): Promise<void> {
     versus,
     team: myTeam,
     night,
+    factions,
   });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
   const setSpeed = (v: number) => {
@@ -478,6 +489,20 @@ async function start(): Promise<void> {
     pickTime.addEventListener('change', () => {
       if (pickTime.value === 'night') params.set('time', 'night');
       else params.delete('time');
+      location.search = params.toString();
+    });
+  }
+  // Your army and the enemy's: in a versus game the host's two choices are red and blue.
+  for (const [id, key, side] of [
+    ['army-pick', 'army', 0],
+    ['foe-pick', 'foe', 1],
+  ] as const) {
+    const pick = document.getElementById(id) as HTMLSelectElement | null;
+    if (!pick) continue;
+    pick.value = FACTIONS[factions[side]].short;
+    pick.title = `${FACTIONS[factions[side]].name}. ${FACTIONS[factions[side]].line} Changing this starts a new game`;
+    pick.addEventListener('change', () => {
+      params.set(key, pick.value);
       location.search = params.toString();
     });
   }
@@ -635,9 +660,9 @@ async function start(): Promise<void> {
       n[units.kindOf(id)]++;
       if (KINDS[units.kindOf(id)].carry > 0) aboard += units.load[id];
     }
-    const parts = KINDS.map((k, i) => (n[i] > 0 ? `${n[i]} ${k.name.toLowerCase()}` : '')).filter(
-      (p) => p !== '',
-    );
+    const parts = myKinds()
+      .map((k, i) => (n[i] > 0 ? `${n[i]} ${k.name.toLowerCase()}` : ''))
+      .filter((p) => p !== '');
     if (aboard > 0) parts.push(`${aboard} squads aboard`);
     const starving = units
       .selectedIds()

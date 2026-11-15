@@ -396,6 +396,17 @@ export interface NightCommand {
   on: boolean;
 }
 
+/**
+ * Army `team` is of this faction (factions.ts). Given once, when the game is set up, before
+ * anything is built: it does not change units already on the field.
+ */
+export const CMD_FACTION = 39;
+export interface FactionCommand {
+  type: typeof CMD_FACTION;
+  team: number;
+  faction: number;
+}
+
 /** Commander `slot` of `team` has its losses replaced by itself (or, off, not). */
 export interface ReinforceCommand {
   type: typeof CMD_REINFORCE;
@@ -417,6 +428,7 @@ export type Command = (
   | ReinforceCommand
   | StyleCommand
   | NightCommand
+  | FactionCommand
   | OrderCommand
   | KeepCommand
   | DestCommand
