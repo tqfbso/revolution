@@ -19,6 +19,8 @@ import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import {
   ST_ARRIVED,
+  ST_FOCUS,
+  ST_MASSED,
   ST_ATTACK,
   ST_DEFEND,
   ST_FALLBACK,
@@ -52,6 +54,7 @@ import {
   M_ATTACK,
   M_DEFEND,
   M_HOLD,
+  M_FOCUS,
   M_MOVE,
   M_PATROL,
   M_SCREEN,
@@ -290,6 +293,69 @@ describe('sub-commanders: the staff', () => {
     );
     expect(there.length).toBeGreaterThanOrEqual(alive(w, ids) - 1);
     expect(alive(w, ids)).toBeGreaterThanOrEqual(8);
+  }, 60000);
+
+  it('concentrate: everyone onto one spot at his own pace, long before an attack masses there', () => {
+    const x = fx(470);
+    const y = fx(585);
+    const go = (m: number) => {
+      const { w, st } = field();
+      const all = add(w, [
+        spawn(0, KIND_INFANTRY, 8, 250, 770),
+        spawn(0, KIND_IFV, 4, 258, 778),
+        // The armour stands somewhere else: an attack would have it wait for the squads.
+        spawn(0, KIND_TANK, 3, 300, 800),
+        spawn(1, KIND_INFANTRY, 2, 476, 579),
+      ]);
+      const ids = all.slice(0, 15);
+      const tanks = ids.filter((i) => w.kind[i] === KIND_TANK);
+      step(w, [{ type: CMD_ASSIGN, units: ids, slot: 3 }, mission(3, m, x, y)]);
+      const near = (i: number) =>
+        w.state[i] === STATE_ALIVE &&
+        (w.carrier[i] >= 0
+          ? Math.hypot(w.posX[w.carrier[i]] - x, w.posY[w.carrier[i]] - y) < fx(30)
+          : Math.hypot(w.posX[i] - x, w.posY[i] - y) < fx(30));
+      const seen = new Set<number>();
+      let armour = -1;
+      let massed = -1;
+      play(w, st, 240, () => {
+        seen.add(st.posts[3].status);
+        if (armour < 0 && tanks.some(near)) armour = w.tick;
+        if (massed < 0 && ids.filter(near).length >= 12) massed = w.tick;
+      });
+      return { w, st, ids, all, seen, armour, massed };
+    };
+    const c = go(M_FOCUS);
+    expect(c.seen.has(ST_FOCUS)).toBe(true);
+    expect(c.st.posts[3].status).toBe(ST_MASSED);
+    expect(c.seen.has(ST_FALLBACK)).toBe(false);
+    expect(c.seen.has(ST_GATHER)).toBe(false);
+    // The picket on the spot was fought, not walked past.
+    expect(alive(c.w, c.all.slice(15))).toBe(0);
+    // Nobody is left in a carrier once they are there.
+    expect(c.ids.filter((i) => c.w.state[i] === STATE_ALIVE && c.w.carrier[i] >= 0).length).toBe(0);
+    expect(c.massed).toBeGreaterThan(0);
+    expect(c.armour).toBeGreaterThan(0);
+    // Measured: 44 seconds against 85 for the attack over the same 310.
+    const a = go(M_ATTACK);
+    expect(a.massed < 0 || a.massed > c.massed + 30 * TICK_RATE).toBe(true);
+  }, 120000);
+
+  it('concentrate: the body stays on the spot and comes back to it', () => {
+    const { w, st } = field();
+    const ids = add(w, [spawn(0, KIND_INFANTRY, 8, 330, 700), spawn(0, KIND_TANK, 2, 336, 706)]);
+    step(w, [{ type: CMD_ASSIGN, units: ids, slot: 1 }, mission(1, M_FOCUS, fx(360), fx(690))]);
+    play(w, st, 60);
+    expect(st.posts[1].status).toBe(ST_MASSED);
+    // Something to chase a little way off: when it is dead they are back on the spot.
+    add(w, [spawn(1, KIND_INFANTRY, 1, 400, 690)]);
+    play(w, st, 90);
+    const out = ids.filter(
+      (i) =>
+        w.state[i] === STATE_ALIVE && Math.hypot(w.posX[i] - fx(360), w.posY[i] - fx(690)) > fx(34),
+    );
+    expect(out.length).toBe(0);
+    expect(st.posts[1].status).toBe(ST_MASSED);
   }, 60000);
 
   it('attack: breaks off against far too much, falls back and waits to be reinforced', () => {

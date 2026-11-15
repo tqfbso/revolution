@@ -428,6 +428,11 @@ From the proposal in the "Design tactical attack formations" thread.
 - Still open from the proposal: halted infantry looking for the nearest house or wood
   (belongs in U5), and a report from the commander of what its drones see at the objective.
 
+## Fixes after the 2026-11-15 games
+
+- Helicopters fight helicopters and hunt when left alone. BUILT (decision 116)
+- Concentrate: a commander's troops on one exact spot, key R. BUILT (decision 117)
+
 ## M10 Factions
 
 - Three asymmetric factions with distinct units and tech

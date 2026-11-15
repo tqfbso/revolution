@@ -2280,3 +2280,43 @@ should."
   armies' lines, and Hold is the player's answer.
 
 Golden hash unchanged (no helicopters in it). Tests in `tests/air.test.ts`.
+
+## 117. Concentrate: a commander's troops on one exact spot, now (2026-11-15)
+
+Fabio: "Commander actions on attack are still a bit hit and miss... sometimes we need a
+troop concentration in one spot and it takes ages, requiring us to remove the units from
+the commander so we can better direct them. Any chance we could do something different
+here without ruining the commander experience?"
+
+An attack is slow on purpose: it forms up, marches at the pace of the slowest, closes up
+out of sight of the objective, and then takes a town, not a point. All of that is right
+for taking a grid square and wrong for "everyone to that corner". The answer is not to
+make the attack quicker (that is the staged attack of decision 109 in reverse) but a
+second order beside it:
+
+- **Concentrate** (`M_FOCUS`, mission 7; R with the commander's troops selected, or the
+  button on the board, then a click). Everything the commander has goes to the exact spot
+  clicked. One order per kind of mover, so tanks, carriers and helicopters go at their own
+  speed and nobody is held to a squad's pace. No forming up, no closing up outside, no
+  waiting for stragglers.
+- Further out than 70 a unit moves without stopping to shoot; inside 70 it attack-moves,
+  so the last stretch is fought and the body arrives fighting. From more than 200 away and
+  out of contact the squads ride in whatever carriers the commander has, and get out when
+  they are there or when the enemy is near.
+- On the spot the body stands close (within about 20 plus 2 per square root of its number)
+  and shoots at what it sees. Whoever chased something comes back when he has nothing
+  left to shoot at. Guns stop 70 short, from where they reach everything round the spot.
+- It never falls back and never goes into the houses: with this order the player has
+  taken the decision of where the troops stand. Giving the commander its mission again
+  (Attack, Hold, ...) hands the thinking back.
+- The troops stay the commander's throughout: replacement of losses, reports ("Alpha
+  concentrating on D4", "Alpha massed at D4"), the board and co-op ownership all work as
+  for any mission.
+
+Measured (`tests/commanders.test.ts`): eight squads, four carriers and three tanks, 310
+from the spot, twelve of fifteen within 30 of it after 44 seconds; the same troops ordered
+to attack the same spot take 85. Only the staff changed, and the golden hash has no
+commanders in it: unchanged.
+
+Not done: a concentration does not split a commander (all of it goes); the computer does
+not use it.

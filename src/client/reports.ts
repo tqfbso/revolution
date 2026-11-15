@@ -9,6 +9,7 @@ import {
   ST_ATTACK,
   ST_FALLBACK,
   ST_GATHER,
+  ST_MASSED,
   ST_REGROUP,
   ST_SECURED,
 } from '../sim/staff';
@@ -16,6 +17,7 @@ import {
   MAX_COMMANDERS,
   M_ATTACK,
   M_DEFEND,
+  M_FOCUS,
   M_HOLD,
   M_MOVE,
   M_NONE,
@@ -66,6 +68,7 @@ const FOUGHT = 15;
 const ORDER: Record<number, string> = {
   [M_ATTACK]: 'attacking',
   [M_MOVE]: 'moving to',
+  [M_FOCUS]: 'concentrating on',
   [M_HOLD]: 'moving to hold',
   [M_DEFEND]: 'moving to defend',
   [M_PATROL]: 'patrolling to',
@@ -151,6 +154,10 @@ export class CommanderReports {
     if (changed && c.status === ST_ARRIVED && !m.arrived) {
       m.arrived = arrivedNow = true;
       say('there', `in position at ${place}`, SAY_URGENT);
+    }
+    if (changed && c.status === ST_MASSED && !m.arrived) {
+      m.arrived = arrivedNow = true;
+      say('there', `massed at ${place}`, SAY_URGENT);
     }
     if (changed && c.status === ST_SECURED) {
       m.arrived = true;

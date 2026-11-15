@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import { CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
-import { MAP_SIZE, MAX_UNITS, M_NONE } from './sim/world';
+import { MAP_SIZE, MAX_UNITS, M_FOCUS, M_NONE } from './sim/world';
 import { ALERT_NOTE, Alerts } from './client/alerts';
 import { SAY_URGENT } from './client/voice';
 import { Cameras } from './client/cameras';
@@ -373,6 +373,7 @@ async function start(): Promise<void> {
     if (e.code === 'KeyM') board.toggle();
     else if (e.code === 'KeyN') board.newFromSelection();
     else if (e.code === 'KeyT' && !e.repeat) board.quickMove();
+    else if (e.code === 'KeyR' && !e.repeat) board.quickMove(M_FOCUS);
   });
   // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
   // default: the first playtest found normal hard to beat.

@@ -10,10 +10,12 @@ import {
   ST_ATTACK,
   ST_DEFEND,
   ST_FALLBACK,
+  ST_FOCUS,
   ST_GATHER,
   ST_HOLD,
   ST_IDLE,
   ST_MARCH,
+  ST_MASSED,
   ST_MOVE,
   ST_PATROL,
   ST_REGROUP,
@@ -25,6 +27,7 @@ import {
   MAX_COMMANDERS,
   M_ATTACK,
   M_DEFEND,
+  M_FOCUS,
   M_HOLD,
   M_MOVE,
   M_NONE,
@@ -72,6 +75,12 @@ const MISSIONS = [
     tip: 'Go to a place and stand there (T with its troops selected). It does not stop to fight on the way, does not go into the houses and never falls back: for getting a body where you want it. Once there it shoots at what comes at it.',
   },
   {
+    m: M_FOCUS,
+    name: 'Concentrate',
+    ask: 'concentrate',
+    tip: 'Everything it has onto one exact spot, now (R with its troops selected). Each unit goes at its own best speed, nobody forms up or waits outside, and the last stretch is fought. They stay massed on the spot and shoot at what they see. It never falls back and does not go into the houses: use it to pile onto a street corner, a breach or one building, then give it its mission again.',
+  },
+  {
     m: M_HOLD,
     name: 'Hold',
     ask: 'hold',
@@ -96,7 +105,16 @@ const MISSIONS = [
     tip: 'A thin line of lookouts through the place you click, across the way from your base. It warns you and pulls back from anything strong.',
   },
 ];
-const MISSION_NAME = ['No orders', 'Attack', 'Hold', 'Defend', 'Patrol to', 'Screen', 'Move to'];
+const MISSION_NAME = [
+  'No orders',
+  'Attack',
+  'Hold',
+  'Defend',
+  'Patrol to',
+  'Screen',
+  'Move to',
+  'Concentrate on',
+];
 const STATUS: Record<number, string> = {
   [ST_IDLE]: 'Awaiting orders',
   [ST_MARCH]: 'On the march',
@@ -111,6 +129,8 @@ const STATUS: Record<number, string> = {
   [ST_GATHER]: 'Closing up out of sight, then going in',
   [ST_MOVE]: 'Moving',
   [ST_ARRIVED]: 'In place, awaiting orders',
+  [ST_FOCUS]: 'Concentrating',
+  [ST_MASSED]: 'Massed on the spot',
 };
 
 export interface CommanderInfo {
@@ -311,10 +331,11 @@ export class MissionBoard {
   }
 
   /**
-   * T: tell a commander to move, without opening the board. The commander is the one whose
-   * troops are selected, or else the one opened on the board. False if there is none.
+   * T and R: tell a commander to move, or to concentrate on a spot, without opening the
+   * board. The commander is the one whose troops are selected, or else the one opened on
+   * the board. False if there is none.
    */
-  quickMove(): boolean {
+  quickMove(mission = M_MOVE): boolean {
     const u = this.units;
     let slot = -1;
     for (const id of u.selectedIds()) {
@@ -325,7 +346,7 @@ export class MissionBoard {
     }
     if (slot < 0 && this.open) slot = this.focus;
     if (slot < 0 || this.info[slot].count === 0) return false;
-    this.act('mission', slot, M_MOVE);
+    this.act('mission', slot, mission);
     return true;
   }
 
