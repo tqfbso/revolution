@@ -2446,3 +2446,31 @@ richer town is cheaper to draw than the plain one. Real frame rate is Fabio's to
 
 Not done here: vehicles and base buildings were left as they are; far facades and the
 roof fade are item 6 of the same run.
+
+## 122. Finding the infantry from mid zoom without making it bigger (2026-11-15)
+
+Fabio wants realistic proportions (no oversized men) and asked for other ways to find
+infantry from mid zoom. Offered: brighter fire, dust, a rim light or outline. He chose the
+first two and ruled the outline out for now: "having the glow around them might be too
+much with the number of units we have on the field at once". A soft contact shadow was
+allowed if cheap.
+
+- **A muzzle flash is never smaller than about three and a half pixels, a tracer never
+  thinner than a pixel and a quarter** (`FLASH_PX`, `TRACER_PX` in effects.ts). Up close
+  nothing changes: the floor only bites where a flash had shrunk below it, from about
+  camera distance 100 outward. Tracers also burn up to a third brighter from far off and
+  last a frame or two longer. So a firefight is a patch of sparkle and streaks at any
+  zoom, which is what the eye needs to find.
+- **Squads on the move raise dust** (`Effects.dust`): a pale puff that hangs for two or
+  three seconds and drifts with the wind, much less on paving, none in water. Rationed
+  over the whole field (about 420 puffs a second at most, so about 1,200 live sprites
+  however many squads march), and switched off by `dustiness` when the weather is wet.
+- **A soft patch of shade under each squad** that is too far off for a real shadow: one
+  flat quad a squad, one draw call.
+
+No outline, no rim light, no change of size. Render only; golden hash untouched.
+
+Checked in a staged fight of 40 squads a side at camera distance 150 and 190: flashes
+and tracers read clearly where before the tracers were dotted hairlines; the dust shows
+as a pale trail behind a marching platoon. How it reads on a real screen at 60 frames a
+second is Fabio's to say; the three numbers above are the levers.

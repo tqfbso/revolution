@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, mix, vec3 } from 'three/tsl';
+import { attribute, float, mix, smoothstep, uv, vec3 } from 'three/tsl';
 import {
   AIR_HEIGHT,
   BLAST_STRAY,
@@ -27,7 +27,7 @@ import {
   FLASH_TICKS,
   NIGHT_SIGHT_PCT,
 } from '../sim/units';
-import { CLASS_AIR } from '../sim/map';
+import { CLASS_AIR, T_BRIDGE, T_FORD, T_WATER } from '../sim/map';
 import {
   EV_BREACH,
   EV_COLLAPSE,
@@ -251,6 +251,10 @@ export class UnitView {
   /** When each paratroop squad left the plane. */
   private readonly dropAt = new Float64Array(MAX_UNITS).fill(-1e9);
   private readonly jamRings: Batch;
+  private readonly shade: Batch;
+  private readonly realShadows: boolean;
+  /** Squads on the move in view last frame: sets how often each may raise dust. */
+  private walkers = 0;
   private readonly icons = new Icons(MAX_UNITS * 2);
   /** Draw a pennant over troops that answer to a sub-commander. */
   pennants = true;
@@ -369,6 +373,29 @@ export class UnitView {
     );
     this.jamRings.mesh.renderOrder = 3;
     this.group.add(this.jamRings.mesh);
+
+    // A soft patch of shade under each squad that is too far off to cast a real shadow:
+    // it ties the men to the ground and darkens the spot they stand on. One flat quad a
+    // squad, in one draw call.
+    const shadeMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true });
+    const fromCentre = uv().sub(0.5).length().mul(2);
+    shadeMaterial.colorNode = vec3(0, 0, 0);
+    shadeMaterial.opacityNode = attribute('aTint', 'vec4').w.mul(
+      float(1).sub(smoothstep(0.25, 1, fromCentre)),
+    );
+    shadeMaterial.depthWrite = false;
+    shadeMaterial.fog = false;
+    shadeMaterial.polygonOffset = true;
+    shadeMaterial.polygonOffsetFactor = -2;
+    shadeMaterial.polygonOffsetUnits = -2;
+    this.shade = new Batch(
+      new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      shadeMaterial,
+      MAX_UNITS,
+    );
+    this.shade.mesh.renderOrder = 0;
+    this.realShadows = look.shadows;
+    this.group.add(this.shade.mesh);
 
     this.group.add(this.icons.batch.mesh);
 
@@ -890,6 +917,12 @@ export class UnitView {
     const batches = this.batches;
     for (const b of batches) b.n = 0;
     this.jamRings.n = 0;
+    this.shade.n = 0;
+    // Dust is rationed: a few hundred puffs a second over the whole field at most.
+    const dustRate = Math.min(2.4, 420 / Math.max(1, this.walkers));
+    let walkers = 0;
+    const shadeAlpha = this.night ? 0.12 : 0.22;
+    const tmap = this.terrain.map;
     // Map symbols: nothing up close, solid when the camera is far out.
     const icons = this.icons;
     icons.batch.n = 0;
@@ -1091,6 +1124,23 @@ export class UnitView {
         }
       } else {
         const squad = this.squads[this.kind[i]] ?? this.squads[KIND_INFANTRY]!;
+        if (alive && fall === 0) {
+          if (lod >= 1 || !this.realShadows)
+            this.shade.put(x, y + 0.07, z, 0, 3.2, 1, 0, 0, 0, shadeAlpha);
+          if (this.moving[i] === 1) {
+            walkers++;
+            if (Math.random() < dt * dustRate) {
+              const ci = Math.min(255, Math.max(0, x >> 2));
+              const cj = Math.min(255, Math.max(0, z >> 2));
+              const c = cj * 256 + ci;
+              const ground = tmap.type[c];
+              if (ground !== T_WATER && ground !== T_FORD && ground !== T_BRIDGE) {
+                fx.thin = 0;
+                fx.dust(x - sin * 0.7, y, z - cos * 0.7, tmap.road[c] !== 0, lod === 2 ? 1.5 : 1);
+              }
+            }
+          }
+        }
         if (lod === 2) {
           squad.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], (i % SEEDS) + BURN_BASE);
         } else {
@@ -1185,6 +1235,8 @@ export class UnitView {
     this.stats.culled = culled;
     for (const b of batches) b.flush();
     this.jamRings.flush();
+    this.shade.flush();
+    this.walkers = walkers;
     icons.batch.flush();
     this.rings.count = ringCount;
     // Hold the number of full-detail units near the budget for the next frame.
