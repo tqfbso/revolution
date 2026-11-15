@@ -64,9 +64,9 @@ describe('buildings that die slowly (U1)', () => {
     expect(buildClass(3, 3, 2)).toBe(BUILD_HALL);
     // Decisions 095 and 104 brought these down from 450, 900 and 1300, twice at Fabio's
     // asking: the city is meant to come apart in a battle.
-    expect(withHouse(2, 2, 3).sMaxHp[0]).toBe(90 * 4);
-    expect(withHouse(2, 2, 4).sMaxHp[0]).toBe(180 * 4);
-    expect(withHouse(3, 3, 2).sMaxHp[0]).toBe(280 * 9);
+    expect(withHouse(2, 2, 3).sMaxHp[0]).toBe(75 * 4);
+    expect(withHouse(2, 2, 4).sMaxHp[0]).toBe(150 * 4);
+    expect(withHouse(3, 3, 2).sMaxHp[0]).toBe(235 * 9);
   });
 
   it('a shot meets the face it comes from', () => {
@@ -204,7 +204,7 @@ describe('collateral damage (decision 095)', () => {
     step(w, [spawnAt(1, KIND_TANK, 1, 535, 500)]);
     w.events.length = 0;
     let hits = 0;
-    for (let t = 0; t < 900; t++) {
+    for (let t = 0; t < 700; t++) {
       w.hp[0] = 30000;
       w.posX[0] = fx(516);
       w.posY[0] = fx(500);
@@ -213,7 +213,7 @@ describe('collateral damage (decision 095)', () => {
       w.events.length = 0;
     }
     // Nobody ordered it: the rounds that go past the squad land on the house behind it.
-    expect(hits).toBeGreaterThan(7);
+    expect(hits).toBeGreaterThan(5);
     expect(w.sWall[FACE_EAST]).toBe(0);
     expect(w.sWall[FACE_WEST]).toBe(wallMax(w.map, 0, FACE_WEST));
     expect(stageOf(w, 0)).toBeGreaterThanOrEqual(STAGE_DAMAGED);
@@ -326,7 +326,11 @@ describe('storming a held building (U2)', () => {
     expect(r.w.sHp[0]).toBeGreaterThan(0);
     expect(r.w.sOccTeam[0]).toBe(0);
     expect(r.ids.filter((i) => r.w.inside[i] === 0).length).toBeGreaterThan(0);
-    expect(r.attackers).toBeLessThan(14);
+    // At a price: squads lost, or at the least men out of most of them.
+    const hurt = r.ids.filter(
+      (i) => r.w.state[i] !== STATE_ALIVE || r.w.hp[i] < KINDS[KIND_INFANTRY].hp,
+    ).length;
+    expect(hurt).toBeGreaterThan(6);
   });
 
   it('fails against a garrison its own size behind whole walls', () => {

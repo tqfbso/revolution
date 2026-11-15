@@ -436,6 +436,7 @@ From the proposal in the "Design tactical attack formations" thread.
   house that is brought down die. BUILT (decision 118)
 - More civilians: 1,400 a map, most round the flags, one in three sheltering at home.
   BUILT (decision 119)
+- Buildings a sixth easier to bring down. BUILT (decision 120)
 
 ## M10 Factions
 

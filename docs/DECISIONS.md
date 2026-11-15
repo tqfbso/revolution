@@ -2391,3 +2391,26 @@ Golden hash 1843229346 to 4027169720 (the same world now has more people in it).
 
 To watch: if the bill is too heavy for the way Fabio plays, lower `CIVILIAN_SUPPLIES`
 before the number of civilians; if deaths are still too few, `SHELTER` 2.
+
+## 120. Buildings a sixth easier to bring down (2026-11-15)
+
+Fabio, after the second cut (decision 104): "Destruction is almost there... we need just
+slightly more easiness to destroy buildings, not too much, we are almost there."
+
+One lever, one small step: the structure of a building per cell of ground plan goes from
+90/180/280 (house, block, hall) to 75/150/235 and its walls per cell of face from
+60/110/160 to 50/90/135. About a sixth less of both. Nothing else moves: the stages
+(marked at 90%, gutted at 40%), stray fire, what bullets may and may not do, fortifying
+and the ruins as positions are as they were.
+
+What it means: a lone tank guts an average city house (nine cells) in about 42 seconds
+instead of 50 and levels it in about 67 instead of 80; two engineer squads bring one down
+in about eight seconds of charges instead of ten. In a computer's game on the city map
+(hard against hard, 30 minutes, seed 1, `tools/toll.ts`) 91 of 444 buildings were marked
+or worse against 75 before; on seed 2 the two battles went differently enough that the
+count did not move (92 against 100), which is the size of step that was asked for.
+
+Golden hash 4027169720 to 3501695057.
+
+If it is still short of what Fabio wants, the next step of the same size is 62/125/195
+and 42/75/112; the other levers are in decision 104.
