@@ -153,12 +153,17 @@ import {
   KIND_DRONE,
   KIND_RECON,
   NIGHT_SIGHT_PCT,
+  HUNT_AIR,
+  HUNT_GROUND,
+  HUNT_PERIOD,
+  KIND_HELI,
 } from './units';
 import {
   CHASE_FIELDS,
   EV_BREACH,
   EV_FLARE,
   FLAG_FLARE,
+  FLAG_HUNT,
   MAX_FLARES,
   EV_GUTTED,
   EV_STORM,
@@ -304,6 +309,8 @@ export const EFFECTIVE = KINDS.flatMap((a) =>
   KINDS.map((b, k) => (a.damage[k] * EFFECTIVE_SHOTS >= b.hp ? 1 : 0)),
 );
 const POOR_PRIORITY = fx(24) * fx(24);
+/** What a helicopter adds to a ground target: one in the air wins unless it is much further. */
+const HELI_GROUND = fx(30) * fx(30);
 /** Men with shoulder-fired rockets, how near a vehicle must come for them to rush it, and how near they get. */
 const ROCKETS = KINDS.map((_, k) => k === KIND_INFANTRY || k === KIND_PARA);
 const ROCKET_RUSH_SQ = fx(18) * fx(18);
@@ -312,6 +319,8 @@ const PRIORITY = KINDS.flatMap((a, ka) =>
   KINDS.map((b, kb) => {
     const air = b.cls === CLASS_AIR && a.damage.some((d, k) => d > 0 && KINDS[k].cls !== CLASS_AIR);
     const soft = a.kamikaze && b.cls === CLASS_FOOT;
+    // A helicopter fights in the air: another helicopter comes before anything below it.
+    if (ka === KIND_HELI) return b.cls === CLASS_AIR ? 0 : HELI_GROUND;
     if (air || soft) return LOW_PRIORITY;
     return EFFECTIVE[ka * KIND_COUNT + kb] === 0 ? POOR_PRIORITY : 0;
   }),
@@ -399,6 +408,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateCameras(w);
   if (w.night !== 0) updateLit(w);
   acquireTargets(w);
+  huntHelis(w);
   armStrikes(w);
   updateCivilians(w);
   updateAir(w);
@@ -611,7 +621,8 @@ const ORDER_FLAGS =
   FLAG_FOCUS |
   FLAG_BREACH |
   FLAG_STORM |
-  FLAG_FLARE;
+  FLAG_FLARE |
+  FLAG_HUNT;
 
 /**
  * Send each squad to the nearest carrier of its own army that still has a seat free,
@@ -1675,6 +1686,70 @@ function acquireTargets(w: World): void {
     } else if (!keep) {
       w.attack[i] = NO_TARGET;
       w.los[i] = blocked ? SIGHT_NONE : 0;
+    }
+  }
+}
+
+const HUNT_GROUND_SQ = HUNT_GROUND * HUNT_GROUND;
+const HUNT_AIR_SQ = HUNT_AIR * HUNT_AIR;
+const HUNT_HOME_SQ = fx(6) * fx(6);
+
+/**
+ * Attack helicopters with nothing to do go looking (decision 116). One that stands without
+ * orders and without a target flies at the nearest enemy its army knows of round the place
+ * it was left (helicopters first, and from further off), fights there, and comes back when
+ * nothing is left. It reads positions only, so the order of units does not matter.
+ */
+function huntHelis(w: World): void {
+  const n = w.count;
+  const tick = w.tick;
+  const dmg = KINDS[KIND_HELI].damage;
+  for (let i = 0; i < n; i++) {
+    if (w.kind[i] !== KIND_HELI || w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
+    if ((tick + i) % HUNT_PERIOD !== 0) continue;
+    if (w.stance[i] === STANCE_HOLD_FIRE || w.attack[i] !== NO_TARGET) continue;
+    const flags = w.flags[i];
+    const hunting = (flags & FLAG_HUNT) !== 0;
+    // Under orders of any kind (moving, holding, told to shoot something): not its business.
+    if (!hunting && (flags & (ORDER_FLAGS | FLAG_MOVING)) !== 0) continue;
+    const x = w.posX[i];
+    const y = w.posY[i];
+    const hx = hunting ? w.aimX[i] : x;
+    const hy = hunting ? w.aimY[i] : y;
+    const team = w.team[i];
+    let best = -1;
+    let bestKey = 0;
+    for (let j = 0; j < n; j++) {
+      if (w.state[j] !== STATE_ALIVE || w.team[j] === team) continue;
+      if (w.spotted[j] <= tick || w.carrier[j] >= 0 || w.inside[j] >= 0) continue;
+      const kj = w.kind[j];
+      if (dmg[kj] === 0) continue;
+      const flying = IS_AIR[kj];
+      const ox = w.posX[j] - hx;
+      const oy = w.posY[j] - hy;
+      if (ox * ox + oy * oy > (flying ? HUNT_AIR_SQ : HUNT_GROUND_SQ)) continue;
+      const dx = w.posX[j] - x;
+      const dy = w.posY[j] - y;
+      const key = dx * dx + dy * dy + (flying ? 0 : HUNT_AIR_SQ * 4);
+      if (best < 0 || key < bestKey) {
+        best = j;
+        bestKey = key;
+      }
+    }
+    if (best >= 0) {
+      w.aimX[i] = hx;
+      w.aimY[i] = hy;
+      sendTo(w, i, w.posX[best], w.posY[best]);
+      w.flags[i] |= FLAG_AMOVE | FLAG_HUNT;
+    } else if (hunting) {
+      const dx = hx - x;
+      const dy = hy - y;
+      if (dx * dx + dy * dy <= HUNT_HOME_SQ) {
+        if ((flags & FLAG_MOVING) === 0) w.flags[i] = flags & ~FLAG_HUNT;
+      } else if ((flags & FLAG_MOVING) === 0 || w.targetX[i] !== hx || w.targetY[i] !== hy) {
+        sendTo(w, i, hx, hy);
+        w.flags[i] |= FLAG_AMOVE | FLAG_HUNT;
+      }
     }
   }
 }

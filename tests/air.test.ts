@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { planeEntry } from '../src/sim/air';
 import {
   CMD_FOUND,
+  CMD_HOLD,
   CMD_LOAD,
   CMD_MOVE,
   CMD_PARADROP,
@@ -23,6 +24,7 @@ import {
   KIND_LIFT,
   KIND_PARA,
   KIND_PLANE,
+  KIND_RECON,
   KIND_TANK,
   PARA_PLANE_LOAD,
   PARA_SCATTER,
@@ -30,6 +32,7 @@ import {
 import {
   EV_PARADROP,
   EV_PLANE,
+  FLAG_HUNT,
   STATE_ALIVE,
   createWorld,
   hashWorld,
@@ -83,7 +86,7 @@ function run(w: World, ticks: number, each?: () => void): void {
   }
 }
 
-describe('helicopters (decision 106)', () => {
+describe('helicopters (decisions 106, 116)', () => {
   it('a helipad holds three: the fourth waits for landing space', () => {
     const { w, pad } = base();
     const train: Command = { type: CMD_TRAIN, structure: pad, kind: KIND_HELI };
@@ -120,6 +123,49 @@ describe('helicopters (decision 106)', () => {
     expect(alive(w, 1, KIND_TANK).length).toBe(0);
     const heli = alive(w, 0, KIND_HELI)[0];
     expect(w.hp[heli]).toBe(KINDS[KIND_HELI].hp);
+  });
+
+  it('helicopters fight each other, and go for one before a tank that is nearer', () => {
+    const w = createWorld(8, flatMap());
+    step(w, [
+      spawnAt(0, KIND_HELI, 2, 400, 400),
+      spawnAt(1, KIND_LIFT, 1, 430, 400),
+      spawnAt(1, KIND_TANK, 1, 422, 400),
+    ]);
+    run(w, 60);
+    for (const h of alive(w, 0, KIND_HELI)) expect(w.kind[w.attack[h]]).toBe(KIND_LIFT);
+    run(w, 400);
+    expect(alive(w, 1, KIND_LIFT).length).toBe(0);
+  });
+
+  it('left alone a helicopter hunts what the army has found, and comes back', () => {
+    const w = createWorld(9, flatMap());
+    // A recon team watches an enemy helicopter far out of the helicopter's own reach.
+    step(w, [
+      spawnAt(0, KIND_HELI, 1, 300, 400),
+      spawnAt(0, KIND_RECON, 1, 440, 400),
+      spawnAt(1, KIND_LIFT, 1, 470, 400),
+    ]);
+    const heli = alive(w, 0, KIND_HELI)[0];
+    run(w, 1500);
+    expect(alive(w, 1, KIND_LIFT).length).toBe(0);
+    expect(Math.abs(w.posX[heli] - fx(300))).toBeLessThan(fx(8));
+    expect(w.flags[heli] & FLAG_HUNT).toBe(0);
+  });
+
+  it('told to hold, it stays where it is', () => {
+    const w = createWorld(9, flatMap());
+    step(w, [
+      spawnAt(0, KIND_HELI, 1, 300, 400),
+      spawnAt(0, KIND_RECON, 1, 440, 400),
+      spawnAt(1, KIND_LIFT, 1, 470, 400),
+    ]);
+    const heli = alive(w, 0, KIND_HELI)[0];
+    const x0 = w.posX[heli];
+    step(w, [{ type: CMD_HOLD, units: [heli] }]);
+    run(w, 600);
+    expect(alive(w, 1, KIND_LIFT).length).toBe(1);
+    expect(w.posX[heli]).toBe(x0);
   });
 
   it('a transport helicopter lifts four squads, and few walk away when it is shot down', () => {
