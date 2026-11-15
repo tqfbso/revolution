@@ -5,9 +5,10 @@ as fortresses. Work in progress.
 
 **Play the latest build:** https://tqfbso.github.io/revolution/
 
-The page opens on a skirmish: you (red) and the AI (blue) each start with a headquarters,
-six trucks and a patrol. The enemy base stays unknown until you scout it; the menu top right
-sets the opponent. URL options: `?ai=recruit`, `?ai=normal`, `?ai=hard` or `?ai=off` (the default is
+The page opens on the main menu: Skirmish leads to the new battle screen (map, armies, time,
+weather, powers, opponent). In a skirmish you (red) and the AI (blue) each start with a
+headquarters, six trucks and a patrol; the enemy base stays unknown until you scout it. A link
+that names a battle skips the menu. URL options: `?ai=recruit`, `?ai=normal`, `?ai=hard` or `?ai=off` (the default is
 easy), `?demo=1` to watch the AI play both sides, `?speed=4` to run the game faster,
 `?seed=7` a different map, `?scenario=assault` the old attack on a held town (`clash` and
 `roam` are stress tests, sized with `?units=6000`), `?map=river` the old river map (the skirmish defaults to the ridge map), `?quality=low` (or `high`) graphics detail, `?shadows=0` no shadows, `?lod=0.5` drop

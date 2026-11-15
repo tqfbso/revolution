@@ -1,12 +1,14 @@
 import { Precipitation, WEATHER_NAMES, setWeather, skyOf, weatherByName } from './client/weather';
 import { WEATHER_RAIN, WEATHER_SNOW } from './sim/units';
-import { myKinds, setArmies } from './client/army';
+import { factionOf, myKinds, setArmies } from './client/army';
+import { MAP_LABEL, openMenu, toMenu, wantsMenu } from './client/menu';
+import { runTickers, tickHtml, wireTickers } from './client/ticker';
 import { FACTIONS, factionByName } from './sim/factions';
 import * as THREE from 'three/webgpu';
 import { CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, type Layout } from './sim/map';
-import { MAP_SIZE, MAX_UNITS, M_FOCUS, M_NONE } from './sim/world';
+import { MAP_SIZE, MAX_UNITS, M_FOCUS, M_NONE, TICK_RATE } from './sim/world';
 import { ALERT_NOTE, Alerts } from './client/alerts';
 import { SAY_URGENT } from './client/voice';
 import { Cameras } from './client/cameras';
@@ -55,6 +57,11 @@ import {
   KIND_TANK,
 } from './sim/units';
 
+const PAUSE_ICON =
+  '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 1v10M9 1v10"/></svg>';
+const PLAY_ICON =
+  '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M2 1l9 5-9 5z"/></svg>';
+
 /** The haze at the horizon: what distance fades into. */
 const SKY = 0xa9b6bd;
 const NIGHT_SKY = 0x0d131d;
@@ -83,6 +90,13 @@ async function createRenderer(forceWebGL: boolean) {
 
 async function start(): Promise<void> {
   const params = new URLSearchParams(location.search);
+  wireTickers();
+  // No battle asked for: the main menu, which leaves by loading the page again with one.
+  if (wantsMenu(params)) {
+    document.getElementById('loading')?.remove();
+    openMenu(params);
+    return;
+  }
   // Co-op: meet the other player before anything is built. A guest takes the host's map,
   // seed and opponent; a shared game is always the plain skirmish.
   const coop = await openCoop(params);
@@ -281,8 +295,13 @@ async function start(): Promise<void> {
       pausedEl.style.display = paused ? 'block' : 'none';
       pausedEl.innerHTML = `PAUSED<small>${queued === 0 ? 'give orders, they start when you resume' : `${queued} order${queued === 1 ? '' : 's'} waiting`} · Space to resume</small>`;
     }
-    if (pauseBtn) pauseBtn.textContent = paused ? 'Resume (Space)' : 'Pause (Space)';
+    if (pauseBtn) {
+      pauseBtn.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
+      pauseBtn.setAttribute('aria-label', paused ? 'Resume' : 'Pause');
+      pauseBtn.classList.toggle('on', paused);
+    }
   };
+  showPause();
   let speedNow = 1;
   const guest = () => coop !== null && coop.role === 'guest' && coop.live;
   const setPaused = (p: boolean) => {
@@ -328,11 +347,16 @@ async function start(): Promise<void> {
     board.applySnapshot(e.data);
     supply.applySnapshot(e.data);
     alerts?.applySnapshot(e.data, performance.now() / 1000);
+    if (clockEl && e.data.tick % TICK_RATE === 0) {
+      const sec = (e.data.tick / TICK_RATE) | 0;
+      clockEl.textContent = `${(sec / 60) | 0}:${String(sec % 60).padStart(2, '0')}`;
+    }
     hud.simTick(e.data.simMs);
     hud.stats.alive = e.data.alive;
     if (e.data.hash !== undefined) hud.stats.hash = e.data.hash.toString(16).padStart(8, '0');
     if (e.data.net) coop?.fromWorker(e.data.net);
   };
+  const clockEl = document.getElementById('clock');
   const lookAt = (x: number, z: number) => rts.moveTo(x, z);
   let alerts: Alerts | null = null;
   const card = new CommandCard(
@@ -349,13 +373,24 @@ async function start(): Promise<void> {
   );
   const debriefEl = document.getElementById('debrief');
   const debrief = debriefEl
-    ? new Debrief(debriefEl, units.playerTeam, () =>
-        coop
-          ? coop.duties.map((d, k) => ({
-              name: k === coop.seat ? 'You' : `Player ${k + 1}`,
-              role: DUTIES[d] ?? DUTIES[0],
-            }))
-          : [{ name: 'You', role: DUTIES[0] }],
+    ? new Debrief(
+        debriefEl,
+        units.playerTeam,
+        () =>
+          coop
+            ? coop.duties.map((d, k) => ({
+                name: k === coop.seat ? 'You' : `Player ${k + 1}`,
+                role: DUTIES[d] ?? DUTIES[0],
+              }))
+            : [{ name: 'You', role: DUTIES[0] }],
+        {
+          armies,
+          label:
+            `${MAP_LABEL[layout]} · ${night ? 'night' : 'day'}` +
+            `${weather > 0 ? ` · ${WEATHER_NAMES[weather]}` : ''} · ` +
+            `${versus ? 'versus' : `${coop ? 'co-op, ' : ''}${params.get('ai') ?? 'easy'} AI`}`,
+          toMenu: () => toMenu(params),
+        },
       )
     : null;
   if (debrief) card.onOver = (won) => debrief.show(won);
@@ -416,6 +451,8 @@ async function start(): Promise<void> {
   board.shared = coop !== null;
   production.postings = () => board.postings();
   const boardBtn = document.getElementById('missions-toggle');
+  board.button = boardBtn;
+  boardBtn?.classList.toggle('on', board.open);
   boardBtn?.addEventListener('click', () => {
     board.toggle();
     boardBtn.blur();
@@ -536,67 +573,6 @@ async function start(): Promise<void> {
     }
   });
   works.revealAll = input.controlAll || demo || params.get('fog') === '0';
-  // The opponent is chosen on screen; a new choice starts a new game.
-  const pickAi = document.getElementById('ai-level') as HTMLSelectElement | null;
-  if (pickAi) {
-    pickAi.value = ai;
-    pickAi.addEventListener('change', () => {
-      params.set('ai', pickAi.value);
-      location.search = params.toString();
-    });
-  }
-  const pickTime = document.getElementById('time-pick') as HTMLSelectElement | null;
-  if (pickTime) {
-    pickTime.value = night ? 'night' : 'day';
-    pickTime.addEventListener('change', () => {
-      if (pickTime.value === 'night') params.set('time', 'night');
-      else params.delete('time');
-      location.search = params.toString();
-    });
-  }
-  // Your army and the enemy's: in a versus game the host's two choices are red and blue.
-  for (const [id, key, side] of [
-    ['army-pick', 'army', 0],
-    ['foe-pick', 'foe', 1],
-  ] as const) {
-    const pick = document.getElementById(id) as HTMLSelectElement | null;
-    if (!pick) continue;
-    pick.value = FACTIONS[factions[side]].short;
-    pick.title = `${FACTIONS[factions[side]].name}. ${FACTIONS[factions[side]].line} Changing this starts a new game`;
-    pick.addEventListener('change', () => {
-      params.set(key, pick.value);
-      location.search = params.toString();
-    });
-  }
-  const pickWeather = document.getElementById('weather-pick') as HTMLSelectElement | null;
-  if (pickWeather) {
-    pickWeather.value = WEATHER_NAMES[weather];
-    pickWeather.addEventListener('change', () => {
-      if (pickWeather.value === 'clear') params.delete('weather');
-      else params.set('weather', pickWeather.value);
-      location.search = params.toString();
-    });
-  }
-  const pickArmies = document.getElementById('armies-pick') as HTMLSelectElement | null;
-  if (pickArmies) {
-    pickArmies.value = String(armies);
-    pickArmies.disabled = versus;
-    pickArmies.addEventListener('change', () => {
-      if (pickArmies.value === '2') params.delete('armies');
-      else params.set('armies', pickArmies.value);
-      location.search = params.toString();
-    });
-  }
-  const pickMap = document.getElementById('map-pick') as HTMLSelectElement | null;
-  if (pickMap) {
-    pickMap.value = layout;
-    pickMap.addEventListener('change', () => {
-      params.set('map', pickMap.value);
-      // Three or four armies need the four corners.
-      if (pickMap.value !== 'four') params.delete('armies');
-      location.search = params.toString();
-    });
-  }
   // The map grid on the battlefield (K, or the button): off until asked for, and it
   // stays as you left it the next time you play.
   const grid = new GridOverlay((x, z) => terrain.heightAt(x, z));
@@ -681,33 +657,74 @@ async function start(): Promise<void> {
     card.group,
     grid.group,
   );
-  // Towns: who holds what, and what the held ones have paid so far.
+  // Flags: who holds what, at a glance, and what the fighting has cost the people who
+  // live here (decision 102). Each square is a town; the pointer names it.
   const townsEl = document.getElementById('towns');
   const TEAM_NAME = ['red', 'blue', 'gold', 'green'];
   const TEAM_CSS = ['#eb4637', '#468cff', '#f0be3c', '#5fd273'];
+  let townsHtml = '';
   setInterval(() => {
     if (!townsEl) return;
-    let html = `<b>Towns pay ${TOWN_INCOME} credits a second each</b>`;
+    const me = units.playerTeam;
+    let held = 0;
+    let squares = '';
+    const taking: string[] = [];
     for (let t = 0; t < map.townCount; t++) {
       const owner = structures.townOwner[t];
-      const taking = structures.townCapturer[t];
+      const by = structures.townCapturer[t];
+      if (owner === me) held++;
       const colour = TEAM_CSS[owner] ?? '#b9c4cf';
-      html += `<br /><span style="color:${colour}">■</span> ${map.townName[t]}`;
-      if (TEAM_NAME[taking] !== undefined) {
-        html += ` <span style="color:${TEAM_CSS[taking]}">${TEAM_NAME[taking]} taking ${structures.townProgress[t]}%</span>`;
+      const who = TEAM_NAME[owner] ?? 'nobody';
+      squares += `<i style="background:${colour}" title="${map.townName[t]}: held by ${who}"></i>`;
+      if (TEAM_NAME[by] !== undefined) {
+        taking.push(
+          `<span style="color:${TEAM_CSS[by]}">${map.townName[t]} ${structures.townProgress[t]}%</span>`,
+        );
       }
     }
-    // The people who live here (decision 102), and what the fighting has cost them.
-    if (civilians.total > 0) {
-      const ours = civilians.killed[units.playerTeam] ?? 0;
-      const theirs = civilians.killed.reduce((n, k) => n + k, 0) - ours;
-      html += `<br /><br /><b>Civilians</b> ${civilians.home + civilians.fleeing} in town, ${civilians.escaped} got out`;
-      html += `<br /><span id="civ-count"${ours > 0 ? ' class="short"' : ''}>Killed by our fire: ${ours}`;
-      if (ours > 0) html += ` (cost ${ours * CIVILIAN_SUPPLIES} supplies)`;
-      html += `</span><br />Killed by the enemy: ${theirs}`;
+    let html = '';
+    if (map.townCount > 0) {
+      html +=
+        `<span title="Each flag you hold pays ${TOWN_INCOME} credits a second">Flags <b>${held}</b> of ${map.townCount}</span>` +
+        `<span class="flags">${squares}</span>`;
+      if (taking.length > 0) html += tickHtml('taking', taking.join(' · '));
     }
-    townsEl.innerHTML = html;
+    if (civilians.total > 0) {
+      const ours = civilians.killed[me] ?? 0;
+      const theirs = civilians.killed.reduce((n, k) => n + k, 0) - ours;
+      if (html !== '') html += '<i class="sep"></i>';
+      html +=
+        `<span title="${civilians.escaped} got out of the town. Killed by the enemy: ${theirs}. Each one killed by your fire costs ${CIVILIAN_SUPPLIES} supplies">${civilians.home + civilians.fleeing} civilians in town, ` +
+        `<span id="civ-count"${ours > 0 ? ' class="short"' : ''}>${ours} killed by us</span></span>`;
+    }
+    townsEl.style.display = html === '' ? 'none' : 'flex';
+    if (html !== townsHtml) {
+      townsEl.innerHTML = townsHtml = html;
+      runTickers(townsEl);
+    }
   }, 500);
+  // The armies in the field: whose colour is whose, which power it is, and who is out.
+  const armiesEl = document.getElementById('armies');
+  if (armiesEl) {
+    if (scenario !== 'skirmish') armiesEl.style.display = 'none';
+    let armiesHtml = '';
+    const paint = () => {
+      let html = '';
+      for (let t = 0; t < armies; t++) {
+        const f = factionOf(t);
+        const name =
+          f > 0 ? FACTIONS[f].name : TEAM_NAME[t][0].toUpperCase() + TEAM_NAME[t].slice(1);
+        const mine = versus ? t === myTeam : t === 0;
+        const out = card.fallen(t);
+        html +=
+          `<span class="${mine ? 'me' : ''}${out ? ' out' : ''}" title="${TEAM_NAME[t]} army: ${mine ? 'yours' : versus ? 'the other side' : 'the computer'}${out ? '. Its headquarters has fallen' : ''}">` +
+          `<i style="background:${TEAM_CSS[t]}"></i>${name}</span>`;
+      }
+      if (html !== armiesHtml) armiesEl.innerHTML = armiesHtml = html;
+    };
+    paint();
+    setInterval(paint, 1000);
+  }
   // What is selected, by type: with ten kinds of unit a box of rings is not enough.
   // Control groups that exist, as chips: number and size. Click = the number key.
   const groupsEl = document.getElementById('groups');
@@ -735,6 +752,7 @@ async function start(): Promise<void> {
   }, 300);
   const selectionEl = document.getElementById('selection');
   let wasFed = true;
+  let selectionHtml = '';
   setInterval(() => {
     if (!selectionEl) return;
     const n = new Array<number>(KINDS.length).fill(0);
@@ -755,7 +773,7 @@ async function start(): Promise<void> {
     for (const id of units.selectedIds()) {
       if (units.cmdr[id] >= 0) under.set(units.cmdr[id], (under.get(units.cmdr[id]) ?? 0) + 1);
     }
-    for (const [slot, count] of under) parts.push(`${count} under ${COMMANDER_NAMES[slot]}`);
+    const led = [...under].map(([slot, count]) => `${count} under ${COMMANDER_NAMES[slot]}`);
     // The first units to run out of rations get an alert; the count stays in the top bar.
     const out = supply.hungry;
     if (out.length > 0 && wasFed) {
@@ -763,8 +781,17 @@ async function start(): Promise<void> {
       if (c) alerts?.report(ALERT_NOTE, c.x, c.z, 'Units out of supply', performance.now() / 1000);
     }
     wasFed = out.length === 0;
-    selectionEl.style.display = parts.length > 0 ? 'block' : 'none';
-    selectionEl.textContent = parts.join(' · ');
+    const total = units.selectedCount;
+    const html =
+      total === 0
+        ? ''
+        : `<b>${total} selected</b>${tickHtml('selection', parts.join(' · '))}` +
+          (led.length > 0 ? `<span class="under">${led.join(' · ')}</span>` : '');
+    selectionEl.style.display = html === '' ? 'none' : 'flex';
+    if (html !== selectionHtml) {
+      selectionEl.innerHTML = selectionHtml = html;
+      runTickers(selectionEl);
+    }
   }, 250);
 
   // Reinforcements: a combined-arms battlegroup of 500 per side, attacking toward the centre.
@@ -838,10 +865,23 @@ async function start(): Promise<void> {
   });
   // Base buildings change this copy of the map too, so a reset starts from a fresh page.
   document.getElementById('reset')?.addEventListener('click', () => location.reload());
+  document.getElementById('to-menu')?.addEventListener('click', () => toMenu(params));
   document.getElementById('coop-host')?.addEventListener('click', () => {
     // A fresh game as the host: the lobby gives the link to send.
     const next = new URLSearchParams();
-    for (const k of ['map', 'ai', 'time', 'seed', 'quality', 'renderer', 'net']) {
+    for (const k of [
+      'map',
+      'ai',
+      'time',
+      'weather',
+      'army',
+      'foe',
+      'armies',
+      'seed',
+      'quality',
+      'renderer',
+      'net',
+    ]) {
       const v = params.get(k);
       if (v !== null) next.set(k, v);
     }

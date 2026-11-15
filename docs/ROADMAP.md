@@ -470,7 +470,9 @@ From the proposal in the "Design tactical attack formations" thread.
 ## M11 Polish for v1
 
 - Authored or CC0 models replacing procedural ones, animation
-- Menus, settings, save/replay
+- Menus and settings: BUILT 2026-11-15 (decision 127). The v1 interface: glass HUD with the
+  commander board always on screen, main menu, new battle screen, settings, glass lobby and
+  end screen. Still to do: save/replay
 
 ## Later
 

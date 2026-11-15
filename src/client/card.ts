@@ -154,6 +154,12 @@ export class CommandCard {
   private html = '';
   private resHtml = '';
   private readonly hadHq = [false, false, false, false];
+  private readonly lostHq = [false, false, false, false];
+
+  /** Has the army of `team` lost its headquarters? */
+  fallen(team: number): boolean {
+    return this.lostHq[team] === true;
+  }
   /**
    * An order waiting for a click on the ground: attack-move or a smoke screen. The input
    * handler reads it and carries it out; `arm` is how both sides change it.
@@ -239,6 +245,7 @@ export class CommandCard {
         if (t !== ME) foes++;
       } else if (this.hadHq[t]) {
         this.hadHq[t] = false;
+        this.lostHq[t] = true;
         if (t !== ME) out = t;
         fallen = true;
       }
@@ -698,20 +705,26 @@ export class CommandCard {
   }
 
   private render(): void {
+    const n = (v: number) => v.toLocaleString('en-US');
     let res =
-      `<i class="sup">Supplies ${this.supplies}</i><i class="fuel">Fuel ${this.fuel}</i>` +
-      `<i class="cred">Credits ${this.credits}</i><i>Army ${this.pop}/${this.popCap}</i>` +
-      `<i>Tier ${this.tier}</i>` +
-      `<i class="${this.upkeep > 0 ? 'sup' : ''}" title="What your army costs to keep, in supplies a minute. The first 60 army points are free.">Upkeep ${this.upkeep > 0 ? '−' : ''}${this.upkeep}/min</i>` +
-      `<i class="${this.flags > 0 ? 'cred' : ''}" title="What the flags you hold pay, in supplies a minute. Each flag also pays ${TOWN_FUEL * 60} fuel and ${TOWN_INCOME * 60} credits a minute. Lose the flag and you lose the income.">Flags ${this.flags} +${this.flags * TOWN_SUPPLIES * 60}/min</i>`;
+      `<span class="pill stats">` +
+      `<span class="sup"><b>${n(this.supplies)}</b> supplies</span>` +
+      `<span class="fuel"><b>${n(this.fuel)}</b> fuel</span>` +
+      `<span class="cred"><b>${n(this.credits)}</b> credits</span>` +
+      `<i class="sep"></i>` +
+      `<span title="Army points in the field, and the most your depots allow"><b>${this.pop}</b>/${this.popCap} army</span>` +
+      `<span>Tier ${this.tier}</span>` +
+      `<span${this.upkeep > 0 ? ' class="sup"' : ''} title="What your army costs to keep, in supplies a minute. The first 60 army points are free.">Upkeep ${this.upkeep > 0 ? '−' : ''}${this.upkeep}/min</span>` +
+      `<span${this.flags > 0 ? ' class="cred"' : ''} title="What the flags you hold pay, in supplies a minute. Each flag also pays ${TOWN_FUEL * 60} fuel and ${TOWN_INCOME * 60} credits a minute. Lose the flag and you lose the income.">Flags +${this.flags * TOWN_SUPPLIES * 60}/min</span>` +
+      `</span>`;
     const idle = this.idle().length;
     if (idle > 0)
-      res += `<button title="Trucks with nothing to do. Click (or press .) to select them">Idle trucks ${idle} (.)</button>`;
+      res += `<button title="Trucks with nothing to do. Click (or press .) to select them">${idle} idle truck${idle === 1 ? '' : 's'} <kbd>.</kbd></button>`;
     const hungry = this.hungry().length;
     if (hungry > 0)
-      res += `<button data-act="hungry" class="warn" title="These units have been beyond your supply for two minutes: they fire at half rate and their vehicles crawl. Bring a truck, build a depot nearby, or take the town. Click to select them">Out of supply ${hungry}</button>`;
+      res += `<button data-act="hungry" class="warn" title="These units have been beyond your supply for two minutes: they fire at half rate and their vehicles crawl. Bring a truck, build a depot nearby, or take the town. Click to select them">${hungry} out of supply</button>`;
     if (this.reserve > 0)
-      res += `<button data-act="paradrop" class="air" title="Paratroop squads waiting in reserve. Click (or press J), then click the map: a transport plane drops up to ${PARA_PLANE_LOAD} of them there. Enemy air defence can shoot the plane down">Paratroops ${this.reserve} (J)</button>`;
+      res += `<button data-act="paradrop" class="air" title="Paratroop squads waiting in reserve. Click (or press J), then click the map: a transport plane drops up to ${PARA_PLANE_LOAD} of them there. Enemy air defence can shoot the plane down">${this.reserve} paratroops <kbd>J</kbd></button>`;
     if (res !== this.resHtml) this.resEl.innerHTML = this.resHtml = res;
 
     let html = '';

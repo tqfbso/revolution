@@ -16,6 +16,7 @@
 // files. `?net=local` swaps the network for a channel between two tabs of one browser.
 import type { Command } from '../sim/commands';
 import type { Frame, NetReport } from '../worker/protocol';
+import { MAP_LABEL } from './menu';
 import { GameLog, expand, type Piece } from './replay';
 
 declare const __BUILD__: string;
@@ -266,16 +267,14 @@ async function peerJoin(id: string): Promise<Link> {
 function overlay(): { el: HTMLElement; set: (html: string) => void; hide: () => void } {
   const el = document.createElement('div');
   el.id = 'coop-lobby';
-  el.style.cssText =
-    'position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;' +
-    'background:rgba(12,14,16,0.86);color:#e8e6df;font:15px/1.5 system-ui,sans-serif';
-  const box = document.createElement('div');
-  box.style.cssText =
-    'max-width:560px;padding:26px 30px;background:#1b1e21;border:1px solid #3a4046;border-radius:10px';
-  el.appendChild(box);
+  el.className = 'screen';
   document.body.appendChild(el);
-  return { el, set: (html) => (box.innerHTML = html), hide: () => el.remove() };
+  return { el, set: (html) => (el.innerHTML = html), hide: () => el.remove() };
 }
+
+/** A lobby page that only has something to say. */
+const page = (title: string, body: string): string =>
+  `<div class="top"><h1>${title}</h1></div><div class="text">${body}</div>`;
 
 function readDuty(): number {
   try {
@@ -287,8 +286,9 @@ function readDuty(): number {
 }
 
 const dutyPicker = (duty: number): string =>
-  `<label style="display:block;margin-top:14px">Your role (advice for the team, nothing is locked): ` +
-  `<select id="coop-duty">${DUTIES.map((d, k) => `<option value="${k}"${k === duty ? ' selected' : ''}>${d}</option>`).join('')}</select></label>`;
+  `<label class="opt"><span>Your role</span>` +
+  `<select id="coop-duty">${DUTIES.map((d, k) => `<option value="${k}"${k === duty ? ' selected' : ''}>${d}</option>`).join('')}</select>` +
+  `<p>Roles are advice for the team. Nothing is locked: anyone can order anything.</p></label>`;
 
 function watchDuty(onPick: (d: number) => void): void {
   const sel = document.getElementById('coop-duty') as HTMLSelectElement | null;
@@ -307,7 +307,7 @@ const sideTag = (side: number): string =>
   `<span style="color:${side === 1 ? '#7fa8e8' : '#e8857a'}">${SIDES[side === 1 ? 1 : 0]}</span>`;
 
 const sidePicker = (side: number): string =>
-  `<label style="display:block;margin-top:14px">Your side: ` +
+  `<label class="opt"><span>Your side</span>` +
   `<select id="coop-side">${SIDES.map((d, k) => `<option value="${k}"${k === side ? ' selected' : ''}>${d}</option>`).join('')}</select></label>`;
 
 function watchSide(onPick: (side: number) => void): void {
@@ -406,15 +406,11 @@ export class Coop {
     }
     this.bar = document.createElement('div');
     this.bar.id = 'coop-status';
-    this.bar.style.cssText =
-      'position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:20;padding:3px 12px;' +
-      'background:rgba(20,23,26,0.82);color:#d8d6cf;border:1px solid #3a4046;border-radius:6px;' +
-      'font:12px/1.5 ui-monospace,monospace;pointer-events:auto;text-align:center';
+    this.bar.className = 'pill';
     this.statusEl = document.createElement('div');
     this.noteEl = document.createElement('div');
-    this.noteEl.style.color = '#e8c36a';
     this.bar.append(this.statusEl, this.noteEl);
-    document.body.appendChild(this.bar);
+    (document.getElementById('left') ?? document.body).appendChild(this.bar);
     links.forEach((link, k) => this.attach(role === 'host' ? k + 1 : 0, link));
     if (listener) {
       // A player who lost the connection and opens the invite again is let back in: into
@@ -428,10 +424,7 @@ export class Coop {
     if (resumed) {
       this.catchEl = document.createElement('div');
       this.catchEl.id = 'coop-catchup';
-      this.catchEl.style.cssText =
-        'position:fixed;top:38%;left:50%;transform:translateX(-50%);z-index:40;padding:18px 28px;' +
-        'background:rgba(20,23,26,0.92);color:#e8e6df;border:1px solid #3a4046;border-radius:8px;' +
-        'font:16px/1.5 system-ui,sans-serif;text-align:center';
+      this.catchEl.className = 'panel';
       this.catchEl.textContent = 'Rejoining the battle…';
       document.body.appendChild(this.catchEl);
     }
@@ -768,7 +761,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
   const ui = overlay();
   let duty = readDuty();
   const home = `${location.origin}${location.pathname}`;
-  const alone = `<p style="margin-top:18px"><a href="${home}" style="color:#9fb7c9">Play alone instead</a></p>`;
+  const alone = `<p class="small"><a href="${home}">Back to the main menu</a></p>`;
 
   if (hosting) {
     let id = '';
@@ -779,7 +772,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
     }
     if (!/^rev-[a-z0-9]{8}$/.test(id)) id = randomId();
     let listener: Listener | null = null;
-    ui.set('<h2 style="margin:0 0 8px">Co-op</h2><p>Opening a line…</p>');
+    ui.set(page('Co-op with friends', '<p>Opening a line…</p>'));
     for (let attempt = 0; attempt < 6 && !listener; attempt++) {
       try {
         listener = local ? localListen(id) : await peerListen(id);
@@ -790,7 +783,10 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         else if (type === 'unavailable-id') id = randomId();
         else {
           ui.set(
-            `<h2 style="margin:0 0 8px">Co-op</h2><p>Could not reach the meeting point (the public PeerJS broker): ${String((e as Error).message ?? type ?? e)}.</p><p>Check the connection and reload the page to try again.</p>${alone}`,
+            page(
+              'Co-op with friends',
+              `<p>Could not reach the meeting point (the public PeerJS broker): ${String((e as Error).message ?? type ?? e)}.</p><p>Check the connection and reload the page to try again.</p>${alone}`,
+            ),
           );
           return new Promise<never>(() => {});
         }
@@ -803,17 +799,24 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       // fine
     }
     const invite = `${home}?join=${id}${local ? '&net=local' : ''}`;
+    const battle =
+      `${MAP_LABEL[(Number(params.get('armies') ?? 2) | 0) > 2 ? 'four' : (params.get('map') ?? 'city')] ?? 'City'} · ` +
+      `${params.get('time') === 'night' ? 'night' : 'day'}` +
+      `${params.get('weather') ? ` · ${params.get('weather')}` : ''}`;
     ui.set(
-      `<h2 style="margin:0 0 8px">Co-op: invite your team</h2>` +
-        `<p>Send this link to everyone you want to play with (up to ${MAX_PLAYERS - 1} others; the same link for all). When they are all listed below, press Start.</p>` +
-        `<p><input id="coop-link" readonly value="${invite}" style="width:100%;padding:7px;background:#101214;color:#e8e6df;border:1px solid #3a4046;border-radius:5px;font:13px ui-monospace,monospace" /></p>` +
-        `<p><button id="coop-copy" style="padding:6px 14px">Copy link</button> <span id="coop-copied" style="color:#8fbf8f"></span></p>` +
-        `<div id="coop-roster" style="margin:12px 0;padding:8px 12px;background:#101214;border:1px solid #3a4046;border-radius:5px"></div>` +
-        `<p><button id="coop-start" disabled style="padding:8px 20px;font-weight:600">Start the game</button></p>` +
-        `<label style="display:block;margin-top:14px">Game: <select id="coop-mode"><option value="coop">Together against the computer</option><option value="versus">Versus: players against players</option></select></label>` +
+      `<div class="top"><h1>Invite your team</h1><span>${battle}</span></div>` +
+        `<div class="cols2"><div class="col">` +
+        `<label class="opt"><span>Game</span><select id="coop-mode"><option value="coop">Together against the computer</option><option value="versus">Versus: players against players</option></select></label>` +
         `<div id="coop-side-box"></div>` +
         dutyPicker(duty) +
-        `<p id="coop-blurb" style="color:#a9a79f;margin-top:14px"></p>${alone}`,
+        `<p id="coop-blurb" class="small"></p>${alone}` +
+        `</div><div class="col" style="gap:10px">` +
+        `<span class="label" id="coop-count">Players</span>` +
+        `<div id="coop-roster" class="col" style="gap:10px"></div>` +
+        `<div class="linkrow"><input id="coop-link" readonly value="${invite}" aria-label="Invitation link" /><button id="coop-copy" class="ghost">Copy link</button></div>` +
+        `<p class="small">Send this link to everyone you want to play with (up to ${MAX_PLAYERS - 1} others; the same link for all). When they are all listed, press Start. <span id="coop-copied" style="color:var(--good)"></span></p>` +
+        `</div></div>` +
+        `<div class="bar"><button id="coop-start" class="go" disabled>Start the game</button></div>`,
     );
     document.getElementById('coop-copy')?.addEventListener('click', () => {
       const done = document.getElementById('coop-copied');
@@ -841,15 +844,17 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         const el = document.getElementById('coop-roster');
         if (el) {
           const tag = (k: number) => (versus ? ` · ${sideTag(all[k])}` : '');
+          const seat = (name: string, d: number, k: number) =>
+            `<div class="seat"><i></i><b>${name}</b><span>${DUTIES[d]}${tag(k)}</span></div>`;
           el.innerHTML =
-            `<div>Player 1 (you, host): ${DUTIES[duty]}${tag(0)}</div>` +
-            guests
-              .map((g, k) => `<div>Player ${k + 2}: ${DUTIES[g.duty]}${tag(k + 1)}</div>`)
-              .join('') +
-            (guests.length === 0
-              ? `<div style="color:#a9a79f">Waiting for someone to open the link…</div>`
-              : '');
+            seat('You (host)', duty, 0) +
+            guests.map((g, k) => seat(`Player ${k + 2}`, g.duty, k + 1)).join('') +
+            `<div class="seat open"><i></i><b>Open seat</b><span>Waiting for someone to open the link</span></div>`.repeat(
+              MAX_PLAYERS - 1 - guests.length,
+            );
         }
+        const count = document.getElementById('coop-count');
+        if (count) count.textContent = `Players, ${guests.length + 1} of ${MAX_PLAYERS}`;
         const box = document.getElementById('coop-side-box');
         if (box) {
           box.innerHTML = versus ? sidePicker(side) : '';
@@ -956,7 +961,8 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
 
   // The guest.
   ui.set(
-    `<h2 style="margin:0 0 8px">Co-op</h2><p id="coop-say">Looking for the host…</p><div id="coop-side-box"></div>${dutyPicker(duty)}${alone}`,
+    `<div class="top"><h1>Joining a battle</h1></div><div class="cols2"><div class="col">` +
+      `<p id="coop-say" class="sub" style="margin:0">Looking for the host…</p><div id="coop-side-box"></div>${dutyPicker(duty)}${alone}</div></div>`,
   );
   let lobby: Link | null = null;
   watchDuty((d) => {
@@ -995,7 +1001,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
             const all = m.sides ?? [];
             const mine = all[m.you ?? -1] ?? 0;
             box.innerHTML = m.versus
-              ? `<p style="margin:10px 0 0">A versus game: red against blue. ${all
+              ? `<p class="small">A versus game: red against blue. ${all
                   .map((v, k) => `${k === m.you ? 'You' : `Player ${k + 1}`}: ${sideTag(v)}`)
                   .join(' · ')}</p>${sidePicker(mine)}`
               : '';
@@ -1040,7 +1046,10 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
     link.close();
     if (answer?.t === 'bad') {
       ui.set(
-        `<h2 style="margin:0 0 8px">Co-op</h2><p>You and the host are on different versions of the game (yours: ${__BUILD__}, the host's: ${answer.build}). Both of you: reload the page with Cmd+Shift+R (Ctrl+Shift+R on Windows), then the host sends a new link.</p>${alone}`,
+        page(
+          'Joining a battle',
+          `<p>You and the host are on different versions of the game (yours: ${__BUILD__}, the host's: ${answer.build}). Both of you: reload the page with Cmd+Shift+R (Ctrl+Shift+R on Windows), then the host sends a new link.</p>${alone}`,
+        ),
       );
       return new Promise<never>(() => {});
     }
