@@ -744,7 +744,9 @@ function anchor(
     }
     if (clear) return ground(map, x, y);
   }
-  return from > near && od <= near + FALL_STEPS * FALL_STEP ? ground(map, cx, cy) : ground(map, bx, by);
+  return from > near && od <= near + FALL_STEPS * FALL_STEP
+    ? ground(map, cx, cy)
+    : ground(map, bx, by);
 }
 
 /** Fewer than half of them stand together. */
