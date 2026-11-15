@@ -358,7 +358,7 @@ describe('sub-commanders: the staff', () => {
     expect(st.posts[1].status).toBe(ST_MASSED);
   }, 60000);
 
-  it('attack: breaks off against far too much, falls back and waits to be reinforced', () => {
+  it('attack: breaks off against far too much, falls back a short way and regroups there', () => {
     const { w, st } = field();
     const t = town(w, 'Ridgetop');
     const ids = add(w, [
@@ -371,15 +371,27 @@ describe('sub-commanders: the staff', () => {
       mission(4, M_ATTACK, w.map.townX[t], w.map.townY[t]),
     ]);
     const seen = new Set<number>();
-    // (After a minute and a half with no enemy in sight it goes to look again: before that.)
-    play(w, st, 185, () => seen.add(st.posts[4].status));
-    expect(seen.has(ST_FALLBACK)).toBe(true);
-    expect(st.posts[4].status).toBe(ST_REGROUP);
-    expect(st.posts[4].need).toBe(true);
-    // What is left of it got away: it is nowhere near the town.
     const p = st.posts[4];
+    let broke = -1;
+    play(w, st, 110, () => {
+      seen.add(p.status);
+      if (broke < 0 && p.status === ST_FALLBACK) broke = w.tick;
+    });
+    expect(seen.has(ST_FALLBACK)).toBe(true);
+    expect(p.status).toBe(ST_REGROUP);
+    expect(p.need).toBe(true);
+    // What is left of it got away: out of the town's sight, but still close by, not back
+    // at the base on the other side of the map.
     expect(alive(w, ids)).toBeGreaterThan(0);
-    expect(Math.hypot(p.cx - w.map.townX[t], p.cy - w.map.townY[t])).toBeGreaterThan(fx(60));
+    const away = (x: number, y: number) => Math.hypot(x - w.map.townX[t], y - w.map.townY[t]);
+    const edge = w.map.townR[t];
+    expect(away(p.cx, p.cy)).toBeGreaterThan(edge + fx(60));
+    expect(away(p.backX, p.backY)).toBeLessThan(edge + fx(240));
+    expect(away(p.cx, p.cy)).toBeLessThan(edge + fx(260));
+    // Left alone, it goes in again by itself once it has caught its breath.
+    const later = new Set<number>();
+    play(w, st, 120, () => later.add(p.status));
+    expect(later.has(ST_MARCH) || later.has(ST_ATTACK) || later.has(ST_GATHER)).toBe(true);
   }, 60000);
 
   it('hold: goes there, digs into the houses and stays put under attack', () => {
