@@ -84,7 +84,13 @@ export const M_PATROL = 4;
 export const M_SCREEN = 5;
 /** Go to a place and stand there: no fighting on the way, no houses, no falling back. */
 export const M_MOVE = 6;
-export const MISSION_COUNT = 7;
+/**
+ * Concentrate (decision 117): every unit makes for one exact spot at its own best speed,
+ * fights its way over the last stretch, and the body stays massed there. No forming up, no
+ * waiting short of the place, no houses, no falling back.
+ */
+export const M_FOCUS = 7;
+export const MISSION_COUNT = 8;
 /** Commander flag: losses are ordered again and sent to it by themselves. */
 export const CF_AUTO = 1;
 /** Bits 1 and 2 of a commander's flags: its attack style (STYLE_*). */

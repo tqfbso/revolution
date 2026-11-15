@@ -59,6 +59,8 @@ import { structDist2 } from './sim';
 import { fortified } from './urban';
 import { KINDS, KIND_ARTILLERY } from './units';
 import {
+  FLAG_AMOVE,
+  FLAG_BOARD,
   FLAG_BOMBARD,
   CF_STYLE_MASK,
   CF_STYLE_SHIFT,
@@ -71,6 +73,7 @@ import {
   MAX_UNITS,
   M_ATTACK,
   M_DEFEND,
+  M_FOCUS,
   M_HOLD,
   M_MOVE,
   M_NONE,
@@ -96,6 +99,9 @@ export const ST_REGROUP = 9;
 export const ST_GATHER = 10;
 export const ST_MOVE = 11;
 export const ST_ARRIVED = 12;
+/** Concentrate: on its way to the spot, and massed on it. */
+export const ST_FOCUS = 13;
+export const ST_MASSED = 14;
 
 /** Ticks between two thinks: once a second, like the hard computer player. */
 const PERIOD = 20;
@@ -125,6 +131,19 @@ const STAND_OFF = fx(75);
 const STAND_CLEAR = fx(60);
 /** A march that is close to its way point but cannot get half its line onto it moves on after this. */
 const MARCH_WAIT = 30 * TICK_RATE;
+
+/**
+ * Concentrate. Further out than FOCUS_FIGHT a unit goes by plain move (it does not stop to
+ * shoot); inside it, it attack-moves, so the last stretch is fought. Guns stop FOCUS_GUNS
+ * short of the spot, from where they reach everything round it.
+ */
+const FOCUS_FIGHT = fx(70);
+const FOCUS_GUNS = fx(70);
+/** It reports itself massed when this share of it is on the spot, or after this long. */
+const FOCUS_MASSED = 75;
+const FOCUS_WAIT = 4 * MINUTE;
+/** Squads mount for a concentration only from further away than this, and never in contact. */
+const FOCUS_MOUNT = fx(200);
 
 /** One commander, as its staff sees it. */
 export interface Post {
@@ -281,7 +300,14 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
   const mission = w.cMission[k];
   // A new mission for troops that stand all over the map: the largest lot of them is the
   // body, the others make their own way to where it is going (see `rally`).
-  if (p.seq !== w.cSeq[k] && mission !== M_NONE && mission !== M_MOVE && mission !== M_SCREEN)
+  const began = p.seq !== w.cSeq[k];
+  if (
+    began &&
+    mission !== M_NONE &&
+    mission !== M_MOVE &&
+    mission !== M_FOCUS &&
+    mission !== M_SCREEN
+  )
     core(st, w, p);
   p.count = units.length + p.joining.length + p.riders;
   if (units.length === 0) {
@@ -310,6 +336,10 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
     p.status = ST_IDLE;
   } else if (mission === M_MOVE) {
     move(w, out, p, tx, ty);
+  } else if (mission === M_FOCUS) {
+    // The orders of a concentration just begun went out in `begin`, this think.
+    if (began) p.status = ST_FOCUS;
+    else focus(w, out, p, tx, ty, false);
   } else if (f.state === F_RETREAT) {
     fallingBack(w, out, p);
   } else if (p.regroup) {
@@ -399,7 +429,7 @@ function rally(st: Staff, w: World, out: Command[], c: number, cx: number, cy: n
   let ox = 0;
   let oy = 0;
   let inner = 0;
-  if (mission === M_MOVE) {
+  if (mission === M_MOVE || mission === M_FOCUS) {
     x = w.cX[k];
     y = w.cY[k];
   } else if (mission === M_NONE || mission === M_SCREEN) {
@@ -434,6 +464,14 @@ function rally(st: Staff, w: World, out: Command[], c: number, cx: number, cy: n
       (turn || ((w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET))
     )
       go.push(i);
+  }
+  if (mission === M_FOCUS) {
+    // Each at its own pace, and fighting over the last stretch like the body.
+    const far = go.filter((i) => dist(w.posX[i], w.posY[i], x, y) > FOCUS_FIGHT);
+    const close = go.filter((i) => !far.includes(i));
+    byPace(w, out, CMD_MOVE, far, x, y);
+    byPace(w, out, CMD_ATTACK_MOVE, close, x, y);
+    return;
   }
   order(out, mission === M_MOVE ? CMD_MOVE : CMD_ATTACK_MOVE, go, x, y);
 }
@@ -489,6 +527,22 @@ function begin(
     return;
   }
   const d = dist(cx, cy, tx, ty);
+  if (mission === M_FOCUS) {
+    f.obj = { kind: OBJ_POINT, id: -1, x: tx, y: ty };
+    f.state = F_MARCH;
+    // From far off, and with nobody shooting, the squads ride: the carriers wait for them.
+    const contact = units.some((i) => w.attack[i] !== NO_TARGET);
+    focus(
+      w,
+      out,
+      p,
+      tx,
+      ty,
+      true,
+      d > FOCUS_MOUNT && !contact ? mount(w, out, f, units) : undefined,
+    );
+    return;
+  }
   if (mission === M_PATROL) {
     f.wps.push(...ground(map, tx, ty), ...ground(map, w.cAX[k], w.cAY[k]));
   } else {
@@ -881,6 +935,97 @@ function move(w: World, out: Command[], p: Post, x: number, y: number): void {
   }
   // Whoever stopped far short of the place (a blocked street, a squad put down) goes on.
   order(out, CMD_MOVE, stuck, ...ground(w.map, x, y));
+}
+
+/** One order per kind of mover, so that nobody is held to the pace of the slowest. */
+function byPace(
+  w: World,
+  out: Command[],
+  type: number,
+  units: readonly number[],
+  x: number,
+  y: number,
+): void {
+  if (units.length === 0) return;
+  const foot: number[] = [];
+  const air: number[] = [];
+  const wheels: number[] = [];
+  for (const i of units) {
+    const cls = KINDS[w.kind[i]].cls;
+    (cls === CLASS_FOOT ? foot : cls === CLASS_AIR ? air : wheels).push(i);
+  }
+  const [gx, gy] = ground(w.map, x, y);
+  order(out, type, wheels, gx, gy);
+  order(out, type, foot, gx, gy);
+  order(out, type, air, gx, gy);
+}
+
+/**
+ * Concentrate: everything this commander has on one exact spot, as fast as each unit can
+ * get there (decision 117). There is no forming up and no closing up short of the place:
+ * that is what an attack does, and it is what takes the time. Out of reach of the spot a
+ * unit moves without stopping to shoot; from FOCUS_FIGHT in it attack-moves, so the body
+ * arrives fighting. On the spot it stands close and shoots at what it sees; whoever chased
+ * something off comes back when he has nothing left to shoot at. It never falls back and
+ * never goes into the houses: where the troops stand is the player's decision here.
+ */
+function focus(
+  w: World,
+  out: Command[],
+  p: Post,
+  x: number,
+  y: number,
+  fresh: boolean,
+  busy?: Set<number>,
+): void {
+  const f = p.f;
+  const units = p.units;
+  const room = fx(20) + Math.trunc(Math.sqrt(units.length)) * fx(2);
+  // While squads mount, they and the carriers they are walking to are left alone.
+  const boarding = w.tick < f.boardUntil;
+  const awaited = new Set<number>();
+  if (boarding) {
+    for (const i of units) if ((w.flags[i] & FLAG_BOARD) !== 0) awaited.add(w.orderUnit[i]);
+  }
+  const far: number[] = [];
+  const close: number[] = [];
+  let up = 0;
+  for (const i of units) {
+    const flags = w.flags[i];
+    const moving = (flags & FLAG_MOVING) !== 0;
+    const d = dist(w.posX[i], w.posY[i], x, y);
+    if (KINDS[w.kind[i]].indirect) {
+      // A gun does not drive into the crowd: it comes within easy reach and shells from there.
+      if (d < FOCUS_GUNS + fx(30)) up++;
+      else if (fresh || !moving) {
+        const gx = x + Math.trunc(((w.posX[i] - x) * FOCUS_GUNS) / d);
+        const gy = y + Math.trunc(((w.posY[i] - y) * FOCUS_GUNS) / d);
+        out.push({ type: CMD_MOVE, units: [i], x: gx, y: gy });
+      }
+      continue;
+    }
+    if (d < room) {
+      up++;
+      continue;
+    }
+    if (busy?.has(i)) continue;
+    if (boarding && ((flags & FLAG_BOARD) !== 0 || awaited.has(i))) continue;
+    // A squad still walking after a carrier that has left gives it up.
+    const late = (flags & FLAG_BOARD) !== 0;
+    if (d > FOCUS_FIGHT) {
+      if (fresh || !moving || late) far.push(i);
+    } else if (fresh || late || (moving ? (flags & FLAG_AMOVE) === 0 : w.attack[i] === NO_TARGET)) {
+      close.push(i);
+    }
+  }
+  byPace(w, out, CMD_MOVE, far, x, y);
+  byPace(w, out, CMD_ATTACK_MOVE, close, x, y);
+  if (f.state === F_MARCH) {
+    if (up * 100 >= units.length * FOCUS_MASSED || w.tick - f.since > FOCUS_WAIT) {
+      f.state = F_ASSAULT;
+    }
+  }
+  p.status = f.state === F_MARCH ? ST_FOCUS : ST_MASSED;
 }
 
 /** At the objective: take it, with everything the computer player's assault has. */
