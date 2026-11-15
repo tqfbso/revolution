@@ -517,6 +517,24 @@ async function start(): Promise<void> {
   }
   input.controlAll = params.get('control') === 'all';
   structures.revealAll = input.controlAll || demo;
+  structures.farDetail = params.get('far') !== '0';
+  // Y: see through the buildings in front of the view, or not. Kept for the next game.
+  // Off until asked for: a half-faded block can be taken for a damaged one (decision 126).
+  try {
+    structures.seeThrough = localStorage.getItem('revolution.seeThrough') === '1';
+  } catch {
+    // not remembered
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyY' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    if ((e.target as HTMLElement | null)?.closest?.('input, textarea, select')) return;
+    structures.seeThrough = !structures.seeThrough;
+    try {
+      localStorage.setItem('revolution.seeThrough', structures.seeThrough ? '1' : '0');
+    } catch {
+      // not remembered; still applied
+    }
+  });
   works.revealAll = input.controlAll || demo || params.get('fog') === '0';
   // The opponent is chosen on screen; a new choice starts a new game.
   const pickAi = document.getElementById('ai-level') as HTMLSelectElement | null;
@@ -916,6 +934,7 @@ async function start(): Promise<void> {
     cameras.zoom = rts.distance;
     cameras.update();
     civilians.update(now / 1000, dt);
+    structures.view(rts.camera, rts.focus, rts.distance);
     structures.update(now / 1000, dt);
     works.update(now / 1000);
     const c2 = performance.now();
