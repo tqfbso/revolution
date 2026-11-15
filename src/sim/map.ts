@@ -57,8 +57,8 @@ export const BUILD_HOUSE = 0;
 export const BUILD_BLOCK = 1;
 export const BUILD_HALL = 2;
 /** Structure per cell of ground plan, and wall strength per cell of face, by class. */
-export const BUILD_HP: readonly number[] = [90, 180, 280];
-export const WALL_HP: readonly number[] = [60, 110, 160];
+export const BUILD_HP: readonly number[] = [75, 150, 235];
+export const WALL_HP: readonly number[] = [50, 90, 135];
 /** The faces of a building, in the order its wall strengths are stored: -y, +x, +y, -x. */
 export const FACE_NORTH = 0;
 export const FACE_EAST = 1;
