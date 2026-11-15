@@ -35,11 +35,14 @@ describe('factions (M10)', () => {
     expect(FACTIONS).toHaveLength(FACTION_COUNT);
   });
 
-  it('each faction lacks exactly one kind, a different one', () => {
-    expect(missingOf(FACTION_NATO)).toEqual([KINDS[KIND_EW].name]);
+  it('Russia and China each lack one kind, a different one; the alliance lacks none', () => {
+    expect(missingOf(FACTION_NATO)).toEqual([]);
+    // The alliance has a jammer again, a light one (decision 132); Russia's is the strongest.
+    expect(FACTIONS[FACTION_NATO].kinds[KIND_EW].jam).toBeLessThan(KINDS[KIND_EW].jam);
+    expect(FACTIONS[FACTION_RUSSIA].kinds[KIND_EW].jam).toBeGreaterThan(KINDS[KIND_EW].jam);
     expect(missingOf(FACTION_RUSSIA)).toEqual([KINDS[KIND_LIFT].name]);
     expect(missingOf(FACTION_CHINA)).toEqual([KINDS[KIND_PARA].name]);
-    for (const f of [FACTION_NATO, FACTION_RUSSIA, FACTION_CHINA]) {
+    for (const f of [FACTION_RUSSIA, FACTION_CHINA]) {
       const missing = FACTIONS[f].roster.findIndex((has) => !has);
       expect(pricesOf(f)[missing].from).toBe(B_COUNT);
     }
@@ -105,16 +108,16 @@ describe('factions (M10)', () => {
 
   it('a faction cannot train the kind it lacks', () => {
     const w = createWorld(1, generateMap(1, 'ridge'));
-    step(w, [{ type: CMD_FACTION, team: 0, faction: FACTION_NATO }, ...skirmishCommands(w.map)]);
+    step(w, [{ type: CMD_FACTION, team: 0, faction: FACTION_RUSSIA }, ...skirmishCommands(w.map)]);
     let hq = -1;
     for (let s = 0; s < w.map.structCount; s++) {
       if (w.sTeam[s] === 0 && w.sType[s] === B_HQ) hq = s;
     }
     expect(hq).toBeGreaterThanOrEqual(0);
-    expect(unitPrice(w, 0, KIND_EW).from).toBe(B_COUNT);
+    expect(unitPrice(w, 0, KIND_LIFT).from).toBe(B_COUNT);
     w.credits[0] = w.supplies[0] = w.fuel[0] = 100000;
     for (let s = 0; s < w.map.structCount; s++) {
-      if (w.sTeam[s] !== NO_TEAM) step(w, [{ type: CMD_TRAIN, structure: s, kind: KIND_EW }]);
+      if (w.sTeam[s] !== NO_TEAM) step(w, [{ type: CMD_TRAIN, structure: s, kind: KIND_LIFT }]);
     }
     let queued = 0;
     for (let s = 0; s < w.map.structCount; s++) queued += w.sQueueLen[s];
