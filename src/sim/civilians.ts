@@ -27,7 +27,7 @@ import { EV_CIVILIAN, packPoint, type World } from './world';
 const TICK_RATE = 20;
 
 /** Civilians on a map at most, and what each is doing. */
-export const MAX_CIVILIANS = 512;
+export const MAX_CIVILIANS = 2048;
 export const CIV_NONE = 0;
 export const CIV_HOME = 1;
 export const CIV_FLEEING = 2;
@@ -38,14 +38,53 @@ export const CIV_DEAD = 4;
 export const DANGER_SHIFT = 14;
 export const DANGER_DIM = 64;
 
-/** Civilians on a map: this many, or fewer where there are few houses to put them in. */
-export const CIVILIANS = 400;
-const PER_BUILDING = 3;
+/**
+ * Civilians on a map: this many, or fewer where the houses do not hold as many (decision
+ * 119; it was 400, and a whole battle for a city killed two to four of them).
+ */
+export const CIVILIANS = 1400;
+/**
+ * How many people a house holds: one, and one more for every HOME_FLOOR cells of floor on
+ * all its storeys, HOME_MAX at most. A cottage holds three or four, a block of flats a
+ * dozen. Houses inside a flag's circle hold twice that and those just outside it half as
+ * much again: the middle of a town is where the people are, and where the battle for the
+ * flag is fought.
+ */
+const HOME_FLOOR = 4;
+const HOME_MAX = 12;
+
+/** The people house `s` holds at most. */
+export function homeRoom(map: World['map'], s: number): number {
+  const floors = map.sFloors[s] > 0 ? map.sFloors[s] : 1;
+  let room = 1 + Math.trunc((map.sW[s] * map.sH[s] * floors) / HOME_FLOOR);
+  if (room > HOME_MAX) room = HOME_MAX;
+  // Round a flag: twice as full inside its circle, half as full again out to twice that.
+  const x = ((2 * map.sX[s] + map.sW[s]) << CELL_SHIFT) >> 1;
+  const y = ((2 * map.sY[s] + map.sH[s]) << CELL_SHIFT) >> 1;
+  let ring = 0;
+  for (let t = 0; t < map.townCount && ring < 2; t++) {
+    const dx = x - map.townX[t];
+    const dy = y - map.townY[t];
+    const r = map.townR[t];
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= r * r) ring = 2;
+    else if (d2 <= 4 * r * r) ring = 1;
+  }
+  if (ring === 2) room *= 2;
+  else if (ring === 1) room += room >> 1;
+  return room;
+}
 /** What a dead civilian costs the army that killed it. */
 export const CIVILIAN_SUPPLIES = 100;
 export const CIVILIAN_CREDITS = 40;
 /** An army cannot be fined deeper into debt than this. */
 export const SUPPLY_FLOOR = -1500;
+/**
+ * Not everybody runs. One civilian in SHELTER stays in the house when the shooting starts
+ * (the old, the stubborn, those with nowhere to go) and comes out only when the house
+ * itself is shelled, gutted or brought down, if he comes out at all.
+ */
+const SHELTER = 3;
 /** How long a place stays dangerous after a shot or a burst there. */
 const DANGER_TICKS = 15 * TICK_RATE;
 /** A running civilian covers about 3.4 m a second, a little more or less each. */
@@ -73,9 +112,18 @@ export function placeCivilians(w: World, seed: number): void {
   // Its own dice, so that the world's are not touched by who lives where.
   const rng = new Uint32Array(1);
   seedRng(rng, seed ^ 0x51c1a5);
-  const n = Math.min(CIVILIANS, MAX_CIVILIANS, PER_BUILDING * houses.length);
+  // Each house draws people in proportion to the room it has, and none more than it holds.
+  const left = houses.map((s) => homeRoom(map, s));
+  let room = 0;
+  for (const r of left) room += r;
+  const n = Math.min(CIVILIANS, MAX_CIVILIANS, room);
   for (let k = 0; k < n; k++) {
-    const s = houses[nextU32(rng) % houses.length];
+    let pick = nextU32(rng) % room;
+    let h = 0;
+    while (pick >= left[h]) pick -= left[h++];
+    left[h]--;
+    room--;
+    const s = houses[h];
     w.civHome[k] = s;
     w.civState[k] = CIV_HOME;
     w.civX[k] = ((2 * map.sX[s] + map.sW[s]) << CELL_SHIFT) >> 1;
@@ -160,7 +208,8 @@ export function updateCivilians(w: World): void {
       // Once a second each, not all on the same tick.
       if ((tick + k) % TICK_RATE !== 0) continue;
       const home = w.civHome[k];
-      if (w.sHp[home] > 0 && !unsafe(w, w.civX[k], w.civY[k])) continue;
+      // One in SHELTER stays in the cellar whatever goes on outside, until the house is hit.
+      if (w.sHp[home] > 0 && (k % SHELTER === 0 || !unsafe(w, w.civX[k], w.civY[k]))) continue;
       leave(w, k);
       continue;
     }

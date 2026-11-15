@@ -2358,3 +2358,36 @@ the ridge map: before and after in `/mnt/project-files/nov15-fixes/fell-*.png`.
 Not done: shells and tank guns do not knock trees down; the computer's engineers do not
 fell or demolish on their own; street trees, fences and lamps on the city maps are
 drawing only and stay.
+
+## 119. More civilians, most of them round the flags, and not all of them run (2026-11-15)
+
+Fabio: "we also need a bit more civilians per map... we are killing at most 2-4 per
+match, which is unreal in a big urban battle."
+
+Measured first (`tools/toll.ts`, hard against hard, city, 30 minutes): 8 dead on seed 1
+and 1 on seed 2, of 400. Two reasons: there were few of them (fewer than one a house),
+and every one of them left at the first shot within a street or two, long before anything
+dangerous happened to the house.
+
+- **1,400 a map instead of 400** (`CIVILIANS`; `MAX_CIVILIANS` 2048), or as many as the
+  houses hold on the small maps (ridge 373, river 512).
+- **By the size of the house and where it stands.** A house holds one person and one more
+  for every four cells of floor over all its storeys, twelve at most; twice that inside a
+  flag's circle and half as much again out to twice the circle (`homeRoom`). People are
+  drawn into houses in proportion to that room, never more than a house holds. The blocks
+  round a flag, where the fighting is, are where the people are.
+- **One in three stays** (`SHELTER`). They sit in the cellar while the shooting goes on
+  outside and come out only when the house itself is shelled, gutted or brought down
+  (decision 118), which is when they die. So what a battle does to the houses now decides
+  what it does to the people in them, and shelling a held block has a price.
+- The cost of a death is unchanged (100 supplies and 40 credits to the army that fired).
+
+Measured after, same games: 19 and 43 dead on the city map (seeds 1 and 2), 67 on the
+European city. That is about 50 to 70 supplies a minute for each side in a computer's
+game; a player who shells housing will pay more. Sim cost unchanged within noise (1.5 to
+1.75 ms a tick at about 1,100 units; civilians at home are looked at once a second).
+
+Golden hash 1843229346 to 4027169720 (the same world now has more people in it).
+
+To watch: if the bill is too heavy for the way Fabio plays, lower `CIVILIAN_SUPPLIES`
+before the number of civilians; if deaths are still too few, `SHELTER` 2.
