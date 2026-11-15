@@ -7,8 +7,17 @@ import type { Look } from './look';
 
 const MAX_PARTICLES = 6000;
 const MAX_TRACERS = 3000;
-// x y z vx vy vz age life size0 size1 r g b alpha turn spin gravity
-const FIELDS = 17;
+// x y z vx vy vz age life size0 size1 r g b alpha turn spin gravity minPx
+const FIELDS = 18;
+/**
+ * How small a muzzle flash and a tracer may get on screen, in pixels. From the height a
+ * battle is commanded from a rifle's flash is a third of a pixel: it is drawn at least this
+ * big instead, so that a firefight shows as a firefight where the men are too small to.
+ */
+const FLASH_PX = 3.4;
+const TRACER_PX = 1.25;
+/** Half the camera's vertical field of view, as a tangent (camera.ts uses 40 degrees). */
+const TAN_HALF_FOV = Math.tan((20 * Math.PI) / 180);
 const ADDITIVE = 0;
 const SMOKE = 1;
 /** The wind that carries smoke and dust, the way the clouds go (world units a second). */
@@ -118,6 +127,7 @@ export class Effects {
     g: number,
     b: number,
     alpha: number,
+    minPx = 0,
   ): void {
     if (this.n[kind] >= MAX_PARTICLES) return;
     if (this.thin !== 0 || this.n[kind] > MAX_PARTICLES * 0.6) {
@@ -146,6 +156,39 @@ export class Effects {
     p[o + 15] = (Math.random() - 0.5) * (1.6 / (0.5 + size1));
     // Sparks (small, shrinking) fall; fireballs and smoke do not.
     p[o + 16] = kind === ADDITIVE && size0 < 0.3 ? -14 : 0;
+    p[o + 17] = minPx;
+  }
+
+  /**
+   * How much dust the ground gives up: 1 on a dry day, 0 in rain or snow (weather.ts).
+   */
+  dustiness = 1;
+
+  /**
+   * Feet on dry ground: a low puff of dust that hangs and drifts. Seen from far off it is a
+   * squad on the move before the squad itself can be made out. `paved` ground gives little.
+   */
+  dust(x: number, y: number, z: number, paved: boolean, big: number): void {
+    const a = (paved ? 0.12 : 0.3) * this.dustiness;
+    if (a <= 0.01) return;
+    // Paler than the ground it rises from, or it reads as a stain and not as dust.
+    const c = paved ? [0.8, 0.79, 0.76] : [0.86, 0.79, 0.64];
+    this.emit(
+      SMOKE,
+      x + rnd(0.5),
+      y + 0.15,
+      z + rnd(0.5),
+      rnd(0.35),
+      0.3 + Math.random() * 0.3,
+      rnd(0.35),
+      2.2 + Math.random() * 1.2,
+      0.5 * big,
+      (2.2 + Math.random() * 0.9) * big,
+      c[0],
+      c[1],
+      c[2],
+      a,
+    );
   }
 
   /** A clod of earth or a piece of plate: dark, thrown up, and it comes down again. */
@@ -274,8 +317,10 @@ export class Effects {
   muzzle(x: number, y: number, z: number, dx: number, dz: number): void {
     // In the dark a muzzle flash is what you see of a squad: bigger, and a beat longer.
     if (this.night) {
-      this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.08, 0.62, 0.3, 1, 0.8, 0.45, 1);
-    } else this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.05, 0.3, 0.16, 1, 0.78, 0.4, 0.95);
+      this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.08, 0.62, 0.3, 1, 0.8, 0.45, 1, FLASH_PX);
+    } else {
+      this.emit(ADDITIVE, x, y, z, dx * 2, 0, dz * 2, 0.06, 0.3, 0.16, 1, 0.8, 0.42, 1, FLASH_PX);
+    }
   }
 
   /** Night battle: fire reads as light. */
@@ -300,7 +345,7 @@ export class Effects {
     for (let k = 0; k < 2; k++) {
       const sx = x0 + rnd(0.8);
       const sz = z0 + rnd(0.8);
-      this.emit(ADDITIVE, sx, y0, sz, 0, 0, 0, 0.05, 0.35, 0.5, 1, 0.8, 0.45, 0.9);
+      this.emit(ADDITIVE, sx, y0, sz, 0, 0, 0, 0.06, 0.35, 0.5, 1, 0.82, 0.47, 1, FLASH_PX);
       this.tracer(
         sx,
         y0,
@@ -308,9 +353,9 @@ export class Effects {
         x1 + rnd(1.2),
         y1 + rnd(0.4),
         z1 + rnd(1.2),
-        Math.min(0.12, d / 160) + k * 0.03,
+        Math.min(0.15, d / 150) + k * 0.03,
         0.05,
-        0.75,
+        0.8,
       );
     }
     if (Math.random() < 0.3) {
@@ -768,6 +813,9 @@ export class Effects {
     const cx = e[12],
       cy = e[13],
       cz = e[14];
+    // World units a pixel covers, per unit of distance from the camera.
+    const pxk =
+      (2 * TAN_HALF_FOV) / Math.max(320, typeof innerHeight === 'number' ? innerHeight : 760);
     for (let kind = 0; kind < 2; kind++) {
       const p = this.p[kind];
       const batch = this.sprites[kind];
@@ -803,11 +851,14 @@ export class Effects {
         const y = (p[o + 1] += p[o + 4] * dt);
         const z = (p[o + 2] += p[o + 5] * dt);
         const k = age / life;
-        const grown = size0 + (p[o + 9] - size0) * (1 - (1 - k) * (1 - k));
+        let grown = size0 + (p[o + 9] - size0) * (1 - (1 - k) * (1 - k));
         const dcx = x - cx;
         const dcy = y - cy;
         const dcz = z - cz;
         const lens = Math.sqrt(dcx * dcx + dcy * dcy + dcz * dcz);
+        // A flash never shrinks below a few pixels, however far the camera is.
+        const minPx = p[o + 17];
+        if (minPx > 0) grown = Math.max(grown, Math.min(3.2, lens * pxk * minPx));
         // 0 when the camera is within half a puff's size of it, 1 beyond two sizes.
         const near = Math.min(1, Math.max(0, (lens - grown * 0.5) / (grown * 1.5)));
         const s = near > 0 ? grown : 0;
@@ -892,7 +943,11 @@ export class Effects {
       const len = Math.min(d * 0.35, 9);
       const head = k * d;
       const tail = Math.max(0, head - len);
-      const w = tr[o + 8];
+      // A tracer is never thinner than a pixel and a bit, and burns brighter from far off.
+      const lens = Math.hypot(tr[o] - cx, tr[o + 1] - cy, tr[o + 2] - cz);
+      const thin = lens * pxk * TRACER_PX;
+      const w = Math.max(tr[o + 8], Math.min(0.7, thin));
+      const far = Math.min(1, Math.max(0, (lens - 90) / 220));
       const q = i * 16;
       const m = tb.m;
       m[q] = ax * w;
@@ -915,7 +970,7 @@ export class Effects {
       tb.t[c] = 1;
       tb.t[c + 1] = 0.82;
       tb.t[c + 2] = 0.5;
-      tb.t[c + 3] = tr[o + 9];
+      tb.t[c + 3] = Math.min(1, tr[o + 9] * (1 + 0.35 * far));
       i++;
     }
     this.trN = n;

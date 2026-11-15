@@ -443,6 +443,9 @@ From the proposal in the "Design tactical attack formations" thread.
 - Mid-zoom graphics: blocks drawn as rows of houses with courtyards and furnished roofs,
   the paved ground dressed. BUILT (decision 121)
 
+- Infantry easier to find from mid zoom: flashes and tracers with a floor on their size on
+  screen, dust behind marching squads, a soft shade under each. BUILT (decision 122)
+
 ## M10 Factions
 
 - Three asymmetric factions with distinct units and tech
