@@ -397,6 +397,16 @@ export interface NightCommand {
 }
 
 /**
+ * The weather of the battle (units.ts WEATHER_*): given once, when the game is set up.
+ * Rain, fog and snow shorten how far everyone sees (WEATHER_SIGHT_PCT).
+ */
+export const CMD_WEATHER = 40;
+export interface WeatherCommand {
+  type: typeof CMD_WEATHER;
+  weather: number;
+}
+
+/**
  * Army `team` is of this faction (factions.ts). Given once, when the game is set up, before
  * anything is built: it does not change units already on the field.
  */
@@ -429,6 +439,7 @@ export type Command = (
   | StyleCommand
   | NightCommand
   | FactionCommand
+  | WeatherCommand
   | OrderCommand
   | KeepCommand
   | DestCommand

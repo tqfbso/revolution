@@ -28,6 +28,7 @@ import {
   FLARE_RADIUS,
   FLASH_TICKS,
   NIGHT_SIGHT_PCT,
+  WEATHER_SIGHT_PCT,
 } from '../sim/units';
 import { CLASS_AIR, T_BRIDGE, T_FORD, T_WATER } from '../sim/map';
 import {
@@ -510,7 +511,8 @@ export class UnitView {
     // Sight is refreshed every other tick (10 Hz): plenty for units that move this slowly.
     if (this.fogAge++ % 2 === 0) {
       this.fog.clock = now / 1000;
-      const sights = (this.night ? NIGHT_FOG_SIGHT : FOG_SIGHT)[factionOf(this.playerTeam)];
+      const sights =
+        this.sights ?? (this.night ? NIGHT_FOG_SIGHT : FOG_SIGHT)[factionOf(this.playerTeam)];
       if (this.night) this.nightLights(n, now / 1000);
       this.fog.update(
         this.curr,
@@ -559,6 +561,19 @@ export class UnitView {
 
   /** A night battle: shorter sight, and light shows what is near it. */
   night = false;
+  /** In weather: how far each kind lifts the fog, in place of the tables (see setWeather). */
+  private sights: number[] | null = null;
+
+  /** Rain, fog and snow shorten what every unit shows of the map, as they do in the sim. */
+  setWeather(weather: number): void {
+    const pct = WEATHER_SIGHT_PCT[weather] ?? 100;
+    if (pct === 100) return;
+    this.sights = FACTIONS[factionOf(this.playerTeam)].kinds.map((k, i) => {
+      const dark = this.night && i !== KIND_RECON && i !== KIND_DRONE ? NIGHT_SIGHT_PCT : 100;
+      const cells = Math.ceil((k.sight * dark * pct) / 10000 / 4096) + 1;
+      return cells * (k.cls === CLASS_AIR ? -1 : 1);
+    });
+  }
   /** Flares hanging over the field (world metres; `from` and `until` in seconds). */
   readonly flares: { x: number; y: number; z: number; from: number; until: number }[] = [];
   /** Where the player has troops, in 16 m squares. */

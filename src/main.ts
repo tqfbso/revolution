@@ -1,3 +1,5 @@
+import { Precipitation, WEATHER_NAMES, setWeather, skyOf, weatherByName } from './client/weather';
+import { WEATHER_RAIN, WEATHER_SNOW } from './sim/units';
 import { myKinds, setArmies } from './client/army';
 import { FACTIONS, factionByName } from './sim/factions';
 import * as THREE from 'three/webgpu';
@@ -126,20 +128,41 @@ async function start(): Promise<void> {
   for (let t = 2; t < 4; t++) factions[t] = factions[1] > 0 ? (factions[t - 1] % 3) + 1 : 0;
   setArmies(factions, myTeam);
   if (night) renderer.toneMappingExposure = 1.15;
+  // `?weather=rain|fog|snow` (decision 125): everyone sees less far (in the sim), and the
+  // sky, the light and the ground are that weather's. Only the skirmish has weather.
+  const weather = skirmishGame ? weatherByName(params.get('weather')) : 0;
+  const sky = skyOf(weather);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(night ? NIGHT_SKY : SKY);
-  scene.fog = new THREE.Fog(night ? NIGHT_SKY : SKY, night ? 380 : 500, night ? 1700 : 2200);
+  // By night the weather keeps the night's colours, a little greyer, and its own haze.
+  const skyColour = new THREE.Color(night ? NIGHT_SKY : (sky?.sky ?? SKY));
+  if (night && sky) skyColour.lerp(new THREE.Color(0x30353c), 0.5);
+  scene.background = skyColour;
+  scene.fog = new THREE.Fog(
+    skyColour,
+    Math.min(night ? 380 : 500, sky?.fogNear ?? 1e9),
+    Math.min(night ? 1700 : 2200, sky?.fogFar ?? 1e9),
+  );
   // Overcast-bright sky light plus a low, warm sun: long readable shadows, muted colours.
   // With reflections on, most of the sky's light comes from the environment map instead.
   scene.add(
     night
       ? new THREE.HemisphereLight(0x7f97c6, 0x2a3142, quality === 'low' ? 1.5 : 1.05)
-      : new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.78),
+      : sky
+        ? new THREE.HemisphereLight(
+            sky.hemiSky,
+            sky.hemiGround,
+            sky.hemi * (quality === 'low' ? 1.5 : 1),
+          )
+        : new THREE.HemisphereLight(0xcfdbe6, 0x4d4636, quality === 'low' ? 1.25 : 0.78),
   );
   // By night the same light is the moon: high, cold and a quarter as strong.
   const sun = night
     ? new THREE.DirectionalLight(0xa9c2ee, quality === 'low' ? 1.7 : 2.0)
-    : new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 4.3);
+    : sky
+      ? new THREE.DirectionalLight(sky.sun, sky.sunPower)
+      : new THREE.DirectionalLight(0xffe6c0, quality === 'low' ? 3.4 : 4.3);
+  // Under cloud the moon is fainter too.
+  if (night && sky) sun.intensity *= 0.6;
   const sunDir = (
     night ? new THREE.Vector3(0.38, 0.8, -0.46) : new THREE.Vector3(-0.55, 0.62, 0.42)
   ).normalize();
@@ -148,13 +171,14 @@ async function start(): Promise<void> {
   sun.shadow.mapSize.set(shadowSize, shadowSize);
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
-  if (quality !== 'low') sun.shadow.radius = night ? 3 : 1.6;
+  if (quality !== 'low') sun.shadow.radius = sky ? sky.shadowRadius : night ? 3 : 1.6;
   scene.add(sun, sun.target);
 
   // The same generator the sim worker runs: both derive the map from the seed.
   // You command the red army (team 0) and see what it sees. `?fog=0` lifts the fog,
   // `?control=all` lets you select and order every army.
   const look = makeLook(quality, shadows, night);
+  setWeather(weather, look.tex.noise);
   if (look.rich && params.get('bake') !== '0') {
     // The city's materials: drawn once by the graphics card, half a second at the most.
     const baked = await Promise.race([
@@ -168,7 +192,10 @@ async function start(): Promise<void> {
     fog.clouds = look.tex.noise;
     // What shiny things reflect, and the light that comes from the whole sky.
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(skyScene(sunDir, night), 0.02).texture;
+    scene.environment = pmrem.fromScene(
+      skyScene(sunDir, night, sky ? { sky: sky.sky, shine: sky.shine } : undefined),
+      0.02,
+    ).texture;
     scene.environmentIntensity = night ? 0.5 : 0.45;
     pmrem.dispose();
   }
@@ -204,7 +231,12 @@ async function start(): Promise<void> {
   works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
   units.night = effects.night = night;
+  // No dust off wet ground or snow.
+  if (weather === WEATHER_RAIN || weather === WEATHER_SNOW) effects.dustiness = 0;
+  const precipitation = new Precipitation(weather, quality);
+  scene.add(precipitation.group);
   units.playerTeam = myTeam;
+  units.setWeather(weather);
   // Night: the two flares nearest the camera light the ground under them for real.
   const flareLights: THREE.PointLight[] = [];
   if (night && quality !== 'low') {
@@ -426,6 +458,7 @@ async function start(): Promise<void> {
     versus,
     team: myTeam,
     night,
+    weather,
     factions,
     armies,
   });
@@ -514,6 +547,15 @@ async function start(): Promise<void> {
     pick.title = `${FACTIONS[factions[side]].name}. ${FACTIONS[factions[side]].line} Changing this starts a new game`;
     pick.addEventListener('change', () => {
       params.set(key, pick.value);
+      location.search = params.toString();
+    });
+  }
+  const pickWeather = document.getElementById('weather-pick') as HTMLSelectElement | null;
+  if (pickWeather) {
+    pickWeather.value = WEATHER_NAMES[weather];
+    pickWeather.addEventListener('change', () => {
+      if (pickWeather.value === 'clear') params.delete('weather');
+      else params.set('weather', pickWeather.value);
       location.search = params.toString();
     });
   }
@@ -878,6 +920,7 @@ async function start(): Promise<void> {
     works.update(now / 1000);
     const c2 = performance.now();
     effects.update(dt, rts.camera);
+    precipitation.update(dt, rts.camera, rts.distance, night);
     const c3 = performance.now();
     terrain.update(dt);
     input.update(dt);

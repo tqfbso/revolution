@@ -49,6 +49,8 @@ interface Config {
   /** The factions of red and of blue (`?army=`, `?foe=`). */
   army?: string;
   foe?: string;
+  /** 'rain', 'fog' or 'snow'. */
+  weather?: string;
   /** '3' or '4' for a free-for-all against that many armies less one. */
   armies?: string;
   /** Players in the game: the computer is given more to fight three or four with. */
@@ -927,6 +929,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           time: params.get('time') ?? '',
           army: params.get('army') ?? '',
           foe: params.get('foe') ?? '',
+          weather: params.get('weather') ?? '',
           armies: versus ? '' : (params.get('armies') ?? ''),
           humans: guests.length + 1,
           versus,
@@ -1014,7 +1017,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       else params.delete('ai');
       if (answer.cfg.time) params.set('time', answer.cfg.time);
       else params.delete('time');
-      for (const k of ['army', 'foe', 'armies'] as const) {
+      for (const k of ['army', 'foe', 'armies', 'weather'] as const) {
         const v = answer.cfg[k];
         if (v) params.set(k, v);
         else params.delete(k);

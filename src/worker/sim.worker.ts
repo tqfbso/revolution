@@ -2,7 +2,7 @@
 // never waits on game logic and game logic never waits on rendering.
 import { aiThink, createAi, type Ai } from '../sim/ai';
 import { createStaff, staffThink, type Staff } from '../sim/staff';
-import { CMD_FACTION, CMD_NIGHT, type Command } from '../sim/commands';
+import { CMD_FACTION, CMD_NIGHT, CMD_WEATHER, type Command } from '../sim/commands';
 import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
 import { fromFx } from '../sim/fixed';
 import { S_BUILDING, generateMap } from '../sim/map';
@@ -117,6 +117,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
             ? assaultCommands(world.map, msg.units)
             : skirmishCommands(world.map, msg.versus ? 2 : (msg.armies ?? 2));
     if (msg.night) pending.unshift({ type: CMD_NIGHT, on: true });
+    if (msg.weather) pending.unshift({ type: CMD_WEATHER, weather: msg.weather });
     (msg.factions ?? []).forEach((faction, team) => {
       if (faction > 0) pending.unshift({ type: CMD_FACTION, team, faction });
     });

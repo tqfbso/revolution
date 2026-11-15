@@ -2,6 +2,7 @@
 // poles, lamps, sheds. Instanced, one batch per kind and per 128 m square so that what is
 // off screen is culled. Cosmetic only: units walk through them, and they are taken away
 // where something is built.
+import { weathered } from './weather';
 import * as THREE from 'three/webgpu';
 import { attribute, hash, instanceIndex, smoothstep, uv, vec3 } from 'three/tsl';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -226,7 +227,7 @@ export class Clutter {
     const geometry = shapes();
     const material = new THREE.MeshLambertNodeMaterial();
     const vary = hash(instanceIndex).mul(0.36).add(0.82);
-    material.colorNode = attribute('color', 'vec3').mul(vary).mul(fog.shade());
+    material.colorNode = weathered(attribute('color', 'vec3').mul(vary)).mul(fog.shade());
     // Sort the props by square and kind.
     const lists = new Map<number, Prop[]>();
     for (const p of land.props) {

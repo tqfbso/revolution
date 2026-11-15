@@ -356,7 +356,8 @@ Each item rides with the work it belongs to, in this order:
   the graphics card or the CPU posing units (the stats overlay already splits CPU time).
   Then: a pixel budget per graphics level, the shadow map redrawn every second frame
   below `high`, and a step down in graphics level when render scale alone is not enough
-- R4 Light and weather presets (medium, Sonnet 5.5). After U3, so the city is lit on
+- R4 Weather. BUILT 2026-11-15 as rain, fog and snow that also shorten sight (decision
+  125); low sun and light shafts are not built. The plan was: Light and weather presets (medium, Sonnet 5.5). After U3, so the city is lit on
   purpose. Low sun, overcast and rain as chosen looks, with fog that takes its colour
   from the sun. Analytic fog on every level; light shafts marched through the shadow map
   on `high` only. Render-only: weather that changes sight or movement would be a sim

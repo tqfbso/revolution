@@ -2565,3 +2565,34 @@ and by vehicle, four headquarters, determinism.
 
 **Not done.** People against people in a free-for-all: the lobby and Versus know red and
 blue only. Factions for gold and green follow blue's in turn and cannot be picked.
+
+## 125. Weather: rain, fog and snow, and they shorten sight (R4, 2026-11-15)
+
+`?weather=rain|fog|snow` (Menu: Weather), chosen when the game starts like the time of
+day, and sent to co-op and versus guests with the other settings.
+
+**In the sim** (the roadmap had R4 as render-only; this goes one step further because
+fog you can see through is decoration). `CMD_WEATHER` on the first tick sets
+`w.weather`; everyone then sees a percentage as far as on a clear day: rain 85, snow 80,
+fog 55 (`WEATHER_SIGHT_PCT`). It multiplies with the night's 60%. Scouts and recon drones
+see through the dark but not through the weather. Nothing else changes: no slower
+movement, no grounded aircraft. A clear game hashes as it always did.
+
+**On screen** (`src/client/weather.ts`), all decided when the materials are built, so a
+clear day costs nothing:
+
+- Sky, haze and light per weather: a grey lid, a weak sun with soft shadows, more light
+  from the sky. Fog brings the haze in to 50 to 760 units.
+- Snow lies on what faces the sky (ground, roofs, tree crowns), in drifts from two scales
+  of noise, thin on streets and where wheels have worn the ground.
+- Rain darkens everything a fifth and makes the ground shine.
+- The rain and the snow themselves: 2,600 streaks or 2,000 flakes (fewer on `low`, more
+  on `high`) in a box that follows the camera, each wrapped to the other side when it
+  leaves. One draw call, no allocation.
+- No dust trails in rain or snow. The fog of war lifts as far as the sim says units see.
+
+Checked in a headless browser on the city and the ridge map: see the screenshots of the
+run. Frame cost on a real card is Fabio's to measure; the levers are the particle counts.
+
+Not done: sound of rain and wind, low sun, light shafts, weather that changes during a
+battle, any effect on movement.

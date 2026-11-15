@@ -1,3 +1,4 @@
+import { weathered } from './weather';
 import { ME } from './me';
 import * as THREE from 'three/webgpu';
 import {
@@ -1626,7 +1627,9 @@ export class StructureView {
         new URLSearchParams(location.search).get('city') === 'plain';
       const wall = plain ? masonry(look, 7) : cityFace(look, attribute('surf', 'float'));
       const gloss = attribute('gloss', 'float');
-      this.material.colorNode = painted(tint.mul(mix(wall.tone, float(1), gloss))).mul(fog.shade());
+      this.material.colorNode = weathered(painted(tint.mul(mix(wall.tone, float(1), gloss)))).mul(
+        fog.shade(),
+      );
       this.material.roughnessNode = mix(wall.roughness, float(0.3), gloss);
       this.material.normalNode = wall.normal;
       if (look.night) {
@@ -1640,7 +1643,7 @@ export class StructureView {
         );
         this.material.emissiveNode = warm.mul(lit).mul(1.5).mul(fog.shade());
       }
-    } else this.material.colorNode = painted(tint).mul(fog.shade());
+    } else this.material.colorNode = weathered(painted(tint)).mul(fog.shade());
     const ui = new THREE.MeshBasicNodeMaterial();
     ui.colorNode = attribute('aTint', 'vec4').xyz;
     this.pips = new Batch(new THREE.BoxGeometry(0.62, 0.14, 0.62), ui, MAX_STRUCTS * 10 + 64);
