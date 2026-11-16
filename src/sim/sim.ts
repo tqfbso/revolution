@@ -99,6 +99,7 @@ import {
   newField,
 } from './path';
 import { nextInt } from './rng';
+import { validCommand } from './guard';
 import {
   ACQUIRE_RANGE,
   AIR_HEIGHT,
@@ -410,7 +411,17 @@ const CHASE_LIMIT = 300;
 /** Advance the world by exactly one tick, applying `commands` first, in order. */
 export function step(w: World, commands: readonly Command[]): void {
   w.map.now = w.tick;
-  for (let c = 0; c < commands.length; c++) applyCommand(w, commands[c]);
+  for (let c = 0; c < commands.length; c++) {
+    // A malformed order is skipped, alike on every machine (src/sim/guard.ts). One that
+    // still throws half way is given up the same way everywhere, so the clock never stops.
+    const cmd = commands[c];
+    if (!validCommand(cmd)) continue;
+    try {
+      applyCommand(w, cmd);
+    } catch (e) {
+      console.warn('order skipped:', e);
+    }
+  }
   updateRoutes(w);
   updateWander(w);
   bucket(w, CELL_SHIFT, GRID_DIM, cellStart, sorted);

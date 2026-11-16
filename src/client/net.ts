@@ -17,7 +17,10 @@
 import type { Command } from '../sim/commands';
 import type { Frame, NetReport } from '../worker/protocol';
 import { MAP_LABEL } from './menu';
-import { GameLog, expand, type Piece } from './replay';
+import { GameLog, expand } from './replay';
+import { MAX_PLAYERS, esc, parseMsg, word, type Config, type Msg } from './wire';
+
+export { MAX_PLAYERS };
 
 declare const __BUILD__: string;
 
@@ -28,8 +31,6 @@ export const DUTIES = ['Everything', 'Armour', 'Infantry', 'Air and drones', 'Ec
 /** The kinds of unit each role looks after (KIND_* numbers), by index into DUTIES. */
 const DUTY_KINDS: number[][] = [[], [0, 3, 4, 8, 9], [1, 2, 5, 11], [6, 7, 12, 13, 14], [10]];
 
-/** The most players in one game, the host included. */
-export const MAX_PLAYERS = 4;
 /** The two armies of a versus game, as the lobby names them. */
 export const SIDES = ['Red', 'Blue'] as const;
 
@@ -40,67 +41,6 @@ export function dutyOf(mine: number, theirs: number[], kinds: number): number[] 
   for (const k of DUTY_KINDS[mine] ?? []) out[k] = 1;
   return out;
 }
-
-interface Config {
-  seed: number;
-  map: string;
-  ai: string;
-  /** 'night' for a night battle. */
-  time?: string;
-  /** The factions of red and of blue (`?army=`, `?foe=`). */
-  army?: string;
-  foe?: string;
-  /** 'rain', 'fog' or 'snow'. */
-  weather?: string;
-  /** '3' or '4' for a free-for-all against that many armies less one. */
-  armies?: string;
-  /** Players in the game: the computer is given more to fight three or four with. */
-  humans: number;
-  /** Versus (decision 114): the players fight each other, no computer. */
-  versus?: boolean;
-}
-
-type Msg =
-  | { t: 'hello'; build: string; duty: number }
-  /** Guest, in the lobby: I have changed my role. */
-  | { t: 'duty'; duty: number }
-  /** Guest, in the lobby of a versus game: I have changed sides. */
-  | { t: 'side'; side: number }
-  /**
-   * Host, in the lobby: you are in, with this many players so far. In a versus game also
-   * every player's side by seat, and which seat is yours.
-   */
-  | { t: 'wait'; n: number; versus?: boolean; sides?: number[]; you?: number }
-  /**
-   * Host: the game starts. Every player's role by seat (0 = the host), your seat, and in
-   * a versus game the army each seat plays (all 0 otherwise).
-   */
-  | {
-      t: 'cfg';
-      cfg: Config;
-      duties: number[];
-      you: number;
-      resume?: boolean;
-      teams?: number[];
-    }
-  /** Host, to a player coming back: a stretch of the game so far (see replay.ts). */
-  | ({ t: 'r' } & Piece)
-  /** Host: the seat is taken again, by a player with this role. */
-  | { t: 'back'; seat: number; duty: number }
-  | { t: 'busy' }
-  | { t: 'full' }
-  /** Host: the player in this seat has left. */
-  | { t: 'gone'; seat: number }
-  | { t: 'bad'; build: string }
-  | { t: 'f'; f: Frame[] }
-  | { t: 'c'; c: Command }
-  | { t: 'h'; k: number; v: number }
-  | { t: 'ctl'; pause?: boolean; speed?: number }
-  | { t: 'st'; paused: boolean; speed: number }
-  | { t: 'p'; ts: number; behind?: number }
-  | { t: 'q'; ts: number }
-  | { t: 'cam'; x: number; z: number; from?: number }
-  | { t: 'mark'; x: number; z: number; from?: number };
 
 /** One connection to the other player, whatever carries it. */
 interface Link {
@@ -143,7 +83,10 @@ function localLink(id: string): Link {
   ch.onmessage = (e: MessageEvent<LocalPacket>) => {
     if (e.data.from !== 'host' || e.data.gid !== gid) return;
     if (e.data.bye) link.onClose();
-    else if (e.data.m) link.onMessage(e.data.m);
+    else {
+      const m = parseMsg(e.data.m);
+      if (m) link.onMessage(m);
+    }
   };
   window.addEventListener('pagehide', () =>
     ch.postMessage({ from: 'guest', gid, bye: true } satisfies LocalPacket),
@@ -164,8 +107,9 @@ function localListen(id: string): Listener {
       links.delete(gid);
       return;
     }
-    if (!e.data.m) return;
-    if (e.data.m.t === 'hello') {
+    const m = parseMsg(e.data.m);
+    if (!m) return;
+    if (m.t === 'hello') {
       links.get(gid)?.onClose();
       const link: Link = {
         send: (m) => ch.postMessage({ from: 'host', gid, m } satisfies LocalPacket),
@@ -176,7 +120,7 @@ function localListen(id: string): Listener {
       links.set(gid, link);
       listener.onLink(link);
     }
-    links.get(gid)?.onMessage(e.data.m);
+    links.get(gid)?.onMessage(m);
   };
   window.addEventListener('pagehide', () => {
     for (const gid of links.keys())
@@ -212,7 +156,11 @@ function peerLink(conn: PeerConn): Link {
     closed = true;
     link.onClose();
   };
-  conn.on('data', (d) => link.onMessage(d as Msg));
+  conn.on('data', (d) => {
+    // Whatever the other browser sends is checked before anything reads it (wire.ts).
+    const m = parseMsg(d);
+    if (m) link.onMessage(m);
+  });
   conn.on('close', shut);
   conn.on('error', shut);
   return link;
@@ -315,6 +263,9 @@ function watchSide(onPick: (side: number) => void): void {
   sel?.addEventListener('change', () => onPick(Number(sel.value) === 1 ? 1 : 0));
 }
 
+/** The weathers the lobby may name (weather.ts WEATHER_NAMES). */
+const WEATHERS = ['rain', 'fog', 'snow'];
+
 const wait = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 interface Peer {
@@ -328,7 +279,22 @@ interface Peer {
   behind: number;
   /** Until then its silence is forgiven (a player coming back is busy loading the map). */
   grace: number;
+  /** Host: his world was found to differ from ours at this tick, or -1. */
+  desync: number;
+  /** Host: orders from him in the current second, and when that second began. */
+  orders: number;
+  second: number;
+  /** Host, in a versus game: the times he has paused the game. */
+  pauses: number;
 }
+
+/** Host: the most orders a player may give in one second; the rest are dropped. */
+const ORDERS_PER_SECOND = 60;
+/** Host, in a versus game: how often each other player may pause it. */
+const VERSUS_PAUSES = 3;
+/** What the host takes from a guest, and a guest from the host. Anything else is dropped. */
+const FROM_GUEST = new Set(['c', 'h', 'ctl', 'p', 'q', 'cam', 'mark']);
+const FROM_HOST = new Set(['f', 'r', 'back', 'gone', 'h', 'st', 'p', 'q', 'cam', 'mark']);
 
 /** The co-op session once the players are in. Seat 0 is the host, guests sit in 1 to 3. */
 export class Coop {
@@ -346,7 +312,8 @@ export class Coop {
   readonly partners: { x: number; z: number; at: number }[] = [];
   /** Set by the game. */
   onFrames: (frames: Frame[]) => void = () => {};
-  onCommand: (c: Command) => void = () => {};
+  /** Host: an order from the player in `seat`, still to be checked against his army. */
+  onCommand: (c: Command, seat: number) => void = () => {};
   onControl: (pause: boolean | undefined, speed: number | undefined) => void = () => {};
   onState: (paused: boolean, speed: number) => void = () => {};
   onMark: (x: number, z: number, from: number) => void = () => {};
@@ -463,6 +430,10 @@ export class Coop {
       ping: 0,
       behind: 0,
       grace: 0,
+      desync: -1,
+      orders: 0,
+      second: 0,
+      pauses: 0,
     });
     link.onMessage = (m) => this.receive(seat, m);
     link.onClose = () => this.drop(seat, 'closed');
@@ -478,7 +449,7 @@ export class Coop {
     for (let k = 1; k < this.humans && seat < 0; k++) {
       if (!this.present.has(k) && !this.joining.has(k)) seat = k;
     }
-    if (seat < 0 || !this.cfg || this.desyncAt >= 0) {
+    if (seat < 0 || !this.cfg) {
       link.send({ t: 'full' });
       return;
     }
@@ -590,6 +561,8 @@ export class Coop {
     const p = this.peers.get(seat);
     if (!p) return;
     p.heard = performance.now();
+    // Only the host runs the clock and says who comes and goes; only guests send orders in.
+    if (!(this.role === 'host' ? FROM_GUEST : FROM_HOST).has(m.t)) return;
     if (m.t === 'f' || m.t === 'r') {
       const frames = m.t === 'f' ? m.f : expand(m);
       if (this.started) this.onFrames(frames);
@@ -598,10 +571,20 @@ export class Coop {
       this.present.add(m.seat);
       this.duties[m.seat] = m.duty;
       this.say(`Player ${m.seat + 1} is back in the game.`);
-    } else if (m.t === 'c') this.onCommand(m.c);
-    else if (m.t === 'h') this.theirs(p, m.k, m.v);
-    else if (m.t === 'ctl') this.onControl(m.pause, m.speed);
-    else if (m.t === 'st') this.onState(m.paused, m.speed);
+    } else if (m.t === 'c') {
+      const now = performance.now();
+      if (now - p.second > 1000) {
+        p.second = now;
+        p.orders = 0;
+      }
+      if (++p.orders <= ORDERS_PER_SECOND) this.onCommand(m.c, seat);
+    } else if (m.t === 'h') this.theirs(seat, p, m.k, m.v);
+    else if (m.t === 'ctl') {
+      // In a versus game a player may stop the clock on his opponent only a few times.
+      if (this.versus && m.pause === true && ++p.pauses > VERSUS_PAUSES) {
+        this.onControl(undefined, m.speed);
+      } else this.onControl(m.pause, m.speed);
+    } else if (m.t === 'st') this.onState(m.paused, m.speed);
     else if (m.t === 'p') {
       p.behind = m.behind ?? 0;
       p.link.send({ t: 'q', ts: m.ts });
@@ -612,7 +595,7 @@ export class Coop {
     } else if (m.t === 'cam' || m.t === 'mark') {
       // The host passes these on, saying whose they are.
       const from = this.role === 'host' ? seat : (m.from ?? 0);
-      if (this.role === 'host') this.send({ ...m, from }, seat);
+      if (this.role === 'host') this.send({ t: m.t, x: m.x, z: m.z, from }, seat);
       // Where the other side looks and what it points at is its own business.
       if (this.teams[from] !== this.team) return;
       if (m.t === 'mark') this.onMark(m.x, m.z, from);
@@ -626,11 +609,23 @@ export class Coop {
     }
   }
 
-  private differ(tick: number, a: number, b: number): void {
+  /**
+   * Our world and the one in `seat` differ. For a guest the game is broken. The host's world
+   * is the game itself, so for the host only that player is out of step (and a player who
+   * claims to be cannot spoil the game for the rest): he can reload and come back in.
+   */
+  private differ(seat: number, tick: number, a: number, b: number): void {
     this.checked++;
-    if (a === b || this.desyncAt >= 0) return;
-    this.desyncAt = tick;
-    console.error(`co-op out of sync at tick ${tick}: ${a >>> 0} vs ${b >>> 0}`);
+    if (a === b) return;
+    if (this.role === 'host') {
+      const p = this.peers.get(seat);
+      if (!p || p.desync >= 0) return;
+      p.desync = tick;
+    } else {
+      if (this.desyncAt >= 0) return;
+      this.desyncAt = tick;
+    }
+    console.error(`co-op out of sync with seat ${seat} at tick ${tick}: ${a >>> 0} vs ${b >>> 0}`);
     this.paint();
   }
 
@@ -639,18 +634,18 @@ export class Coop {
     this.mine.set(tick, hash);
     // Never let the books grow: an entry nobody answers is dropped.
     if (this.mine.size > 64) this.mine.delete(this.mine.keys().next().value as number);
-    for (const p of this.peers.values()) {
+    for (const [seat, p] of this.peers) {
       const seen = p.ahead.get(tick);
       if (seen === undefined) continue;
       p.ahead.delete(tick);
-      this.differ(tick, seen, hash);
+      this.differ(seat, tick, seen, hash);
     }
   }
 
-  private theirs(p: Peer, tick: number, hash: number): void {
+  private theirs(seat: number, p: Peer, tick: number, hash: number): void {
     const seen = this.mine.get(tick);
     if (seen !== undefined) {
-      this.differ(tick, seen, hash);
+      this.differ(seat, tick, seen, hash);
       return;
     }
     p.ahead.set(tick, hash);
@@ -714,21 +709,23 @@ export class Coop {
   private paint(): void {
     let html: string;
     if (this.desyncAt >= 0) {
-      html = `<span style="color:#ff8a70">CO-OP OUT OF SYNC since ${(this.desyncAt / 20).toFixed(0)} s: the screens no longer show the same battle. Start a new co-op game.</span>`;
+      html = `<span style="color:#ff8a70">CO-OP OUT OF SYNC since ${(this.desyncAt / 20).toFixed(0)} s: your screen no longer shows the host's battle. Reload the page to rejoin it.</span>`;
     } else if (!this.live) {
       html = '';
     } else {
       let lag = this.behind > 8 ? ` · catching up ${this.behind}` : '';
       // The host's clock never waits for a slow player; it says who is running late.
       for (const [seat, p] of this.peers) {
-        if (this.role === 'host' && p.behind > 40)
-          lag += ` · P${seat + 1} is ${(p.behind / 20).toFixed(0)} s behind`;
+        if (this.role !== 'host') continue;
+        if (p.desync >= 0)
+          lag += ` · <span style="color:#ff8a70">P${seat + 1} is out of sync (a reload brings him back)</span>`;
+        else if (p.behind > 40) lag += ` · P${seat + 1} is ${(p.behind / 20).toFixed(0)} s behind`;
       }
       let duties = '';
       if (this.duties.some((d) => d > 0)) {
         for (const seat of [...this.present].sort()) {
           if (this.teams[seat] !== this.team) continue;
-          duties += ` · ${seat === this.seat ? 'you' : `P${seat + 1}`}: ${DUTIES[this.duties[seat]]}`;
+          duties += ` · ${seat === this.seat ? 'you' : `P${seat + 1}`}: ${DUTIES[this.duties[seat]] ?? DUTIES[0]}`;
         }
       }
       const count = this.present.size > 2 ? ` · ${this.present.size} players` : '';
@@ -761,7 +758,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
   const ui = overlay();
   let duty = readDuty();
   const home = `${location.origin}${location.pathname}`;
-  const alone = `<p class="small"><a href="${home}">Back to the main menu</a></p>`;
+  const alone = `<p class="small"><a href="${esc(home)}">Back to the main menu</a></p>`;
 
   if (hosting) {
     let id = '';
@@ -785,7 +782,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           ui.set(
             page(
               'Co-op with friends',
-              `<p>Could not reach the meeting point (the public PeerJS broker): ${String((e as Error).message ?? type ?? e)}.</p><p>Check the connection and reload the page to try again.</p>${alone}`,
+              `<p>Could not reach the meeting point (the public PeerJS broker): ${esc((e as Error).message ?? type ?? e)}.</p><p>Check the connection and reload the page to try again.</p>${alone}`,
             ),
           );
           return new Promise<never>(() => {});
@@ -802,9 +799,9 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
     const battle =
       `${MAP_LABEL[(Number(params.get('armies') ?? 2) | 0) > 2 ? 'four' : (params.get('map') ?? 'city')] ?? 'City'} · ` +
       `${params.get('time') === 'night' ? 'night' : 'day'}` +
-      `${params.get('weather') ? ` · ${params.get('weather')}` : ''}`;
+      `${WEATHERS.includes(params.get('weather') ?? '') ? ` · ${params.get('weather')}` : ''}`;
     ui.set(
-      `<div class="top"><h1>Invite your team</h1><span>${battle}</span></div>` +
+      `<div class="top"><h1>Invite your team</h1><span>${esc(battle)}</span></div>` +
         `<div class="cols2"><div class="col">` +
         `<label class="opt"><span>Game</span><select id="coop-mode"><option value="coop">Together against the computer</option><option value="versus">Versus: players against players</option></select></label>` +
         `<div id="coop-side-box"></div>` +
@@ -813,7 +810,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         `</div><div class="col" style="gap:10px">` +
         `<span class="label" id="coop-count">Players</span>` +
         `<div id="coop-roster" class="col" style="gap:10px"></div>` +
-        `<div class="linkrow"><input id="coop-link" readonly value="${invite}" aria-label="Invitation link" /><button id="coop-copy" class="ghost">Copy link</button></div>` +
+        `<div class="linkrow"><input id="coop-link" readonly value="${esc(invite)}" aria-label="Invitation link" /><button id="coop-copy" class="ghost">Copy link</button></div>` +
         `<p class="small">Send this link to everyone you want to play with (up to ${MAX_PLAYERS - 1} others; the same link for all). When they are all listed, press Start. <span id="coop-copied" style="color:var(--good)"></span></p>` +
         `</div></div>` +
         `<div class="bar"><button id="coop-start" class="go" disabled>Start the game</button></div>`,
@@ -845,7 +842,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         if (el) {
           const tag = (k: number) => (versus ? ` · ${sideTag(all[k])}` : '');
           const seat = (name: string, d: number, k: number) =>
-            `<div class="seat"><i></i><b>${name}</b><span>${DUTIES[d]}${tag(k)}</span></div>`;
+            `<div class="seat"><i></i><b>${name}</b><span>${DUTIES[d] ?? DUTIES[0]}${tag(k)}</span></div>`;
           el.innerHTML =
             seat('You (host)', duty, 0) +
             guests.map((g, k) => seat(`Player ${k + 2}`, g.duty, k + 1)).join('') +
@@ -927,15 +924,16 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       };
       startBtn.addEventListener('click', () => {
         if (guests.length === 0) return;
+        // Passed on as plain words only: each player's game reads them again for itself.
         const cfg: Config = {
           seed: Number(params.get('seed') ?? 1) | 0,
-          map: params.get('map') ?? 'city',
-          ai: params.get('ai') ?? '',
-          time: params.get('time') ?? '',
-          army: params.get('army') ?? '',
-          foe: params.get('foe') ?? '',
-          weather: params.get('weather') ?? '',
-          armies: versus ? '' : (params.get('armies') ?? ''),
+          map: word(params.get('map')) || 'city',
+          ai: word(params.get('ai')),
+          time: word(params.get('time')),
+          army: word(params.get('army')),
+          foe: word(params.get('foe')),
+          weather: word(params.get('weather')),
+          armies: versus ? '' : word(params.get('armies')),
           humans: guests.length + 1,
           versus,
         };
@@ -1048,7 +1046,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       ui.set(
         page(
           'Joining a battle',
-          `<p>You and the host are on different versions of the game (yours: ${__BUILD__}, the host's: ${answer.build}). Both of you: reload the page with Cmd+Shift+R (Ctrl+Shift+R on Windows), then the host sends a new link.</p>${alone}`,
+          `<p>You and the host are on different versions of the game (yours: ${esc(__BUILD__)}, the host's: ${esc(answer.build)}). Both of you: reload the page with Cmd+Shift+R (Ctrl+Shift+R on Windows), then the host sends a new link.</p>${alone}`,
         ),
       );
       return new Promise<never>(() => {});

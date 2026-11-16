@@ -59,7 +59,9 @@ export class GameLog {
 export function expand(p: Piece): Frame[] {
   const out: Frame[] = [];
   let k = 0;
-  for (let t = p.from; t < p.to; t++) {
+  // Never more than one piece's worth, whatever the host says (security review, finding 4).
+  const to = Math.min(p.to, p.from + PIECE_TICKS);
+  for (let t = p.from; t < to; t++) {
     if (k < p.f.length && p.f[k][0] === t) out.push(p.f[k++]);
     else out.push([t, []]);
   }
