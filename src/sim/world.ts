@@ -460,6 +460,14 @@ export interface World {
   stats: Int32Array;
   /** Per unit: the player of a shared army who last gave it an order himself, or NO_SEAT. */
   seat: Uint8Array;
+  /**
+   * Per unit: the tick it came into the world on. Ids are used again after a death; this is
+   * how an order tells the unit a player meant from one that has taken its number since
+   * (`admit` in guard.ts). Follows from the rest of the world, so it is not in the hash.
+   */
+  born: Int32Array;
+  /** Orders refused or cut down by the ownership check so far (not in the hash). */
+  refused: number;
   danger: Int32Array;
   civField: Uint16Array | null;
   civFieldAt: number;
@@ -622,6 +630,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     civEscaped: 0,
     stats: new Int32Array(STATS),
     seat: new Uint8Array(MAX_UNITS).fill(NO_SEAT),
+    born: new Int32Array(MAX_UNITS),
+    refused: 0,
     danger: new Int32Array(DANGER_DIM * DANGER_DIM),
     civField: null,
     civFieldAt: 0,

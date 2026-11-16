@@ -18,12 +18,18 @@ import {
   vec3,
 } from 'three/tsl';
 import { Batch } from './batch';
-import { WEATHER_CLEAR, WEATHER_FOG, WEATHER_RAIN, WEATHER_SNOW } from '../sim/units';
+import {
+  WEATHER_CLEAR,
+  WEATHER_FOG,
+  WEATHER_NAMES,
+  WEATHER_RAIN,
+  WEATHER_SNOW,
+} from '../sim/units';
 
 type V3 = THREE.Node<'vec3'>;
 type F = THREE.Node<'float'>;
 
-export const WEATHER_NAMES = ['clear', 'rain', 'fog', 'snow'] as const;
+export { WEATHER_NAMES };
 
 let now = WEATHER_CLEAR;
 let noise: THREE.Texture | null = null;

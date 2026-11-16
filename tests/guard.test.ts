@@ -13,6 +13,7 @@ import { generateMap } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import { authorize, validCommand } from '../src/sim/guard';
+import { defaultMatch, type Match } from '../src/sim/match';
 import { STATE_ALIVE, createWorld, hashWorld } from '../src/sim/world';
 import { PIECE_TICKS, expand } from '../src/client/replay';
 import { esc, parseMsg } from '../src/client/wire';
@@ -95,12 +96,13 @@ describe('an order from another player', () => {
     expect(authorize(w, { type: CMD_STOP, units: blue }, 0, 1)).toBeNull();
   });
 
-  it('keeps only his own units, and is signed with his seat', () => {
+  it('keeps only his own units, and is signed with his seat and his army', () => {
     const w = skirmish();
     const red = unitsOf(w, 0).slice(0, 3);
     const blue = unitsOf(w, 1).slice(0, 3);
-    const out = authorize(w, { type: CMD_STOP, units: [...red, ...blue, -1, 1e9], by: 3 }, 0, 2);
-    expect(out).toEqual({ type: CMD_STOP, units: red, by: 2 });
+    // What he says of himself (seat 3, army 1) counts for nothing.
+    const said = { type: CMD_STOP, units: [...red, ...blue, -1, 1e9], by: 3, army: 1 };
+    expect(authorize(w, said, 0, 2)).toEqual({ type: CMD_STOP, units: red, by: 2, army: 0 });
   });
 
   it('may not train in an enemy building', () => {
@@ -126,6 +128,18 @@ describe('an order from another player', () => {
   });
 });
 
+/** A game for two against the computer, as a host sends it. */
+function twoPlayers(): Match {
+  return {
+    ...defaultMatch(),
+    weather: 1,
+    players: [
+      { army: 0, duty: 0 },
+      { army: 0, duty: 3 },
+    ],
+  };
+}
+
 describe('the wire', () => {
   it('drops what this game never sends', () => {
     expect(parseMsg(null)).toBeNull();
@@ -138,11 +152,15 @@ describe('the wire', () => {
     expect(
       parseMsg({
         t: 'cfg',
-        cfg: { seed: 1, map: 'city', ai: '<img>', humans: 2 },
-        duties: [0, 0],
+        match: { ...twoPlayers(), map: '<img>' },
         you: 1,
       }),
     ).toBeNull();
+    // A seat nobody sits in, and a player on an army that is not there.
+    expect(parseMsg({ t: 'cfg', match: twoPlayers(), you: 2 })).toBeNull();
+    const stray = twoPlayers();
+    stray.players[1].army = 3;
+    expect(parseMsg({ t: 'cfg', match: stray, you: 1 })).toBeNull();
   });
 
   it('lets through what it does send', () => {
@@ -156,15 +174,7 @@ describe('the wire', () => {
         ],
       }),
     ).not.toBeNull();
-    expect(
-      parseMsg({
-        t: 'cfg',
-        cfg: { seed: 1, map: 'city', ai: 'hard', weather: 'rain', humans: 2, versus: true },
-        duties: [0, 3],
-        you: 1,
-        teams: [0, 1],
-      }),
-    ).not.toBeNull();
+    expect(parseMsg({ t: 'cfg', match: twoPlayers(), you: 1, resume: true })).not.toBeNull();
   });
 
   it('rebuilds positions, so nothing else rides along', () => {

@@ -4,6 +4,7 @@
 // one is asked for, and a battle is asked for by loading the page again with its choices in
 // the address, exactly as the links and the test flags always did.
 import { FACTIONS, factionByName } from '../sim/factions';
+import { MATCH_KEYS, matchFromParams, matchToParams } from './setup';
 import { esc } from './wire';
 
 declare const __BUILD__: string;
@@ -31,21 +32,7 @@ const RELEASES: { version: string; notes: string[] }[] = [
 ];
 
 /** What in the address asks for a battle: any of these and the menu is skipped. */
-const BATTLE_KEYS = [
-  'play',
-  'join',
-  'coop',
-  'scenario',
-  'demo',
-  'units',
-  'map',
-  'ai',
-  'armies',
-  'time',
-  'weather',
-  'army',
-  'foe',
-];
+const BATTLE_KEYS = ['play', 'join', 'coop', ...MATCH_KEYS.filter((k) => k !== 'seed')];
 
 export function wantsMenu(params: URLSearchParams): boolean {
   return !BATTLE_KEYS.some((k) => params.has(k));
@@ -63,14 +50,6 @@ export function toMenu(params: URLSearchParams): void {
   const next = carried(params).toString();
   location.href = `${location.origin}${location.pathname}${next ? `?${next}` : ''}`;
 }
-
-export const MAP_LABEL: Record<string, string> = {
-  city: 'City',
-  euro: 'European city',
-  ridge: 'Ridge',
-  river: 'River',
-  four: 'Four corners',
-};
 
 /** The battle just fought, for the main menu's corner. */
 export interface LastBattle {
@@ -238,15 +217,14 @@ export function openMenu(params: URLSearchParams): void {
 
   const start = (): void => {
     write('revolution.setup', JSON.stringify(setup));
-    const next = carried(params);
-    const armies = mode === 'versus' ? '2' : setup.armies;
-    next.set('map', armies !== '2' ? 'four' : setup.map);
-    if (mode !== 'versus') next.set('ai', setup.ai);
-    if (armies !== '2') next.set('armies', armies);
-    if (setup.time === 'night') next.set('time', 'night');
-    if (setup.weather !== 'clear') next.set('weather', setup.weather);
-    next.set('army', setup.army);
-    next.set('foe', setup.foe);
+    // The choices as a Match (decision 137), written into the address the battle loads
+    // with: the same reading and writing as every link and test flag goes through.
+    const asked = new URLSearchParams({
+      ...setup,
+      armies: mode === 'versus' ? '2' : setup.armies,
+      seed: params.get('seed') ?? '1',
+    });
+    const next = matchToParams(matchFromParams(asked), carried(params));
     if (mode === 'skirmish') next.set('play', '1');
     else {
       next.set('coop', 'host');

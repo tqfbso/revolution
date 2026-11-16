@@ -1,10 +1,5 @@
-import type { AiLevel } from '../sim/ai';
 import type { Command } from '../sim/commands';
-import type { Layout } from '../sim/map';
-
-/** assault: storm a held town. clash: two armies meet head on. roam: stress test. */
-/** skirmish: build a base and beat the AI, which starts with what you start with. */
-export type Scenario = 'skirmish' | 'assault' | 'clash' | 'roam';
+import type { Match } from '../sim/match';
 
 /** Integers per base building in Snapshot.bases. */
 export const BASE_STRIDE = 19;
@@ -57,41 +52,31 @@ export interface NetReport {
 export type ToWorker =
   | {
       type: 'init';
-      seed: number;
-      /** Which battlefield (see generateMap). */
-      layout: Layout;
-      units: number;
-      scenario: Scenario;
-      /** Who plays blue in the skirmish. */
-      ai: AiLevel | 'off';
-      demo: boolean;
+      /** The whole game: map, seed, setting, armies and players (src/sim/match.ts). */
+      match: Match;
+      /** This player's place among `match.players`. */
+      seat: number;
       /** Game speed, 1 = real time. */
       speed: number;
       /** Co-op (client/net.ts): alone, the clock of a shared game, or following one. */
       net?: NetMode;
-      /** Co-op: players sharing the army. The computer is strengthened for three or four. */
-      humans?: number;
-      /** Versus (decision 114): no computer, and commanders for both armies. */
-      versus?: boolean;
-      /** The army this player commands: 0, or 1 for a blue player in a versus game. */
-      team?: number;
-      /** A night battle (CMD_NIGHT on the first tick): short sight, flares, fires that show. */
-      night?: boolean;
-      /** The weather (units.ts WEATHER_*; CMD_WEATHER on the first tick). */
-      weather?: number;
-      /** Armies in the skirmish, 2 to 4: beyond two, each is a computer for itself. */
-      armies?: number;
-      /** The faction of each army (CMD_FACTION on the first tick), 0 or absent for none. */
-      factions?: number[];
+      /** `?control=all`, alone only: this player's orders are not checked against his army. */
+      free?: boolean;
     }
   | {
       type: 'command';
       command: Command;
       /**
-       * Host: the order came from another player's browser, in this seat, commanding this
-       * army. It is checked against that army before it goes in (src/sim/guard.ts).
+       * Host: the order came from another player's browser, in this seat. Absent for this
+       * player's own. Either way the sim signs it with the seat and that seat's army and
+       * checks it against that army before it goes in (src/sim/guard.ts).
        */
-      from?: { seat: number; team: number };
+      from?: number;
+      /**
+       * An order of the game's own (the stress-test button's troops), not a player's: it
+       * goes in unsigned. Taken only in a game alone.
+       */
+      setup?: boolean;
     }
   /** Guest: ticks the host has run, in order. The sim runs these and no others. */
   | { type: 'frames'; frames: Frame[] }

@@ -2858,3 +2858,43 @@ Order: drawing-only work first (deaths, dismount, floors, front line), then the 
 that change how infantry fights (blast in the open, squad gunners), then formations, the
 ground-floor collapse, mortars and rooftops, air strikes, and the guerrilla last, with
 the unique units and authored models. All of it after the review fixes.
+
+## 137. One description of a game, and every order signed with its army (2026-11-16)
+
+The architecture review's findings F1 and F2, fixed together because the second needs the
+first.
+
+**A Match** (`src/sim/match.ts`) is the whole of what is being played: seed, map, scenario,
+night, weather, every army (its faction, and whether players, the computer at a level, or
+nobody runs it) and every player by seat (his army, his role). Before, that was spread over
+some twenty address flags read in `main.ts`, fourteen optional fields of the worker's `init`
+message, four worker globals (`ais`, `staff`, `rival`, `me`) and a two-sided lobby config,
+all of which had to agree by convention. Now the address is read into a Match in one place
+(`src/client/setup.ts`, which also writes one back), the menu and the lobby build one, the
+host sends it whole to the guests (checked on arrival by `validMatch`), and `createGame`
+builds the world, a computer for every army that is the computer's and a staff for every
+army of players. The worker's `init` is the Match and a seat. The third and fourth armies'
+factions can now be named (`?foe2=`, `?foe3=`); unnamed they follow the second's as before.
+
+**Every order carries its sender**: the seat (`by`), the army (`army`) and the tick of the
+picture the player was looking at (`seen`). Nobody says the first two of himself: the sim
+that takes an order in signs it (the player's own alone, the host's in a shared game), and
+the computers' and staffs' orders are signed as they are handed in. **Every sim checks a
+signed order before applying it** (`admit` in `src/sim/guard.ts`): only that army's units,
+carriers and buildings obey, nothing that is the game's own setup is taken, and a unit born
+on or after `seen` is left out, which closes the old hole of an order reaching whatever
+reused a dead unit's number. The host-side check of PR #98 (`authorize`) is now the door
+that signs and calls the same `admit`; there is one ownership rule, not two.
+
+What did not change, and how we know: an unsigned order is the game's own (scenario
+openings, tests) and is applied as before, so every existing test and the golden hashes
+are untouched. The old worker loop is kept word for word in `tests/legacy.ts`, and
+`tests/match.test.ts` plays six kinds of game on both loops, the new one signing and
+checking every order of every player, computer and staff, and compares the worlds hash for
+hash. Nine longer games (up to twelve minutes, all modes) were compared the same way before
+merging: identical. In those games the check never refused a computer's or a staff's order.
+
+Consequences: `?control=all` and the stress-test button send unsigned orders and are taken
+only in a game alone. In a shared game nobody, the host included, can conjure troops or
+order another army. The lobby still offers two sides; the Match and the wire no longer
+assume it, which is what human free-for-all and per-player ownership needed.

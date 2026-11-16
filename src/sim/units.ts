@@ -630,6 +630,8 @@ export const WEATHER_CLEAR = 0;
 export const WEATHER_RAIN = 1;
 export const WEATHER_FOG = 2;
 export const WEATHER_SNOW = 3;
+/** As an address or a menu names them, by WEATHER_*. */
+export const WEATHER_NAMES = ['clear', 'rain', 'fog', 'snow'] as const;
 /** How far everyone sees in each weather, percent of a clear day (and of a clear night). */
 export const WEATHER_SIGHT_PCT = [100, 85, 55, 80];
 /** A flare lights this far round where it bursts, for this long. */

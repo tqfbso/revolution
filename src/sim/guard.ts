@@ -1,15 +1,20 @@
-// The order path's guard (security review, findings 4 and 5).
+// The order path's guard (security review, findings 4 and 5; decision 137).
 //
 // `validCommand` is a shape check every sim runs on every order before it applies it: an
 // order that is not an object of a known type, or whose lists are not lists of numbers,
 // is skipped. Every machine skips it alike, so a bad order can no longer stop the clock of
 // a shared game, nor make the machines differ.
 //
-// `authorize` is what the host asks of an order that came from another player's browser,
-// before it goes into the game: is it his to give? It refuses the orders that only the
-// game's own setup may give, orders for another army, and units, carriers and buildings
-// that are not his army's, and it signs the order with the seat it came from. Orders the
-// host gives himself, and those of the computer, never pass through it.
+// `admit` is the ownership check, and every sim runs it too, on every order that says which
+// army gave it: is it that army's to give? It refuses the orders that only the game's own
+// setup may give, orders for another army, and units, carriers and buildings that are not
+// that army's, or that came into the world after the player last looked. Because it runs
+// inside the sim, on every machine alike, "whose unit is this" has one answer.
+//
+// `authorize` is the door an order from a player comes in by, at the sim that takes it in
+// (his own, or the host's in a shared game): it signs the order with the seat and the army
+// it came from (never the sender's own word for it) and turns it away there and then if
+// `admit` would refuse it.
 import {
   CMD_ASSIGN,
   CMD_ATTACK,
@@ -53,7 +58,7 @@ import {
   CMD_WEATHER,
   type Command,
 } from './commands';
-import type { World } from './world';
+import { MAX_TEAMS, type World } from './world';
 
 /** For each order type: the lists it must carry. */
 const LISTS: Record<number, readonly string[]> = {
@@ -123,6 +128,8 @@ const NUMBERS = [
   'faction',
   'weather',
   'by',
+  'army',
+  'seen',
 ] as const;
 const FLAGS = ['queue', 'smoke', 'flare', 'on', 'wander'] as const;
 
@@ -177,37 +184,79 @@ const MAX_CELLS = 4096;
 const finite = (v: unknown): boolean => v === undefined || Number.isFinite(v);
 
 /**
- * Host: the order `raw` came from the player in `seat`, who commands army `team`. Returns
- * the order as it may go into the game, or null if it may not. Only units (and carriers) of
- * his army are kept; an order left with none is refused.
+ * The order `c` as its army may give it, or null if it may not. An order that names no
+ * army is the game's own and passes as it is. Of a signed one only the units (and carriers)
+ * of its army are kept, and of those only the ones the player can have meant; an order left
+ * with none is refused. Never changes `c`: the same order may be on its way to another sim.
  */
-export function authorize(w: World, raw: unknown, team: number, seat: number): Command | null {
-  if (!validCommand(raw)) return null;
-  const o = raw as unknown as Record<string, unknown>;
-  for (const name of NUMBERS) if (!finite(o[name])) return null;
-  const type = raw.type;
-  if (SETUP.has(type)) return null;
-  if (ARMY.has(type) && o.team !== team) return null;
+export function admit(w: World, c: Command): Command | null {
+  const army = c.army;
+  if (army === undefined) return c;
+  const o = c as unknown as Record<string, unknown>;
+  const refuse = (): null => {
+    w.refused++;
+    return null;
+  };
+  if (!Number.isInteger(army) || army < 0 || army >= MAX_TEAMS) return refuse();
+  const type = c.type;
+  if (SETUP.has(type)) return refuse();
+  if (ARMY.has(type) && o.team !== army) return refuse();
   if (OWN_BUILDING.has(type)) {
     const s = o.structure as number;
-    if (!Number.isInteger(s) || s < 0 || s >= w.map.structCount || w.sTeam[s] !== team) {
-      return null;
+    if (!Number.isInteger(s) || s < 0 || s >= w.map.structCount || w.sTeam[s] !== army) {
+      return refuse();
     }
-  }
-  const out = { ...o } as Record<string, unknown>;
-  for (const name of ['units', 'carriers'] as const) {
-    if (!(name in o)) continue;
-    const ids = (o[name] as number[]).filter(
-      (id) => Number.isInteger(id) && id >= 0 && id < w.count && w.team[id] === team,
-    );
-    if (ids.length === 0) return null;
-    out[name] = ids;
   }
   if ('cells' in o) {
     const cells = o.cells as number[];
-    if (cells.length > MAX_CELLS || !cells.every(Number.isInteger)) return null;
+    if (cells.length > MAX_CELLS || !cells.every(Number.isInteger)) return refuse();
   }
-  // Who gave it is not his to say: it is the seat the order came from.
-  out.by = seat;
+  const seen = Number.isInteger(c.seen) ? (c.seen as number) : -1;
+  const his = (id: number): boolean =>
+    Number.isInteger(id) &&
+    id >= 0 &&
+    id < w.count &&
+    w.team[id] === army &&
+    (seen < 0 || w.born[id] < seen);
+  let out: Record<string, unknown> | null = null;
+  for (const name of ['units', 'carriers'] as const) {
+    if (!(name in o)) continue;
+    const ids = o[name] as number[];
+    let ok = 0;
+    for (let k = 0; k < ids.length; k++) if (his(ids[k])) ok++;
+    if (ok === 0) return refuse();
+    if (ok === ids.length) continue;
+    out ??= { ...o };
+    out[name] = ids.filter(his);
+  }
+  if (out === null) return c;
+  w.refused++;
   return out as unknown as Command;
+}
+
+/**
+ * The order `raw` came from the player in `seat`, who commands `army`, looking at the
+ * picture of tick `seen` (his own word, and only ever used to leave units out). Returns the
+ * order signed, as it may go into the game, or null if it may not.
+ */
+export function authorize(
+  w: World,
+  raw: unknown,
+  army: number,
+  seat: number,
+  seen?: number,
+): Command | null {
+  if (!validCommand(raw)) return null;
+  const o = raw as unknown as Record<string, unknown>;
+  for (const name of NUMBERS) if (!finite(o[name])) return null;
+  // Who gave it is not his to say: it is the seat, and the army, the order came from.
+  const signed = { ...o, by: seat, army } as Record<string, unknown>;
+  const at = seen ?? o.seen;
+  if (Number.isInteger(at) && (at as number) >= 0) signed.seen = at;
+  else delete signed.seen;
+  const refused = w.refused;
+  const out = admit(w, signed as unknown as Command);
+  // Turned away at the door: it never went into the game, so it is not counted in it.
+  w.refused = refused;
+  return out;
 }
