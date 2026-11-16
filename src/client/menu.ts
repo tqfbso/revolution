@@ -7,6 +7,28 @@ import { FACTIONS, factionByName } from '../sim/factions';
 
 declare const __BUILD__: string;
 
+/** The version this build is, shown on the main menu. Bump it with each milestone. */
+export const VERSION = '1.0';
+
+/** What's new, newest first: one short entry per milestone, in plain words. */
+const RELEASES: { version: string; notes: string[] }[] = [
+  {
+    version: '1.0',
+    notes: [
+      'Menus: a main menu, a New battle screen for the map, armies, time, weather and opponent, plus settings and how to play.',
+      'A glass battle screen with a commander board: every commander and its orders in one list.',
+      'Co-op with friends: two to four of you command one army against the computer, with one link for everyone.',
+      'Versus: red against blue, with up to two players a side and no computer.',
+      'Night battles, rain, fog and snow. At night gunfire and flares light the ground.',
+      'Free-for-all: three or four armies on the four corners map, each fighting for itself.',
+      'A European city map: a cathedral square, a station, a park and a motorway round it.',
+      'Helicopters and paratroopers: trucks build a helipad for the helicopters, a barracks holds the paratroopers, and J drops them.',
+      'Way points: Shift and right click queue the next place, and trucks build a list of buildings in order.',
+      'See-through buildings (Y), close up, so you can see the street you are looking at.',
+    ],
+  },
+];
+
 /** What in the address asks for a battle: any of these and the menu is skipped. */
 const BATTLE_KEYS = [
   'play',
@@ -210,7 +232,7 @@ export function openMenu(params: URLSearchParams): void {
   } catch {
     // the defaults, then
   }
-  let view: 'home' | 'setup' | 'settings' | 'howto' = 'home';
+  let view: 'home' | 'setup' | 'settings' | 'howto' | 'news' = 'home';
   let mode: Mode = 'skirmish';
 
   const start = (): void => {
@@ -256,7 +278,8 @@ export function openMenu(params: URLSearchParams): void {
       `<button data-go="versus">Versus</button>` +
       `<button data-go="settings">Settings</button>` +
       `<button data-go="howto">How to play</button>` +
-      `</nav><div class="corner">build ${__BUILD__}</div>${last}`
+      `<button data-go="news">What's new</button>` +
+      `</nav><div class="corner">version ${VERSION} · build ${__BUILD__}</div>${last}`
     );
   };
 
@@ -330,6 +353,17 @@ export function openMenu(params: URLSearchParams): void {
     );
   };
 
+  const news = (): string => {
+    const releases = RELEASES.map(
+      (r) =>
+        `<h2>Version ${r.version}</h2><ul>` + r.notes.map((n) => `<li>${n}</li>`).join('') + `</ul>`,
+    ).join('');
+    return (
+      `<div class="top"><h1>What's new</h1><span>Esc to go back</span></div>` +
+      `<div class="text">${releases}</div><div class="bar"><button data-go="home">Back</button></div>`
+    );
+  };
+
   const render = (): void => {
     root.className = `screen${view === 'home' ? ' home' : ''}`;
     root.innerHTML =
@@ -339,7 +373,9 @@ export function openMenu(params: URLSearchParams): void {
           ? battle()
           : view === 'settings'
             ? settings()
-            : howto();
+            : view === 'news'
+              ? news()
+              : howto();
     root.scrollTop = 0;
     root.querySelector<HTMLElement>('[autofocus]')?.focus();
   };
@@ -357,7 +393,7 @@ export function openMenu(params: URLSearchParams): void {
     if (go === 'skirmish' || go === 'coop' || go === 'versus') {
       mode = go;
       view = 'setup';
-    } else if (go === 'home' || go === 'settings' || go === 'howto') view = go;
+    } else if (go === 'home' || go === 'settings' || go === 'howto' || go === 'news') view = go;
     else if (set === 'quality') {
       write('revolution.quality', v);
       // The address would overrule the choice.
