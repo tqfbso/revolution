@@ -33,6 +33,8 @@ import {
   FACE_WEST,
   STAGE_DAMAGED,
   STAGE_GUTTED,
+  DAMAGED_PCT,
+  GUTTED_PCT,
   SITE_SUPPLIES,
   S_BASE,
   S_BRIDGE,
@@ -606,6 +608,7 @@ export function buildingParts(
   breached: number,
   cls: number,
   fort: boolean,
+  level = 0,
 ): Part[] {
   const damaged = stage >= STAGE_DAMAGED;
   const parts: Part[] = [];
@@ -1341,7 +1344,153 @@ export function buildingParts(
         color: SOOT,
       });
   }
-  return parts;
+  return level > 0 ? breakTop(parts, id, cx, cz, w, d, base, floors, level, wall, wsurf) : parts;
+}
+
+/**
+ * How far a shot-up building has burnt down from the top (I1): 0 none, 1 the roof is off,
+ * then a storey more for each step, all within the health the sim calls damaged, so it
+ * is gutted on the very hit it always was. `hp` is 0..255 of the maximum.
+ */
+export function brokenLevel(hp: number, floors: number): number {
+  const t = (DAMAGED_PCT - (hp * 100) / 255) / (DAMAGED_PCT - GUTTED_PCT);
+  if (t <= 0) return 0;
+  return Math.min(floors, Math.floor(Math.min(1, t) * (floors + 1)));
+}
+
+/** Storeys a building has lost at a broken level: the roof goes first, then a floor a step. */
+export function lostFloors(level: number, floors: number): number {
+  return Math.min(floors - 1, Math.max(0, level - 1));
+}
+
+/**
+ * A building burnt down from the top: the roof and the top storeys gone, ragged walls
+ * standing where they were with the sky through their windows, charred beams across, the
+ * fallen roof in heaps on the floor that held, and soot up the face over the windows the
+ * fire came out of.
+ */
+function breakTop(
+  parts: Part[],
+  id: number,
+  cx: number,
+  cz: number,
+  w: number,
+  d: number,
+  base: number,
+  floors: number,
+  level: number,
+  wall: number,
+  wsurf: number,
+): Part[] {
+  const lost = lostFloors(level, floors);
+  const cut = base + (floors - lost) * FLOOR;
+  const out: Part[] = [];
+  for (const p of parts) {
+    const half = p.size[1] / 2;
+    const bottom = p.at[1] - half;
+    const fancy =
+      p.rot !== undefined || p.hip !== undefined || p.sign !== undefined || p.taper !== undefined;
+    if (fancy) {
+      if (p.at[1] < cut - 0.05) out.push(p);
+      continue;
+    }
+    if (bottom >= cut - 0.02) continue;
+    if (p.at[1] + half <= cut) {
+      out.push(p);
+      continue;
+    }
+    const up = cut - bottom;
+    out.push({ ...p, size: [p.size[0], up, p.size[2]], at: [p.at[0], bottom + up / 2, p.at[2]] });
+    // The top of what held is the charred floor of the storey that burnt.
+    if (p.size[0] > 2 && p.size[2] > 2) {
+      out.push({
+        size: [p.size[0] - 0.12, 0.08, p.size[2] - 0.12],
+        at: [p.at[0], cut + 0.04, p.at[2]],
+        color: 0x2b2926,
+      });
+    }
+  }
+  // Ragged walls where the lost storeys were (a low burnt parapet when only the roof went).
+  const tall = lost * FLOOR + FLOOR * 0.55;
+  for (let f = 0; f < 4; f++) {
+    const alongX = f === FACE_NORTH || f === FACE_SOUTH;
+    const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+    const len = alongX ? w : d;
+    const off = (side * ((alongX ? d : w) - 0.3)) / 2;
+    const n = Math.max(3, Math.round(len / 1.6));
+    for (let i = 0; i < n; i++) {
+      const corner = i === 0 || i === n - 1;
+      const r = rand(id, 2100 + f * 40 + i);
+      const hh = tall * (corner ? 0.7 + r * 0.3 : r < 0.18 ? 0 : 0.12 + r * r * 0.88);
+      if (hh < 0.15) continue;
+      const t = ((i + 0.5) / n - 0.5) * len;
+      out.push({
+        size: alongX ? [len / n + 0.02, hh, 0.3] : [0.3, hh, len / n + 0.02],
+        at: alongX ? [cx + t, cut + hh / 2, cz + off] : [cx + off, cut + hh / 2, cz + t],
+        color: wall,
+        shade: 0.38 + rand(id, 2300 + f * 40 + i) * 0.2,
+        surf: wsurf,
+      });
+      for (let fl = 0; fl < lost; fl++) {
+        const wy = cut + fl * FLOOR + FLOOR * 0.56;
+        if (wy + 0.3 > cut + hh) break;
+        out.push({
+          size: alongX ? [0.5, 0.44, 0.34] : [0.34, 0.44, 0.5],
+          at: alongX ? [cx + t, wy, cz + off] : [cx + off, wy, cz + t],
+          color: SOOT,
+        });
+      }
+    }
+    // Soot licked up the face from the windows of the top storey that still stands.
+    const streaks = 2 + Math.floor(rand(id, 2500 + f) * 3);
+    for (let k = 0; k < streaks; k++) {
+      const t = (rand(id, 2510 + f * 8 + k) - 0.5) * (len - 1.2);
+      const up = FLOOR * (0.45 + rand(id, 2530 + f * 8 + k) * 0.3);
+      const y = cut - FLOOR * 0.44 + up / 2;
+      const o = (side * (alongX ? d : w)) / 2 + side * 0.04;
+      out.push({
+        size: alongX ? [0.62, up, 0.05] : [0.05, up, 0.62],
+        at: alongX ? [cx + t, y, cz + o] : [cx + o, y, cz + t],
+        color: SOOT,
+      });
+    }
+  }
+  // Charred beams across the gap, and the roof that came down, in heaps on the floor.
+  for (let i = 0; i < 3; i++) {
+    const across = w < d;
+    const t = ((i + 0.5) / 3 - 0.5) * (across ? d : w) * 0.7;
+    const y = cut + Math.min(tall * 0.8, 0.3 + rand(id, 2600 + i) * tall * 0.7);
+    out.push({
+      size: across
+        ? [w * (0.5 + rand(id, 2610 + i) * 0.45), 0.1, 0.12]
+        : [0.12, 0.1, d * (0.5 + rand(id, 2610 + i) * 0.45)],
+      at: across ? [cx, y, cz + t] : [cx + t, y, cz],
+      rot: across
+        ? [0, 0, (rand(id, 2620 + i) - 0.5) * 0.6]
+        : [(rand(id, 2620 + i) - 0.5) * 0.6, 0, 0],
+      color: SOOT,
+    });
+  }
+  for (let i = 0; i < 4 + Math.min(14, w * d * 0.04); i++) {
+    const s = 0.5 + rand(id, 2700 + i) * 1.3;
+    out.push({
+      size: [s, 0.14 + rand(id, 2730 + i) * 0.3, s * (0.5 + rand(id, 2760 + i) * 0.6)],
+      at: [
+        cx + (rand(id, 2790 + i) - 0.5) * (w - 1.5),
+        cut + 0.12 + rand(id, 2820 + i) * 0.2,
+        cz + (rand(id, 2850 + i) - 0.5) * (d - 1.5),
+      ],
+      rot: [
+        (rand(id, 2880 + i) - 0.5) * 0.7,
+        rand(id, 2910 + i) * 3.1,
+        (rand(id, 2940 + i) - 0.5) * 0.7,
+      ],
+      color: i % 3 === 0 ? 0x4c4a46 : i % 3 === 1 ? TILES[i % TILES.length] : wall,
+      shade: 0.35 + rand(id, 2970 + i) * 0.25,
+      surf: SURF_RUBBLE,
+    });
+  }
+  return out;
 }
 
 /** What is left: a scorched heap of slabs with stumps of wall still standing. */
@@ -1929,6 +2078,11 @@ export class StructureView {
   readonly breached = new Uint8Array(MAX_STRUCTS);
   /** 1 where engineers have fortified the building. */
   readonly fort = new Uint8Array(MAX_STRUCTS);
+  /** How far each shot-up building has burnt down from the top (brokenLevel), and since when. */
+  readonly broken = new Uint8Array(MAX_STRUCTS);
+  private readonly burnAt = new Float32Array(MAX_STRUCTS).fill(-1e9);
+  /** Where the camera is, for the fires: only those near enough to see are lit. */
+  private readonly eye = new THREE.Vector3(0, 1e6, 0);
   /**
    * What is drawn: 0 standing, 1 damaged, 2 destroyed, 3 going up, 4 gutted, plus the
    * breached faces times eight.
@@ -2067,7 +2221,10 @@ export class StructureView {
   topOf(s: number): number {
     const m = this.map;
     if (m.sKind[s] === S_BRIDGE) return Math.max(fromFx(m.sBase[s]), fromFx(m.sEast[s]));
-    return fromFx(m.sBase[s]) + (this.hp[s] === 0 ? 0.8 : m.sFloors[s] * FLOOR + this.crest[s]);
+    if (this.hp[s] === 0) return fromFx(m.sBase[s]) + 0.8;
+    const b = this.broken[s];
+    const lost = b > 0 && b < 250 ? lostFloors(b, m.sFloors[s]) : 0;
+    return fromFx(m.sBase[s]) + (m.sFloors[s] - lost) * FLOOR + this.crest[s];
   }
 
   centreOf(s: number): { x: number; z: number } {
@@ -2086,7 +2243,9 @@ export class StructureView {
   private show(s: number, state: number): void {
     const holes = state === 2 || state === 3 ? 0 : this.breached[s];
     const fort = state === 2 || state === 3 ? 0 : this.fort[s];
-    const key = state + 8 * holes + 128 * fort;
+    // How far it has burnt down from the top (I1): only a shot-up building shows it.
+    const level = state === 1 ? this.broken[s] : 0;
+    const key = state + 8 * holes + 128 * fort + 256 * level;
     if (this.shown[s] === key && !this.pending.has(s)) return;
     if (this.pending.get(s) === key) return;
     if (this.map.sKind[s] === S_BUILDING && this.ready) {
@@ -2124,11 +2283,15 @@ export class StructureView {
     this.version++;
   }
 
-  /** Build the look of structure `s` for `shown` key `key` (state, breached faces, fort). */
+  /**
+   * Build the look of structure `s` for `shown` key `key` (state, breached faces, fort,
+   * broken level).
+   */
   private draw(s: number, key: number): void {
     const state = key & 7;
     const holes = (key >> 3) & 15;
-    const fort = key >> 7;
+    const fort = (key >> 7) & 1;
+    const level = key >> 8;
     const sm = this.map;
     if (sm.sKind[s] === S_BASE) {
       // A base building takes the place of whatever hedge or fence stood there.
@@ -2171,9 +2334,10 @@ export class StructureView {
               holes,
               m.sClass[s],
               fort === 1,
+              level,
             );
     if (m.sKind[s] === S_BUILDING) {
-      this.crest[s] = state === 0 || state === 1 ? Math.max(0.9, crest) : 0.9;
+      this.crest[s] = level > 0 ? 0.6 : state === 0 || state === 1 ? Math.max(0.9, crest) : 0.9;
       const k = this.chunkAt(s);
       const old = this.fresh.get(s);
       if (old) {
@@ -2287,6 +2451,14 @@ export class StructureView {
       this.stage[k] = bits & 3;
       this.breached[k] = (bits >> 2) & 15;
       this.fort[k] = bits & STRUCT_FORTIFIED ? 1 : 0;
+      if (map.sKind[k] === S_BUILDING) {
+        const level =
+          hp > 0 && this.stage[k] === STAGE_DAMAGED ? brokenLevel(hp, map.sFloors[k]) : 0;
+        if (level > this.broken[k] || (this.stage[k] === STAGE_GUTTED && this.broken[k] < 250))
+          this.burnAt[k] = seconds;
+        // Gutted keeps a mark, so its fire is lit once and then burns down.
+        this.broken[k] = this.stage[k] === STAGE_GUTTED && hp > 0 ? 250 : level;
+      }
       if (this.hidden(k) && !this.spot(k)) continue;
       const rising = this.baseTeam[k] >= 0 && this.basePct[k] < 100;
       this.show(
@@ -2393,6 +2565,55 @@ export class StructureView {
     }
   }
 
+  /**
+   * A building burning down from the top (I1): flames out of the windows of the highest
+   * storey that stands and along the broken top, hot for the first minute or two after each
+   * storey goes, then smouldering. A gutted shell burns out over two minutes.
+   */
+  private burn(s: number, seconds: number, dt: number): void {
+    const m = this.map;
+    const gutted = this.broken[s] === 250;
+    const age = seconds - this.burnAt[s];
+    const heat = gutted ? Math.max(0, 1 - age / 120) : Math.max(0.22, 1 - age / 100);
+    if (heat <= 0) return;
+    const { x: cx, z: cz } = this.centreOf(s);
+    const dx = cx - this.eye.x;
+    const dz = cz - this.eye.z;
+    if (dx * dx + dz * dz + this.eye.y * this.eye.y > 700 * 700) return;
+    const level = gutted ? 1 : this.broken[s];
+    if (Math.random() > dt * (0.8 + level * 0.6) * heat * 3) return;
+    const w = m.sW[s] * CELL - 1;
+    const d = m.sH[s] * CELL - 1;
+    const base = fromFx(m.sBase[s]);
+    const floors = gutted ? 1 : m.sFloors[s] - lostFloors(level, m.sFloors[s]);
+    const top = base + floors * FLOOR;
+    let x: number;
+    let y: number;
+    let z: number;
+    let nx = 0;
+    let nz = 0;
+    if (!gutted && Math.random() < 0.6) {
+      // Out of a window of the top storey left standing.
+      const f = Math.floor(Math.random() * 4);
+      const alongX = f === FACE_NORTH || f === FACE_SOUTH;
+      const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+      const t = (Math.random() - 0.5) * ((alongX ? w : d) - 1.2);
+      x = alongX ? cx + t : cx + side * (w / 2 + 0.15);
+      z = alongX ? cz + side * (d / 2 + 0.15) : cz + t;
+      y = top - FLOOR * 0.44;
+      nx = alongX ? 0 : side;
+      nz = alongX ? side : 0;
+    } else {
+      // Off the broken top (or up out of a gutted shell).
+      x = cx + (Math.random() - 0.5) * (w - 1.5);
+      z = cz + (Math.random() - 0.5) * (d - 1.5);
+      y = gutted ? base + 0.6 : top + 0.2;
+    }
+    if (!this.fog.sees(x, z)) return;
+    this.effects.thin = 0;
+    this.effects.windowFire(x, y, z, nx, nz, heat);
+  }
+
   /** First standing structure a ray passes through before `maxT`, or -1. */
   pick(origin: THREE.Vector3, dir: THREE.Vector3, maxT: number): number {
     const m = this.map;
@@ -2413,6 +2634,7 @@ export class StructureView {
   /** Which squares of the city are far enough from the camera to be drawn simplified. */
   view(camera: THREE.Camera, focus?: THREE.Vector3, distance = 1000): void {
     const p = camera.position;
+    this.eye.copy(p);
     if (focus) {
       this.cutFocus.value.copy(focus);
       const dx = p.x - focus.x;
@@ -2461,10 +2683,11 @@ export class StructureView {
         }
         continue;
       }
-      if (this.shown[s] === 1 && Math.random() < dt * 0.5) {
+      if ((this.shown[s] & 7) === 1 && this.broken[s] === 0 && Math.random() < dt * 0.5) {
         const p = this.hit(s);
         if (this.fog.sees(p.x, p.z)) this.effects.wreckSmoke(p.x, this.topOf(s), p.z, 0.15);
       }
+      if (this.broken[s] > 0) this.burn(s, seconds, dt);
       if (this.baseTeam[s] >= 0 && this.basePct[s] < 100) {
         // Going up: ten pips over the plot, filled as the work gets done.
         const { x, z } = this.centreOf(s);
