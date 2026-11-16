@@ -442,7 +442,7 @@ export interface ReinforceCommand {
 }
 
 /**
- * Who gave an order (decision 137). Nobody says it of himself: the game that takes the order
+ * Who gave an order (decision 138). Nobody says it of himself: the game that takes the order
  * in (the player's own sim alone, the host's in a shared game) signs it, and the computers'
  * and the staffs' orders are signed as they are handed in (src/sim/match.ts).
  */

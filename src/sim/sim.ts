@@ -359,32 +359,24 @@ const lightDamage = new Int32Array(MAX_STRUCTS);
 const wallTouched = new Uint8Array(MAX_STRUCTS);
 const townCount = new Int32Array(MAX_TOWNS * MAX_TEAMS);
 const repairCrew = new Int32Array(MAX_STRUCTS * MAX_TEAMS);
-/** Set when a structure fell or was rebuilt this tick: routes must be recomputed. */
-let topologyChanged = false;
-/** Set when a base building went up: whoever stands on its plot has to step off it. */
-let plotTaken = false;
-
-/** Set when only field works changed: the cheaper update of the routes will do. */
-let worksChanged = false;
-
-/** The ground itself changed (trees felled): routes must be recomputed. */
-export function markGround(): void {
-  topologyChanged = true;
+/** The ground itself changed (trees felled): passability must be recomputed. */
+export function markGround(w: World): void {
+  w.groundChanged = true;
 }
 
-/** A base building was placed: routes must be recomputed and its plot cleared of units. */
-export function markTopology(): void {
-  topologyChanged = true;
-  plotTaken = true;
+/** A base building was placed: passability must be recomputed and its plot cleared of units. */
+export function markTopology(w: World): void {
+  w.groundChanged = true;
+  w.plotTaken = true;
 }
 
 /**
  * A field work that stops movement went up (`taken`: whoever stands on its cell has to
- * step off) or came down: routes must be recomputed.
+ * step off) or came down: passability must be recomputed.
  */
-export function markWorks(taken: boolean): void {
-  worksChanged = true;
-  if (taken) plotTaken = true;
+export function markWorks(w: World, taken: boolean): void {
+  w.worksChanged = true;
+  if (taken) w.plotTaken = true;
 }
 
 // Line-of-sight checks per target search. Candidates beyond the budget count as unseen.
@@ -459,17 +451,17 @@ export function step(w: World, commands: readonly Command[]): void {
     updateTowns(w);
     clearSmoke(w);
   }
-  if (topologyChanged || worksChanged) {
-    // The ground changed: every route computed so far may run through a wall or off a bridge.
-    if (topologyChanged) refreshPassability(w.map);
+  if (w.groundChanged || w.worksChanged) {
+    // The ground changed: a route computed so far may run through a wall or off a bridge.
+    // Each is rebuilt when a unit following it runs into trouble, not all of them now.
+    if (w.groundChanged) refreshPassability(w.map);
     else refreshWorks(w.map);
-    topologyChanged = false;
-    worksChanged = false;
-    w.fieldGoal.fill(-1);
-    w.path.fill(-1, 0, w.count);
+    w.groundChanged = false;
+    w.worksChanged = false;
+    w.fieldStale.fill(1);
     w.chaseBuilt.fill(-1);
-    if (plotTaken) {
-      plotTaken = false;
+    if (w.plotTaken) {
+      w.plotTaken = false;
       const map = w.map;
       for (let i = 0; i < w.count; i++) {
         if (w.state[i] !== STATE_ALIVE || w.inside[i] >= 0 || w.carrier[i] >= 0) continue;
@@ -1436,7 +1428,10 @@ function acquireField(w: World, goal: number, layer: number): number {
   // Armies whose passability is the same share their fields.
   const cls = w.map.shared[layer];
   for (let f = 0; f < MAX_FIELDS; f++) {
-    if (w.fieldGoal[f] === goal && w.fieldClass[f] === cls) return f;
+    if (w.fieldGoal[f] === goal && w.fieldClass[f] === cls) {
+      if (w.fieldStale[f] !== 0) rebuildField(w, f);
+      return f;
+    }
   }
   if (w.fieldsFullTick === w.tick) return -1;
   fieldRefs.fill(0);
@@ -1452,9 +1447,18 @@ function acquireField(w: World, goal: number, layer: number): number {
     w.fieldsFullTick = w.tick;
     return -1;
   }
-  const dist = (w.fieldDist[slot] ??= newField());
-  goalScratch[0] = goal;
-  buildField(w.map, cls, dist, goalScratch, 1, UNREACHABLE - 1);
+  w.fieldGoal[slot] = goal;
+  w.fieldClass[slot] = cls;
+  fillField(w, slot);
+  return slot;
+}
+
+/** (Re)compute field `f` for its goal and class. */
+function fillField(w: World, f: number): void {
+  const dist = (w.fieldDist[f] ??= newField());
+  goalScratch[0] = w.fieldGoal[f];
+  buildField(w.map, w.fieldClass[f], dist, goalScratch, 1, UNREACHABLE - 1);
+  w.fieldStale[f] = 0;
   // A field costs a few milliseconds and a city gives every squad and truck its own goal:
   // build a few a tick and let the rest walk straight until theirs is made.
   if (w.fieldsBuiltTick !== w.tick) {
@@ -1462,9 +1466,52 @@ function acquireField(w: World, goal: number, layer: number): number {
     w.fieldsBuilt = 0;
   }
   if (++w.fieldsBuilt >= FIELDS_PER_TICK) w.fieldsFullTick = w.tick;
-  w.fieldGoal[slot] = goal;
-  w.fieldClass[slot] = cls;
-  return slot;
+}
+
+/** `field` value in steer for a unit that waits a tick for its route to be redrawn. */
+const FIELD_WAIT = -2;
+/**
+ * Units of one order share a route: a unit heads for a cell near the middle of the
+ * ROUTE_BLOCK x ROUTE_BLOCK square its own spot lies in, then walks the last stretch
+ * straight (see steer). A formation of a hundred asks for a handful of fields, not a
+ * hundred that differ by a cell or two. Where that cell is not in plain sight of the spot
+ * (another bank, the far side of a wall) the unit routes to its own spot as before.
+ */
+const ROUTE_BLOCK_SHIFT = 2;
+const ROUTE_BLOCK = 1 << ROUTE_BLOCK_SHIFT;
+
+function routeGoal(map: GameMap, cls: number, goal: number): number {
+  const snap = map.snap[cls];
+  const own = snap[goal];
+  const gx = goal & (MAP_CELLS - 1);
+  const gy = goal >> 8;
+  const mx = ((gx >> ROUTE_BLOCK_SHIFT) << ROUTE_BLOCK_SHIFT) + (ROUTE_BLOCK >> 1);
+  const my = ((gy >> ROUTE_BLOCK_SHIFT) << ROUTE_BLOCK_SHIFT) + (ROUTE_BLOCK >> 1);
+  const mid = snap[my * MAP_CELLS + mx];
+  if (mid === own) return own;
+  const ox = own & (MAP_CELLS - 1);
+  const oy = own >> 8;
+  const bx = mid & (MAP_CELLS - 1);
+  const by = mid >> 8;
+  if (Math.abs(bx - ox) > ROUTE_BLOCK || Math.abs(by - oy) > ROUTE_BLOCK) return own;
+  const half = CELL_FX >> 1;
+  return clearLine(
+    map,
+    cls,
+    (bx << CELL_SHIFT) + half,
+    (by << CELL_SHIFT) + half,
+    (ox << CELL_SHIFT) + half,
+    (oy << CELL_SHIFT) + half,
+  )
+    ? mid
+    : own;
+}
+
+/** Bring stale field `f` up to date if this tick's budget allows. True if it was rebuilt. */
+function rebuildField(w: World, f: number): boolean {
+  if (w.fieldsFullTick === w.tick) return false;
+  fillField(w, f);
+  return true;
 }
 
 /**
@@ -2779,7 +2826,7 @@ function resolveStructures(w: World): void {
     if (map.sKind[s] === S_BUILDING) w.stats[STAT_RAZED]++;
     razeStructure(map, s);
     spillRubble(w, s);
-    topologyChanged = true;
+    w.groundChanged = true;
     w.events.push(EV_COLLAPSE, s, 0);
   }
 }
@@ -2869,7 +2916,7 @@ function updateTowns(w: World): void {
     w.sRepair[s] = 0;
     w.sHp[s] = map.sMaxHp[s];
     stampStructure(map, s);
-    topologyChanged = true;
+    w.groundChanged = true;
     w.events.push(EV_REPAIR, s, 0);
   }
 }
@@ -3019,11 +3066,41 @@ function steer(w: World): void {
         w.flags[i] = flags;
       }
       let field = -1;
+      let dir = -1;
       if ((flags & FLAG_DIRECT) === 0) {
         field = w.path[i];
-        if (field < 0) field = w.path[i] = acquireField(w, map.snap[cls][w.goal[i]], cls);
+        if (field < 0) field = w.path[i] = acquireField(w, routeGoal(map, cls, w.goal[i]), cls);
       }
-      if (field < 0) {
+      if (field >= 0) {
+        dir = flowDirection(map, cls, w.fieldDist[field]!, cell);
+        if (
+          w.fieldStale[field] !== 0 &&
+          (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0) &&
+          rebuildField(w, field)
+        ) {
+          dir = flowDirection(map, cls, w.fieldDist[field]!, cell);
+        }
+        if (w.fieldStale[field] !== 0 && (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0)) {
+          // An old route has run into new ground: wait a tick for it to be redrawn.
+          field = FIELD_WAIT;
+        } else if (dir < 0) {
+          const own = map.snap[cls][w.goal[i]];
+          if (w.fieldGoal[field] !== own) {
+            // The end of the route the whole order shares: from here, its own way to its spot.
+            if (clearLine(map, cls, x, y, tx, ty)) {
+              flags |= FLAG_DIRECT;
+              w.flags[i] = flags;
+              field = -1;
+            } else {
+              field = w.path[i] = acquireField(w, own, cls);
+              if (field >= 0) dir = flowDirection(map, cls, w.fieldDist[field]!, cell);
+            }
+          }
+        }
+      }
+      if (field === FIELD_WAIT) {
+        // vx and vy stay 0.
+      } else if (field < 0) {
         const dx = tx - x;
         const dy = ty - y;
         const dist = isqrt(dx * dx + dy * dy);
@@ -3036,7 +3113,6 @@ function steer(w: World): void {
           vy = Math.trunc((dy * pace) / dist);
         }
       } else {
-        const dir = flowDirection(map, cls, w.fieldDist[field]!, cell);
         if (dir >= 0) {
           vx = Math.trunc((DIR_X[dir] * pace) / 1024);
           vy = Math.trunc((DIR_Y[dir] * pace) / 1024);

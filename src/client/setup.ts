@@ -1,4 +1,4 @@
-// The address of the page as a Match and back (decision 137). A battle is still asked for
+// The address of the page as a Match and back (decision 138). A battle is still asked for
 // by loading the page with its choices in the address, as the links and the test flags
 // always did; this is the one place that reads those choices and the one that writes them.
 import type { AiLevel } from '../sim/ai';

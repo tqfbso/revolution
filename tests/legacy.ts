@@ -1,4 +1,4 @@
-// The game loop as the sim worker ran it before there was a Match (decision 137), kept word
+// The game loop as the sim worker ran it before there was a Match (decision 138), kept word
 // for word so that the tests can hold the new one against it, hash for hash: the same armies,
 // the same computers and staffs thinking in the same order, the same opening orders.
 import { aiThink, createAi, type Ai, type AiLevel } from '../src/sim/ai';
