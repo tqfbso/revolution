@@ -42,7 +42,9 @@ import type { Look } from './look';
 const GRID = MAP_CELLS;
 const CELL = MAP_SIZE / GRID;
 const VERTS = GRID + 1;
-const TREE_CHUNK = 32; // cells per side of one tree batch, so off-screen forest is culled
+// Cells per side of one tree batch (256 m), so off-screen forest is culled. Each batch is a
+// draw call, two with shadows: 128 m squares made 128 of them.
+const TREE_CHUNK = 64;
 const TREES_PER_CELL = 2;
 /** Texels per side of the wear texture: one every 2 world units. */
 const WEAR = 512;
