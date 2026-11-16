@@ -84,7 +84,15 @@ export type ToWorker =
       /** The faction of each army (CMD_FACTION on the first tick), 0 or absent for none. */
       factions?: number[];
     }
-  | { type: 'command'; command: Command }
+  | {
+      type: 'command';
+      command: Command;
+      /**
+       * Host: the order came from another player's browser, in this seat, commanding this
+       * army. It is checked against that army before it goes in (src/sim/guard.ts).
+       */
+      from?: { seat: number; team: number };
+    }
   /** Guest: ticks the host has run, in order. The sim runs these and no others. */
   | { type: 'frames'; frames: Frame[] }
   /** Guest: the host is gone. Run what was received, then go on alone on your own clock. */

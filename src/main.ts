@@ -1,3 +1,9 @@
+// The typeface ships with the game (security review, finding 9): no request to Google.
+import '@fontsource/inter/latin-300.css';
+import '@fontsource/inter/latin-400.css';
+import '@fontsource/inter/latin-500.css';
+import '@fontsource/inter/latin-600.css';
+import '@fontsource/inter/latin-700.css';
 import { Precipitation, WEATHER_NAMES, setWeather, skyOf, weatherByName } from './client/weather';
 import { WEATHER_RAIN, WEATHER_SNOW } from './sim/units';
 import { factionOf, myKinds, setArmies } from './client/army';
@@ -391,7 +397,7 @@ async function start(): Promise<void> {
           label:
             `${MAP_LABEL[layout]} · ${night ? 'night' : 'day'}` +
             `${weather > 0 ? ` · ${WEATHER_NAMES[weather]}` : ''} · ` +
-            `${versus ? 'versus' : `${coop ? 'co-op, ' : ''}${params.get('ai') ?? 'easy'} AI`}`,
+            `${versus ? 'versus' : `${coop ? 'co-op, ' : ''}${aiLevel(params.get('ai'))} AI`}`,
           toMenu: () => toMenu(params),
         },
       )
@@ -469,11 +475,7 @@ async function start(): Promise<void> {
   });
   // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
   // default: the first playtest found normal hard to beat.
-  const level = params.get('ai');
-  const ai =
-    level === 'recruit' || level === 'normal' || level === 'hard' || level === 'off'
-      ? level
-      : 'easy';
+  const ai = aiLevel(params.get('ai'));
   const demo = params.get('demo') === '1';
   // Game speed: `?speed=N` for testing, or the 0.75x / 1x choice on screen (remembered).
   let saved: string | null = null;
@@ -511,7 +513,8 @@ async function start(): Promise<void> {
   };
   if (coop) {
     coop.onFrames = (frames) => post({ type: 'frames', frames });
-    coop.onCommand = (command) => post({ type: 'command', command });
+    coop.onCommand = (command, seat) =>
+      post({ type: 'command', command, from: { seat, team: coop.teams[seat] ?? 0 } });
     coop.onControl = (p, v) => {
       if (p !== undefined) setPaused(p);
       if (v === 0.75 || v === 1) setSpeed(v);
@@ -1070,7 +1073,9 @@ async function start(): Promise<void> {
     board,
     alerts,
     map,
-    send,
+    // Driving the sim from the console is for the automated checks only (`?debug=1`):
+    // it is not handed to anyone who opens the console of the live game.
+    send: params.get('debug') === '1' || import.meta.env.DEV ? send : undefined,
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),
     camera: rts.camera,
     cameras,
@@ -1078,6 +1083,13 @@ async function start(): Promise<void> {
     routes,
   };
   document.getElementById('loading')?.remove();
+}
+
+/** `?ai=` as one of the opponents there are: anything else is the default, easy. */
+function aiLevel(level: string | null): 'recruit' | 'easy' | 'normal' | 'hard' | 'off' {
+  return level === 'recruit' || level === 'normal' || level === 'hard' || level === 'off'
+    ? level
+    : 'easy';
 }
 
 start().catch((err) => {

@@ -4,6 +4,7 @@
 // one is asked for, and a battle is asked for by loading the page again with its choices in
 // the address, exactly as the links and the test flags always did.
 import { FACTIONS, factionByName } from '../sim/factions';
+import { esc } from './wire';
 
 declare const __BUILD__: string;
 
@@ -264,8 +265,8 @@ export function openMenu(params: URLSearchParams): void {
       const l = JSON.parse(read('revolution.last') ?? 'null') as LastBattle | null;
       if (l && typeof l.label === 'string') {
         last =
-          `<div class="pill last"><span>Last battle</span><b>${l.label}</b>` +
-          `<span style="color:${l.won ? 'var(--good)' : 'var(--bad)'}">${l.won ? 'Victory' : 'Defeat'} in ${l.time}</span></div>`;
+          `<div class="pill last"><span>Last battle</span><b>${esc(l.label)}</b>` +
+          `<span style="color:${l.won ? 'var(--good)' : 'var(--bad)'}">${l.won ? 'Victory' : 'Defeat'} in ${esc(l.time)}</span></div>`;
       }
     } catch {
       // no last battle

@@ -1,5 +1,6 @@
 // Runs the deterministic simulation at a fixed tick rate, off the main thread, so rendering
 // never waits on game logic and game logic never waits on rendering.
+import { authorize } from '../sim/guard';
 import { aiThink, createAi, type Ai } from '../sim/ai';
 import { createStaff, staffThink, type Staff } from '../sim/staff';
 import { CMD_FACTION, CMD_NIGHT, CMD_WEATHER, type Command } from '../sim/commands';
@@ -148,8 +149,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     lastTime = performance.now();
     if (timer === undefined) timer = setInterval(pump, 5);
   } else if (msg.type === 'command') {
-    // Applied on the next tick this sim runs on its own clock (alone, or as the host).
-    inbox.push(msg.command);
+    // Applied on the next tick this sim runs on its own clock (alone, or as the host). An
+    // order from another player's browser goes in only as far as it is his to give.
+    const command = !msg.from
+      ? msg.command
+      : world
+        ? authorize(world, msg.command, msg.from.team, msg.from.seat)
+        : null;
+    if (command) inbox.push(command);
   } else if (msg.type === 'frames') {
     for (const f of msg.frames) frames.push(f);
   } else if (msg.type === 'alone') {
