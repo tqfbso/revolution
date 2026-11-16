@@ -1,24 +1,16 @@
 // Runs the deterministic simulation at a fixed tick rate, off the main thread, so rendering
 // never waits on game logic and game logic never waits on rendering.
-import { authorize } from '../sim/guard';
-import { aiThink, createAi, type Ai } from '../sim/ai';
-import { createStaff, staffThink, type Staff } from '../sim/staff';
-import { CMD_FACTION, CMD_NIGHT, CMD_WEATHER, type Command } from '../sim/commands';
+import type { Command } from '../sim/commands';
+import { createGame, type Game } from '../sim/match';
 import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
 import { fromFx } from '../sim/fixed';
-import { CELL_SHIFT, S_BUILDING, generateMap } from '../sim/map';
+import { CELL_SHIFT, S_BUILDING } from '../sim/map';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, unitPrice } from '../sim/economy';
 import { kindOf } from '../sim/factions';
-import {
-  assaultCommands,
-  battleCommands,
-  skirmishCommands,
-  stressTestCommands,
-} from '../sim/scenarios';
 import { KINDS } from '../sim/units';
 import { NEEDS_SUPPLY, upkeepPerMinute } from '../sim/logistics';
 import { WORKS } from '../sim/works';
-import { stageOf, step } from '../sim/sim';
+import { stageOf } from '../sim/sim';
 import { fortified } from '../sim/urban';
 import {
   FLAG_MOVING,
@@ -31,7 +23,6 @@ import {
   STATE_ALIVE,
   TICK_MS,
   TICK_RATE,
-  createWorld,
   hashWorld,
   type World,
   MAX_CAMERAS,
@@ -67,9 +58,11 @@ import {
 
 const MAX_CATCH_UP_TICKS = 4;
 
-let world: World | null = null;
-/** Orders for the next tick: the scenario's opening ones, then whatever arrives. */
-let pending: Command[] = [];
+/**
+ * The game being played: the world, and the computer or the staff of every army, all built
+ * from the one description of it the page sends (src/sim/match.ts).
+ */
+let game: Game | null = null;
 /**
  * Co-op (client/net.ts). The host runs on its own clock like a game alone, and reports the
  * players' orders that went into each tick; the guest runs exactly the ticks it is sent.
@@ -84,16 +77,16 @@ const REPLAY_BEHIND = 200;
 let hashes: number[] = [];
 /** Both sides hash the world on the same ticks, two seconds apart. */
 const HASH_EVERY = TICK_RATE * 2;
-/** Players' orders received since the last tick, kept apart so a frame holds only those. */
+/**
+ * Players' orders received since the last tick, each signed with the seat and the army it
+ * came from, kept apart so a frame holds only those.
+ */
 let inbox: Command[] = [];
-/** The computer players. They hand in their commands before each tick, like anyone else. */
-let ais: Ai[] = [];
-/** The staff of the player's sub-commanders: it hands its commands in the same way. */
-let staff: Staff | null = null;
-/** Versus: the other army's commanders. Every sim runs both staffs; each shows its own. */
-let rival: Staff | null = null;
-/** The army this player commands (the snapshot's commanders are that army's). */
+/** This player's seat, and the army he commands (the snapshot's commanders are that army's). */
+let seat = 0;
 let me = 0;
+/** `?control=all`, alone: this player's orders go in unsigned, so any army obeys them. */
+let free = false;
 let lastTime = 0;
 let accumulator = 0;
 /** Game speed: simulated ticks per real tick interval (`?speed=`). */
@@ -109,38 +102,15 @@ let felledSent = 0;
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   if (msg.type === 'init') {
-    world = createWorld(msg.seed, generateMap(msg.seed, msg.layout));
+    game = createGame(msg.match);
     worksSent = -1;
-    pending =
-      msg.scenario === 'roam'
-        ? stressTestCommands(msg.units)
-        : msg.scenario === 'clash'
-          ? battleCommands(msg.units)
-          : msg.scenario === 'assault'
-            ? assaultCommands(world.map, msg.units)
-            : skirmishCommands(world.map, msg.versus ? 2 : (msg.armies ?? 2));
-    if (msg.night) pending.unshift({ type: CMD_NIGHT, on: true });
-    if (msg.weather) pending.unshift({ type: CMD_WEATHER, weather: msg.weather });
-    (msg.factions ?? []).forEach((faction, team) => {
-      if (faction > 0) pending.unshift({ type: CMD_FACTION, team, faction });
-    });
-    ais = [];
-    const versus = msg.versus === true && msg.scenario === 'skirmish';
-    me = versus && msg.team === 1 ? 1 : 0;
-    if (msg.scenario === 'skirmish' && msg.ai !== 'off' && !versus) {
-      ais.push(createAi(1, msg.ai, msg.seed, msg.humans ?? 1));
-      // Free-for-all (decision 124): every further army is a computer on its own side.
-      for (let t = 2; t < Math.min(msg.armies ?? 2, MAX_TEAMS); t++) {
-        if (world.map.startX[t] >= 0) ais.push(createAi(t, msg.ai, msg.seed, msg.humans ?? 1));
-      }
-      // `?demo=1`: the AI plays red as well, to watch it at work.
-      if (msg.demo) ais.push(createAi(0, msg.ai, msg.seed));
-    }
-    staff = msg.demo ? null : createStaff(0, msg.seed);
-    rival = versus ? createStaff(1, msg.seed) : null;
+    felledSent = 0;
+    seat = msg.seat;
+    me = msg.match.players[seat]?.army ?? 0;
+    mode = msg.net ?? 'solo';
+    free = msg.free === true && mode === 'solo';
     speed = Math.min(Math.max(msg.speed, 0.5), 16);
     paused = false;
-    mode = msg.net ?? 'solo';
     frames = [];
     head = 0;
     hashes = [];
@@ -149,20 +119,20 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     lastTime = performance.now();
     if (timer === undefined) timer = setInterval(pump, 5);
   } else if (msg.type === 'command') {
-    // Applied on the next tick this sim runs on its own clock (alone, or as the host). An
-    // order from another player's browser goes in only as far as it is his to give.
-    const command = !msg.from
-      ? msg.command
-      : world
-        ? authorize(world, msg.command, msg.from.team, msg.from.seat)
-        : null;
+    // Applied on the next tick this sim runs on its own clock (alone, or as the host).
+    // Whoever it is from, this player or another's browser, it is signed here with the seat
+    // and the army it came from and goes in only as far as it is theirs to give.
+    const from = msg.from ?? seat;
+    const own = msg.from === undefined && mode === 'solo' && (free || msg.setup === true);
+    const command = own ? msg.command : (game?.sign(msg.command, from) ?? null);
     if (command) inbox.push(command);
   } else if (msg.type === 'frames') {
     for (const f of msg.frames) frames.push(f);
   } else if (msg.type === 'alone') {
-    if (world && mode === 'guest') {
+    if (game && mode === 'guest') {
+      const world = game.world;
       for (let k = head; k < frames.length; k++) {
-        if (frames[k][0] === world.tick) tick(world, frames[k][1]);
+        if (frames[k][0] === world.tick) tick(game, frames[k][1]);
       }
       frames = [];
       head = 0;
@@ -180,14 +150,10 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
 };
 
 /** One tick: the players' orders, then the computer's, then the world moves. */
-function tick(w: World, orders: Command[], quiet = false): number {
+function tick(g: Game, orders: Command[], quiet = false): number {
   const t0 = performance.now();
-  for (const c of orders) pending.push(c);
-  for (const ai of ais) aiThink(ai, w, pending);
-  if (staff) staffThink(staff, w, pending);
-  if (rival) staffThink(rival, w, pending);
-  step(w, pending);
-  pending = [];
+  g.tick(orders);
+  const w = g.world;
   if (!quiet && mode !== 'solo' && w.tick % HASH_EVERY === 0) hashes.push(w.tick, hashWorld(w));
   return performance.now() - t0;
 }
@@ -195,7 +161,8 @@ function tick(w: World, orders: Command[], quiet = false): number {
 let lastReport = 0;
 
 /** The guest's clock is the host's: run what has arrived, faster if we have fallen behind. */
-function follow(w: World, now: number): void {
+function follow(g: Game, now: number): void {
+  const w = g.world;
   lastTime = now;
   const waiting = frames.length - head;
   // Far behind means a player who came back (decision 104): the whole game so far is
@@ -211,7 +178,7 @@ function follow(w: World, now: number): void {
     // A frame for another tick than ours cannot be played; the hash check will report it.
     if (f[0] !== w.tick) continue;
     const quiet = frames.length - head > REPLAY_BEHIND;
-    simMs = tick(w, f[1], quiet);
+    simMs = tick(g, f[1], quiet);
     if (quiet) w.events.length = 0;
     ticks++;
   }
@@ -226,10 +193,11 @@ function follow(w: World, now: number): void {
 }
 
 function pump(): void {
-  if (!world) return;
+  if (!game) return;
+  const world = game.world;
   const now = performance.now();
   if (mode === 'guest') {
-    follow(world, now);
+    follow(game, now);
     return;
   }
   if (paused) {
@@ -246,7 +214,7 @@ function pump(): void {
     const orders = inbox;
     inbox = [];
     if (mode === 'host') frames.push([world.tick, orders]);
-    simMs = tick(world, orders);
+    simMs = tick(game, orders);
     accumulator -= TICK_MS;
     ticks++;
   }
@@ -367,7 +335,7 @@ function postSnapshot(w: World, simMs: number): void {
   const commanders = new Int32Array(MAX_COMMANDERS * COMMANDER_STRIDE);
   for (let c = 0; c < MAX_COMMANDERS; c++) {
     const o = c * COMMANDER_STRIDE;
-    const p = (me === 1 ? rival : staff)?.posts[c];
+    const p = game?.staffs[me]?.posts[c];
     const k = me * MAX_COMMANDERS + c;
     commanders[o] = w.cMission[k];
     commanders[o + 1] = Math.round(fromFx(w.cX[k]));

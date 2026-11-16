@@ -16,9 +16,10 @@
 // files. `?net=local` swaps the network for a channel between two tabs of one browser.
 import type { Command } from '../sim/commands';
 import type { Frame, NetReport } from '../worker/protocol';
-import { MAP_LABEL } from './menu';
+import { isVersus, type Match } from '../sim/match';
 import { GameLog, expand } from './replay';
-import { MAX_PLAYERS, esc, parseMsg, word, type Config, type Msg } from './wire';
+import { fieldLabel, matchFromParams } from './setup';
+import { MAX_PLAYERS, esc, parseMsg, type Msg } from './wire';
 
 export { MAX_PLAYERS };
 
@@ -263,9 +264,6 @@ function watchSide(onPick: (side: number) => void): void {
   sel?.addEventListener('change', () => onPick(Number(sel.value) === 1 ? 1 : 0));
 }
 
-/** The weathers the lobby may name (weather.ts WEATHER_NAMES). */
-const WEATHERS = ['rain', 'fog', 'snow'];
-
 const wait = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 interface Peer {
@@ -342,30 +340,31 @@ export class Coop {
 
   /** The players this game was started with: fixed, the computer's strength hangs on it. */
   readonly humans: number;
-  /** The army each seat plays: all 0 unless this is a versus game. */
+  /** The army each seat plays (all 0 in a game together against the computer). */
   readonly teams: number[];
   /** Our army. */
   readonly team: number;
   /** Players against players, no computer. */
   readonly versus: boolean;
+  /** Every player's role, by seat: as the game began, then as players come back. */
+  readonly duties: number[];
 
   constructor(
     readonly role: Role,
     links: Link[],
     /** Our seat. */
     readonly seat: number,
-    /** Every player's role, by seat. */
-    readonly duties: number[],
+    /** What is being played, and who plays what (sim/match.ts). */
+    readonly match: Match,
     listener: Listener | null,
-    /** Host: what is being played, for a player who comes back. */
-    private readonly cfg: Config | null = null,
     /** Guest: we are coming back into a game in progress. */
     resumed = false,
-    teams: number[] | null = null,
   ) {
+    const duties = match.players.map((p) => p.duty);
+    this.duties = duties;
     this.humans = duties.length;
-    this.teams = duties.map((_, k) => (teams?.[k] === 1 ? 1 : 0));
-    this.versus = teams !== null;
+    this.teams = match.players.map((p) => p.army);
+    this.versus = isVersus(match);
     this.team = this.teams[seat] ?? 0;
     for (let k = 0; k < duties.length; k++) {
       this.present.add(k);
@@ -449,21 +448,17 @@ export class Coop {
     for (let k = 1; k < this.humans && seat < 0; k++) {
       if (!this.present.has(k) && !this.joining.has(k)) seat = k;
     }
-    if (seat < 0 || !this.cfg) {
+    if (seat < 0) {
       link.send({ t: 'full' });
       return;
     }
     this.joining.add(seat);
-    const duties = this.duties.slice();
-    duties[seat] = duty;
-    link.send({
-      t: 'cfg',
-      cfg: this.cfg,
-      duties,
-      you: seat,
-      resume: true,
-      teams: this.versus ? this.teams : undefined,
-    });
+    // The same game, with the roles as they stand now and his as he has just picked it.
+    const players = this.match.players.map((p, k) => ({
+      army: p.army,
+      duty: k === seat ? duty : this.duties[k],
+    }));
+    link.send({ t: 'cfg', match: { ...this.match, players }, you: seat, resume: true });
     this.say(`Player ${seat + 1} is coming back into the game…`);
     let open = true;
     link.onMessage = () => {};
@@ -746,9 +741,9 @@ function randomId(): string {
 }
 
 /**
- * Before the game is built: if the address asks for co-op, meet the other player and
- * agree what is to be played. A guest's `params` are overwritten with the host's choice of
- * map, seed and opponent. Resolves null for a game alone.
+ * Before the game is built: if the address asks for co-op, meet the other players and
+ * agree what is to be played. The game is the host's (`Coop.match`): his address read as a
+ * Match, with the players the lobby gathered. Resolves null for a game alone.
  */
 export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
   const join = params.get('join');
@@ -796,10 +791,12 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       // fine
     }
     const invite = `${home}?join=${id}${local ? '&net=local' : ''}`;
-    const battle =
-      `${MAP_LABEL[(Number(params.get('armies') ?? 2) | 0) > 2 ? 'four' : (params.get('map') ?? 'city')] ?? 'City'} · ` +
-      `${params.get('time') === 'night' ? 'night' : 'day'}` +
-      `${WEATHERS.includes(params.get('weather') ?? '') ? ` · ${params.get('weather')}` : ''}`;
+    // What the address asks for, as a game alone: the lobby adds the players. A shared
+    // game is always the plain skirmish.
+    const asked = new URLSearchParams(params);
+    for (const k of ['scenario', 'demo', 'units']) asked.delete(k);
+    const base = matchFromParams(asked);
+    const battle = fieldLabel(base);
     ui.set(
       `<div class="top"><h1>Invite your team</h1><span>${esc(battle)}</span></div>` +
         `<div class="cols2"><div class="col">` +
@@ -924,33 +921,26 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       };
       startBtn.addEventListener('click', () => {
         if (guests.length === 0) return;
-        // Passed on as plain words only: each player's game reads them again for itself.
-        const cfg: Config = {
-          seed: Number(params.get('seed') ?? 1) | 0,
-          map: word(params.get('map')) || 'city',
-          ai: word(params.get('ai')),
-          time: word(params.get('time')),
-          army: word(params.get('army')),
-          foe: word(params.get('foe')),
-          weather: word(params.get('weather')),
-          armies: versus ? '' : word(params.get('armies')),
-          humans: guests.length + 1,
-          versus,
-        };
+        // The one description of the game: every player's sim is built from this and
+        // nothing else. Versus is red against blue with players for both and no computer.
         const duties = [duty, ...guests.map((g) => g.duty)];
-        const teams = versus ? sides() : undefined;
-        guests.forEach((g, k) => g.link.send({ t: 'cfg', cfg, duties, you: k + 1, teams }));
+        const armyOf = versus ? sides() : duties.map(() => 0);
+        const match: Match = {
+          ...base,
+          armies: versus
+            ? base.armies.slice(0, 2).map((a) => ({ faction: a.faction, controller: 'human' }))
+            : base.armies,
+          players: duties.map((d, k) => ({ army: armyOf[k], duty: d })),
+        };
+        guests.forEach((g, k) => g.link.send({ t: 'cfg', match, you: k + 1 }));
         ui.hide();
         resolve(
           new Coop(
             'host',
             guests.map((g) => g.link),
             0,
-            duties,
+            match,
             listening,
-            cfg,
-            false,
-            teams ?? null,
           ),
         );
       });
@@ -1015,31 +1005,9 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
     });
     lobby = null;
     if (answer?.t === 'cfg') {
-      params.set('seed', String(answer.cfg.seed));
-      params.set('map', answer.cfg.map);
-      if (answer.cfg.ai) params.set('ai', answer.cfg.ai);
-      else params.delete('ai');
-      if (answer.cfg.time) params.set('time', answer.cfg.time);
-      else params.delete('time');
-      for (const k of ['army', 'foe', 'armies', 'weather'] as const) {
-        const v = answer.cfg[k];
-        if (v) params.set(k, v);
-        else params.delete(k);
-      }
-      // Nobody lifts the fog on the other side.
-      if (answer.teams) params.delete('fog');
       ui.hide();
-      // Our role as the host has it, unless we changed it in the last instant.
-      return new Coop(
-        'guest',
-        [link],
-        answer.you,
-        answer.duties,
-        null,
-        null,
-        answer.resume === true,
-        answer.teams ?? null,
-      );
+      // The game is the host's, whole; our role is as the host has it.
+      return new Coop('guest', [link], answer.you, answer.match, null, answer.resume === true);
     }
     link.close();
     if (answer?.t === 'bad') {

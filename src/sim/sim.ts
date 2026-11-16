@@ -99,7 +99,7 @@ import {
   newField,
 } from './path';
 import { nextInt } from './rng';
-import { validCommand } from './guard';
+import { admit, validCommand } from './guard';
 import {
   ACQUIRE_RANGE,
   AIR_HEIGHT,
@@ -406,8 +406,11 @@ export function step(w: World, commands: readonly Command[]): void {
   for (let c = 0; c < commands.length; c++) {
     // A malformed order is skipped, alike on every machine (src/sim/guard.ts). One that
     // still throws half way is given up the same way everywhere, so the clock never stops.
-    const cmd = commands[c];
-    if (!validCommand(cmd)) continue;
+    const given = commands[c];
+    if (!validCommand(given)) continue;
+    // A signed order goes in only as far as it is its army's to give.
+    const cmd = admit(w, given);
+    if (cmd === null) continue;
     try {
       applyCommand(w, cmd);
     } catch (e) {
@@ -1536,6 +1539,7 @@ function updateChaseFields(w: World): void {
 
 /** Fill slot `id` with a fresh unit standing where its position already says. */
 function initUnit(w: World, id: number, kindId: number, teamId: number): void {
+  w.born[id] = w.tick;
   w.velX[id] = 0;
   w.velY[id] = 0;
   w.targetX[id] = w.posX[id];

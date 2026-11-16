@@ -274,14 +274,15 @@ canvas ten times a second. Selection, control groups and the minimap are client 
 
 ## Current limits, on purpose
 
-- Blue does not react beyond shooting what it sees, and does not build: no AI until M7.
 - Your base buildings lift the fog for 28 units around them, on the client only: in the
   sim a building spots nothing. Enemy base buildings are drawn from the start.
-- Commands do not say who sent them; the sim takes the army from the units or the building
-  named. Multiplayer will add the sender and check it.
+- A game is described by one Match (decision 140, `src/sim/match.ts`), and every order a
+  player, a computer or a staff gives is signed with its army and checked against it inside
+  the sim (`admit` in `src/sim/guard.ts`). The sim does not yet know which player of a
+  shared army a unit belongs to: `seat` on a unit is only who last ordered it.
 - Fog of war (client) and the fight (sim) use the same sight rules but separate code; the
   fog is per cell, so they can disagree by a cell at the edges.
 - If all 96 flowfield slots are in use, further units walk straight until one frees up.
-- A command naming a slot that died and was reused reaches the new occupant. Harmless in
-  single player; multiplayer will add a generation counter per slot.
+- An order says which tick's picture it was given on (`seen`), and a unit born since is left
+  out of it, so an order no longer reaches whatever took a dead unit's number.
 - Models are untextured procedural geometry (see decision 011).

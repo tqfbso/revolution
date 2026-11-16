@@ -4,26 +4,10 @@
 // anything that is not a message this game sends is dropped without a word.
 import type { Command } from '../sim/commands';
 import type { Frame } from '../worker/protocol';
+import { DUTY_COUNT, MAX_PLAYERS, validMatch, type Match } from '../sim/match';
 import { PIECE_TICKS, type Piece } from './replay';
 
-export interface Config {
-  seed: number;
-  map: string;
-  ai: string;
-  /** 'night' for a night battle. */
-  time?: string;
-  /** The factions of red and of blue (`?army=`, `?foe=`). */
-  army?: string;
-  foe?: string;
-  /** 'rain', 'fog' or 'snow'. */
-  weather?: string;
-  /** '3' or '4' for a free-for-all against that many armies less one. */
-  armies?: string;
-  /** Players in the game: the computer is given more to fight three or four with. */
-  humans: number;
-  /** Versus (decision 114): the players fight each other, no computer. */
-  versus?: boolean;
-}
+export { DUTY_COUNT, MAX_PLAYERS };
 
 export type Msg =
   | { t: 'hello'; build: string; duty: number }
@@ -37,17 +21,10 @@ export type Msg =
    */
   | { t: 'wait'; n: number; versus?: boolean; sides?: number[]; you?: number }
   /**
-   * Host: the game starts. Every player's role by seat (0 = the host), your seat, and in
-   * a versus game the army each seat plays (all 0 otherwise).
+   * Host: the game starts. The whole of it (the map, the armies, and every player's army
+   * and role by seat, 0 = the host), and which seat is yours.
    */
-  | {
-      t: 'cfg';
-      cfg: Config;
-      duties: number[];
-      you: number;
-      resume?: boolean;
-      teams?: number[];
-    }
+  | { t: 'cfg'; match: Match; you: number; resume?: boolean }
   /** Host, to a player coming back: a stretch of the game so far (see replay.ts). */
   | ({ t: 'r' } & Piece)
   /** Host: the seat is taken again, by a player with this role. */
@@ -67,10 +44,6 @@ export type Msg =
   | { t: 'cam'; x: number; z: number; from?: number }
   | { t: 'mark'; x: number; z: number; from?: number };
 
-/** The most players in one game, the host included. */
-export const MAX_PLAYERS = 4;
-/** The roles a player can pick (DUTIES in net.ts). */
-export const DUTY_COUNT = 5;
 /** No message carries more ticks than this. */
 const MAX_FRAMES = 20000;
 
@@ -86,10 +59,6 @@ const isInt = (v: unknown, lo: number, hi: number): v is number =>
   Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
-/** A word from a setting: the map, the opponent, a faction, the weather. */
-const isWord = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9]{0,16}$/.test(v);
-/** A setting as the host passes it on: the word, or nothing if it is not one. */
-export const word = (v: string | null | undefined): string => (isWord(v) ? v : '');
 const isBuild = (v: unknown): v is string =>
   typeof v === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(v);
 const intList = (v: unknown, max: number, lo: number, hi: number): v is number[] =>
@@ -104,21 +73,6 @@ function frames(v: unknown): v is Frame[] {
     for (const c of f[1]) if (typeof c !== 'object' || c === null) return false;
   }
   return true;
-}
-
-function config(v: unknown): v is Config {
-  if (typeof v !== 'object' || v === null) return false;
-  const c = v as Record<string, unknown>;
-  return (
-    isNum(c.seed) &&
-    isWord(c.map) &&
-    isWord(c.ai) &&
-    (['time', 'army', 'foe', 'weather', 'armies'] as const).every(
-      (k) => c[k] === undefined || isWord(c[k]),
-    ) &&
-    isInt(c.humans, 1, MAX_PLAYERS) &&
-    (c.versus === undefined || isBool(c.versus))
-  );
 }
 
 /**
@@ -144,13 +98,9 @@ export function parseMsg(d: unknown): Msg | null {
         ? (m as Msg)
         : null;
     case 'cfg': {
-      const duties = m.duties;
-      if (!config(m.cfg) || !intList(duties, MAX_PLAYERS, 0, DUTY_COUNT - 1)) return null;
-      if (duties.length === 0 || !isInt(m.you, 0, duties.length - 1)) return null;
+      // The game itself is checked whole (sim/match.ts): nothing after this doubts it.
+      if (!validMatch(m.match) || !isInt(m.you, 0, m.match.players.length - 1)) return null;
       if (m.resume !== undefined && !isBool(m.resume)) return null;
-      if (m.teams !== undefined) {
-        if (!intList(m.teams, MAX_PLAYERS, 0, 1) || m.teams.length !== duties.length) return null;
-      }
       return m as Msg;
     }
     case 'r':

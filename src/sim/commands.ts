@@ -442,9 +442,28 @@ export interface ReinforceCommand {
 }
 
 /**
- * Every order may carry who gave it: the player's place (0 to 3) in a shared army, 0 when
- * he plays alone. Orders a staff or the computer gives carry none.
+ * Who gave an order (decision 140). Nobody says it of himself: the game that takes the order
+ * in (the player's own sim alone, the host's in a shared game) signs it, and the computers'
+ * and the staffs' orders are signed as they are handed in (src/sim/match.ts).
  */
+export interface Sender {
+  /** The player's place (0 to 3) among the players of the game. Not on a computer's order. */
+  by?: number;
+  /**
+   * The army that gives the order. Every sim checks an order that carries one before it
+   * applies it (`admit` in src/sim/guard.ts): only that army's own units and buildings obey,
+   * and nothing that is the game's own setup. An order without one is the game's own (the
+   * opening of a scenario, a test) and is not checked.
+   */
+  army?: number;
+  /**
+   * The tick of the picture the player was looking at when he gave it. A unit that came
+   * into the world on or after that tick stands in the place of one that has died since: it
+   * is not the one he meant, and is left out.
+   */
+  seen?: number;
+}
+
 export type Command = (
   | FellCommand
   | EntrenchCommand
@@ -486,4 +505,5 @@ export type Command = (
   | BombardCommand
   | HoldCommand
   | AttackCommand
-) & { by?: number };
+) &
+  Sender;

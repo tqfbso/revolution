@@ -4,17 +4,19 @@ import '@fontsource/inter/latin-400.css';
 import '@fontsource/inter/latin-500.css';
 import '@fontsource/inter/latin-600.css';
 import '@fontsource/inter/latin-700.css';
-import { Precipitation, WEATHER_NAMES, setWeather, skyOf, weatherByName } from './client/weather';
+import { Precipitation, setWeather, skyOf } from './client/weather';
 import { WEATHER_RAIN, WEATHER_SNOW } from './sim/units';
 import { factionOf, myKinds, setArmies } from './client/army';
-import { MAP_LABEL, openMenu, toMenu, wantsMenu } from './client/menu';
+import { openMenu, toMenu, wantsMenu } from './client/menu';
+import { matchFromParams, matchLabel, matchToParams } from './client/setup';
+import { isVersus } from './sim/match';
 import { runTickers, tickHtml, wireTickers } from './client/ticker';
-import { FACTIONS, factionByName } from './sim/factions';
+import { FACTIONS } from './sim/factions';
 import * as THREE from 'three/webgpu';
 import { CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
-import { generateMap, MAX_TEAMS, type Layout } from './sim/map';
-import { MAP_SIZE, MAX_UNITS, M_FOCUS, M_NONE, TICK_RATE } from './sim/world';
+import { generateMap, MAX_TEAMS } from './sim/map';
+import { MAP_SIZE, M_FOCUS, M_NONE, TICK_RATE } from './sim/world';
 import { ALERT_NOTE, Alerts } from './client/alerts';
 import { SAY_URGENT } from './client/voice';
 import { Cameras } from './client/cameras';
@@ -50,7 +52,7 @@ import { SupplyView } from './client/supply';
 import { WorksView } from './client/works';
 import { UnitView, flareHeight } from './client/units';
 import { setMe } from './client/me';
-import { TASK_HUNGRY, type Scenario, type Snapshot, type ToWorker } from './worker/protocol';
+import { TASK_HUNGRY, type Snapshot, type ToWorker } from './worker/protocol';
 import {
   KINDS,
   TOWN_INCOME,
@@ -106,20 +108,21 @@ async function start(): Promise<void> {
     openMenu(params);
     return;
   }
-  // Co-op: meet the other player before anything is built. A guest takes the host's map,
-  // seed and opponent; a shared game is always the plain skirmish.
+  // Co-op: meet the other players before anything is built. A shared game is the host's,
+  // and always the plain skirmish.
   const coop = await openCoop(params);
-  if (coop) for (const k of ['scenario', 'demo', 'units', 'control', 'speed']) params.delete(k);
+  if (coop) for (const k of ['control', 'speed']) params.delete(k);
+  // What is being played (decision 140): the one description of the game. Everything below
+  // that needs to know the map, the armies or the players reads it from here, and the sim
+  // is built from the same object.
+  const match = coop ? coop.match : matchFromParams(params);
+  const seat = coop ? coop.seat : 0;
   // Versus (decision 114): red against blue, each seeing only its own side.
-  const versus = coop?.versus === true;
-  const myTeam = coop ? coop.team : 0;
+  const versus = isVersus(match);
+  const myTeam = match.players[seat].army;
   setMe(myTeam);
   if (versus) params.delete('fog');
-  const unitCount = Math.min(Math.max(Number(params.get('units') ?? 3000) | 0, 0), MAX_UNITS);
-  const seed = Number(params.get('seed') ?? 1) | 0;
-  const wanted = params.get('scenario');
-  const scenario: Scenario =
-    wanted === 'roam' || wanted === 'clash' || wanted === 'assault' ? wanted : 'skirmish';
+  const { seed, scenario, night, weather, map: layout } = match;
 
   const { renderer, canvas, backend } = await createRenderer(params.get('renderer') === 'webgl');
   const quality = readQuality(params);
@@ -137,23 +140,16 @@ async function start(): Promise<void> {
   // Shadow edges a little soft, as under a hazy sun (and softer still by moonlight).
   if (quality !== 'low') renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  // `?time=night`: a night battle (decision 113). A moonlit night, not a black one: the
-  // ground and the troops stay readable, and fire is what stands out.
-  const night = params.get('time') === 'night';
-  // `?army=nato|russia|china` is red's faction and `?foe=` blue's (M10, decision 123): the
-  // alliance against Russia unless chosen. Only the skirmish has factions; the measuring
-  // scenarios keep the plain table their numbers were taken on (`none` gives it here too).
-  const skirmishGame = scenario === 'skirmish';
-  const pickFaction = (key: string, fallback: string): number =>
-    skirmishGame ? factionByName(params.get(key) ?? fallback) : 0;
-  const factions = [pickFaction('army', 'nato'), pickFaction('foe', 'russia'), 0, 0];
-  // The third and fourth armies take the factions that follow the second's, in turn.
-  for (let t = 2; t < 4; t++) factions[t] = factions[1] > 0 ? (factions[t - 1] % 3) + 1 : 0;
-  setArmies(factions, myTeam);
+  // A night battle (decision 113) is a moonlit night, not a black one: the ground and the
+  // troops stay readable, and fire is what stands out.
+  // Each army's faction (M10, decision 123), for everything on screen that names a unit.
+  setArmies(
+    match.armies.map((a) => a.faction),
+    myTeam,
+  );
   if (night) renderer.toneMappingExposure = 1.15;
-  // `?weather=rain|fog|snow` (decision 125): everyone sees less far (in the sim), and the
-  // sky, the light and the ground are that weather's. Only the skirmish has weather.
-  const weather = skirmishGame ? weatherByName(params.get('weather')) : 0;
+  // The weather (decision 125): everyone sees less far (in the sim), and the sky, the light
+  // and the ground are that weather's.
   const sky = skyOf(weather);
   const scene = new THREE.Scene();
   // By night the weather keeps the night's colours, a little greyer, and its own haze.
@@ -222,25 +218,7 @@ async function start(): Promise<void> {
     scene.environmentIntensity = night ? 0.5 : 0.45;
     pmrem.dispose();
   }
-  // The skirmish is fought in the city unless `?map=euro`, `?map=ridge` or `?map=river` asks
-  // for another map; the other scenarios are laid out for the river.
-  // `?armies=3|4`: a free-for-all (decision 124), every army for itself, on the map with
-  // four corners. Not in a versus game, where the players are the two sides.
-  const armies =
-    scenario === 'skirmish' && !versus
-      ? Math.min(Math.max(Number(params.get('armies') ?? 2) | 0, 2), 4)
-      : 2;
-  const asked = armies > 2 ? 'four' : params.get('map');
-  const layout: Layout =
-    scenario !== 'skirmish' || asked === 'river'
-      ? 'river'
-      : asked === 'four'
-        ? 'four'
-        : asked === 'ridge'
-          ? 'ridge'
-          : asked === 'euro'
-            ? 'euro'
-            : 'city';
+  const armies = match.armies.length;
   const map = generateMap(seed, layout);
   fog.setMap(map);
   const terrain = new Terrain(map, fog, look);
@@ -314,6 +292,8 @@ async function start(): Promise<void> {
   };
   showPause();
   let speedNow = 1;
+  /** The tick of the picture on screen: an order says which one it was given on. */
+  let seenTick = 0;
   const guest = () => coop !== null && coop.role === 'guest' && coop.live;
   const setPaused = (p: boolean) => {
     // A guest asks; the host's clock is the only one, and its answer sets the screen.
@@ -328,8 +308,10 @@ async function start(): Promise<void> {
     coop?.state(paused, speedNow);
   };
   const deliver = (command: Command) => {
-    // Signed, so that the score knows whose units did what (decision 103).
-    command.by = coop ? coop.seat : 0;
+    // Who gave it is not ours to say: the sim that takes the order in signs it with our
+    // seat and our army (decision 140). We say only which picture we were looking at, so
+    // that a unit that has since taken a dead one's number is left out.
+    command.seen = seenTick;
     if (guest()) coop?.sendCommand(command);
     else post({ type: 'command', command });
   };
@@ -347,6 +329,7 @@ async function start(): Promise<void> {
     }
   };
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
+    seenTick = e.data.tick;
     structures.applySnapshot(e.data, performance.now() / 1000);
     works.applySnapshot(e.data);
     cameras.applySnapshot(e.data, performance.now() / 1000);
@@ -397,10 +380,7 @@ async function start(): Promise<void> {
             : [{ name: 'You', role: DUTIES[0] }],
         {
           armies,
-          label:
-            `${MAP_LABEL[layout]} · ${night ? 'night' : 'day'}` +
-            `${weather > 0 ? ` · ${WEATHER_NAMES[weather]}` : ''} · ` +
-            `${versus ? 'versus' : `${coop ? 'co-op, ' : ''}${aiLevel(params.get('ai'))} AI`}`,
+          label: matchLabel(match),
           toMenu: () => toMenu(params),
         },
       )
@@ -476,10 +456,8 @@ async function start(): Promise<void> {
     else if (e.code === 'KeyT' && !e.repeat) board.quickMove();
     else if (e.code === 'KeyR' && !e.repeat) board.quickMove(M_FOCUS);
   });
-  // `?ai=recruit|easy|normal|hard|off` picks the opponent of the skirmish. Easy is the
-  // default: the first playtest found normal hard to beat.
-  const ai = aiLevel(params.get('ai'));
-  const demo = params.get('demo') === '1';
+  // `?demo=1`: the computer plays our army as well, to watch it at work.
+  const demo = match.armies[myTeam].controller !== 'human';
   // Game speed: `?speed=N` for testing, or the 0.75x / 1x choice on screen (remembered).
   let saved: string | null = null;
   try {
@@ -489,24 +467,8 @@ async function start(): Promise<void> {
   }
   const speed = Number(params.get('speed') ?? saved ?? 1) || 1;
   speedNow = speed;
-  post({
-    type: 'init',
-    seed,
-    layout,
-    units: unitCount,
-    scenario,
-    ai,
-    demo,
-    speed,
-    net: coop ? coop.role : 'solo',
-    humans: coop ? coop.humans : 1,
-    versus,
-    team: myTeam,
-    night,
-    weather,
-    factions,
-    armies,
-  });
+  const controlAll = !coop && params.get('control') === 'all';
+  post({ type: 'init', match, seat, speed, net: coop ? coop.role : 'solo', free: controlAll });
   const speedEl = document.getElementById('game-speed') as HTMLSelectElement | null;
   const setSpeed = (v: number) => {
     speedNow = v;
@@ -516,8 +478,7 @@ async function start(): Promise<void> {
   };
   if (coop) {
     coop.onFrames = (frames) => post({ type: 'frames', frames });
-    coop.onCommand = (command, seat) =>
-      post({ type: 'command', command, from: { seat, team: coop.teams[seat] ?? 0 } });
+    coop.onCommand = (command, from) => post({ type: 'command', command, from });
     coop.onControl = (p, v) => {
       if (p !== undefined) setPaused(p);
       if (v === 0.75 || v === 1) setSpeed(v);
@@ -561,7 +522,7 @@ async function start(): Promise<void> {
   if (scenario === 'skirmish' && map.startX[myTeam] >= 0) {
     rts.look(map.startX[myTeam] * 4 + 14, map.startY[myTeam] * 4 + 10, 95);
   }
-  input.controlAll = params.get('control') === 'all';
+  input.controlAll = controlAll;
   structures.revealAll = input.controlAll || demo;
   structures.farDetail = params.get('far') !== '0';
   // Y: see through the buildings in front of the view, or not. Kept for the next game.
@@ -838,7 +799,10 @@ async function start(): Promise<void> {
   }, 250);
 
   // Reinforcements: a combined-arms battlegroup of 500 per side, attacking toward the centre.
+  // An order of the game's own, not a player's: it goes in unsigned, and only a game alone
+  // takes it (in a shared game nobody conjures troops).
   document.getElementById('add-units')?.addEventListener('click', () => {
+    if (coop) return;
     for (let team = 0; team < 2; team++) {
       const dir = team === 0 ? -1 : 1;
       const mix: [number, number, number][] = [
@@ -854,7 +818,7 @@ async function start(): Promise<void> {
         [KIND_EW, 3, 185],
       ];
       for (const [kind, count, back] of mix) {
-        send({
+        const command: Command = {
           type: CMD_SPAWN,
           count,
           team,
@@ -865,7 +829,8 @@ async function start(): Promise<void> {
           wander: scenario === 'roam',
           advanceX: scenario === 'roam' ? undefined : fx(-dir * 150),
           advanceY: scenario === 'roam' ? undefined : 0,
-        });
+        };
+        post({ type: 'command', command, setup: true });
       }
     }
   });
@@ -910,21 +875,10 @@ async function start(): Promise<void> {
   document.getElementById('reset')?.addEventListener('click', () => location.reload());
   document.getElementById('to-menu')?.addEventListener('click', () => toMenu(params));
   document.getElementById('coop-host')?.addEventListener('click', () => {
-    // A fresh game as the host: the lobby gives the link to send.
-    const next = new URLSearchParams();
-    for (const k of [
-      'map',
-      'ai',
-      'time',
-      'weather',
-      'army',
-      'foe',
-      'armies',
-      'seed',
-      'quality',
-      'renderer',
-      'net',
-    ]) {
+    // A fresh game as the host, on this battlefield: the lobby gives the link to send.
+    const next = matchToParams({ ...match, scenario: 'skirmish' });
+    next.delete('demo');
+    for (const k of ['quality', 'renderer', 'net']) {
       const v = params.get(k);
       if (v !== null) next.set(k, v);
     }
@@ -1127,13 +1081,6 @@ async function start(): Promise<void> {
     routes,
   };
   document.getElementById('loading')?.remove();
-}
-
-/** `?ai=` as one of the opponents there are: anything else is the default, easy. */
-function aiLevel(level: string | null): 'recruit' | 'easy' | 'normal' | 'hard' | 'off' {
-  return level === 'recruit' || level === 'normal' || level === 'hard' || level === 'off'
-    ? level
-    : 'easy';
 }
 
 start().catch((err) => {
