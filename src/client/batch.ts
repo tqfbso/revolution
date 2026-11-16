@@ -6,27 +6,82 @@ import * as THREE from 'three/webgpu';
  * for particles).
  */
 export class Batch {
-  readonly mesh: THREE.InstancedMesh;
-  readonly m: Float32Array;
-  readonly t: Float32Array;
+  /** Replaced by a larger one when a growing batch fills up: do not keep a reference. */
+  mesh: THREE.InstancedMesh;
+  m: Float32Array;
+  t: Float32Array;
   n = 0;
-  private readonly tint: THREE.InstancedBufferAttribute;
+  private tint: THREE.InstancedBufferAttribute;
+  /** Instances there is room for now; grows by doubling up to `capacity`. */
+  private size: number;
 
+  /**
+   * `start`: room to begin with, if less than `capacity`. A unit batch could be asked for
+   * thousands of instances but seldom holds more than a few hundred: 71 of them reserving
+   * their worst case cost 40 MB on each of the CPU and the GPU. The mesh is swapped for a
+   * larger one in the same parent when it fills.
+   */
   constructor(
     geometry: THREE.BufferGeometry,
     material: THREE.Material,
     readonly capacity: number,
+    start = capacity,
   ) {
-    this.t = new Float32Array(capacity * 4);
+    this.size = Math.min(start, capacity);
+    this.t = new Float32Array(this.size * 4);
     this.tint = new THREE.InstancedBufferAttribute(this.t, 4);
     this.tint.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('aTint', this.tint);
-    this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    this.mesh = new THREE.InstancedMesh(geometry, material, this.size);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false; // culled per instance on the CPU instead
     this.mesh.matrixAutoUpdate = false;
     this.mesh.count = 0;
     this.m = this.mesh.instanceMatrix.array as Float32Array;
+  }
+
+  /** Room for one more instance: false only at full capacity. */
+  private room(): boolean {
+    if (this.n < this.size) return true;
+    if (this.size >= this.capacity) return false;
+    const size = Math.min(this.capacity, this.size * 2);
+    const old = this.mesh;
+    const m = new Float32Array(size * 16);
+    m.set(this.m);
+    const t = new Float32Array(size * 4);
+    t.set(this.t);
+    // A new geometry that shares the shape and carries the larger tints: a renderer never
+    // sees an attribute of a geometry it has drawn change size.
+    const geometry = new THREE.BufferGeometry();
+    for (const [name, a] of Object.entries(old.geometry.attributes)) {
+      if (name !== 'aTint') geometry.setAttribute(name, a);
+    }
+    geometry.setIndex(old.geometry.index);
+    for (const g of old.geometry.groups) geometry.addGroup(g.start, g.count, g.materialIndex);
+    this.tint = new THREE.InstancedBufferAttribute(t, 4);
+    this.tint.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('aTint', this.tint);
+    const mesh = new THREE.InstancedMesh(geometry, old.material, size);
+    mesh.instanceMatrix = new THREE.InstancedBufferAttribute(m, 16);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.matrixAutoUpdate = false;
+    mesh.count = old.count;
+    mesh.castShadow = old.castShadow;
+    mesh.receiveShadow = old.receiveShadow;
+    mesh.visible = old.visible;
+    mesh.renderOrder = old.renderOrder;
+    const parent = old.parent;
+    if (parent) {
+      parent.remove(old);
+      parent.add(mesh);
+    }
+    old.dispose();
+    this.mesh = mesh;
+    this.m = m;
+    this.t = t;
+    this.size = size;
+    return true;
   }
 
   /** Add an upright instance rotated about Y (sin/cos may carry a uniform scale `s`). */
@@ -42,7 +97,7 @@ export class Batch {
     b: number,
     a: number,
   ): void {
-    if (this.n >= this.capacity) return;
+    if (this.n >= this.size && !this.room()) return;
     const m = this.m;
     const o = this.n * 16;
     m[o] = cos;
@@ -72,7 +127,7 @@ export class Batch {
 
   /** Add an instance from a full frame: three axes (already scaled) and a position. */
   frame(f: Float32Array, r: number, g: number, b: number, a: number): void {
-    if (this.n >= this.capacity) return;
+    if (this.n >= this.size && !this.room()) return;
     const m = this.m;
     const o = this.n * 16;
     m[o] = f[0];

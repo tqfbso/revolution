@@ -69,7 +69,8 @@ import type { Terrain } from './terrain';
 // collapsed. A ruin is never removed. The readability layer on top (who holds a house, who
 // holds the town) is drawn with two small instanced batches.
 
-const CELL = 4;
+/** World units per map cell. */
+const CELL = MAP_SIZE / MAP_CELLS;
 /**
  * A storey as drawn: taller than the sim's (which only ranks buildings by height), so that
  * a five-floor block stands well over a tank and a street reads as a street.

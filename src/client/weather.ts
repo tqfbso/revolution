@@ -40,8 +40,6 @@ export function setWeather(kind: number, tex: THREE.Texture | null): void {
   noise = tex;
 }
 
-export const weatherNow = (): number => now;
-
 /** The weather called `name` in a URL or a menu, or clear. */
 export function weatherByName(name: string | null | undefined): number {
   const k = WEATHER_NAMES.indexOf((name ?? '') as (typeof WEATHER_NAMES)[number]);

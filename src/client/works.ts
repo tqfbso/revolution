@@ -2,7 +2,16 @@ import { ME } from './me';
 import type { Clutter } from './clutter';
 import * as THREE from 'three/webgpu';
 import { attribute, float, mix } from 'three/tsl';
-import { MAP_CELLS, NO_OWNER, T_FORD, T_FOREST, T_OPEN, isWork, type GameMap } from '../sim/map';
+import {
+  MAP_CELLS,
+  MAP_SIZE,
+  NO_OWNER,
+  T_FORD,
+  T_FOREST,
+  T_OPEN,
+  isWork,
+  type GameMap,
+} from '../sim/map';
 import {
   WORKS,
   WORK_COUNT,
@@ -29,7 +38,8 @@ import type { Terrain } from './terrain';
 // thousands of cells of them, so each kind is one instanced draw call (walls: two, a post
 // and the arms that join it to its neighbours), rebuilt only when something changed.
 
-const CELL = 4;
+/** World units per map cell. */
+const CELL = MAP_SIZE / MAP_CELLS;
 const CELLS = MAP_CELLS * MAP_CELLS;
 const CONCRETE = 0x8d8b84;
 const STEEL = 0x4b4f52;

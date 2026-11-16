@@ -5,9 +5,10 @@ import * as THREE from 'three/webgpu';
 import { attribute } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fromFx } from '../sim/fixed';
-import type { GameMap } from '../sim/map';
+import { MAP_CELLS, MAP_SIZE, type GameMap } from '../sim/map';
 import type { Fog } from './fog';
-const CELL = 4;
+/** World units per map cell. */
+const CELL = MAP_SIZE / MAP_CELLS;
 
 const WIDTH = 11.4;
 const CONCRETE = new THREE.Color(0x8d8a82);
