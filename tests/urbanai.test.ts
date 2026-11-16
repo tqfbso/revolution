@@ -84,7 +84,7 @@ describe('the computer in a city', () => {
       w.sHp[s] = 0;
       razeStructure(map, s);
     }
-    markTopology();
+    markTopology(w);
     const from = w.count;
     step(w, [
       {

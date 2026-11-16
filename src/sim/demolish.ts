@@ -109,7 +109,7 @@ export function updateFelling(w: World): void {
     map.type[c] = T_OPEN;
     map.baseType[c] = T_OPEN;
     w.felled[w.felledCount++] = c;
-    markGround();
+    markGround(w);
     w.events.push(EV_FELL, c, w.team[i]);
   }
 }
