@@ -800,7 +800,9 @@ async function start(): Promise<void> {
     if (!selectionEl) return;
     const n = new Array<number>(KINDS.length).fill(0);
     let aboard = 0;
-    for (const id of units.selectedIds()) {
+    // One scan of all units a refresh, not three.
+    const ids = units.selectedIds();
+    for (const id of ids) {
       n[units.kindOf(id)]++;
       if (KINDS[units.kindOf(id)].carry > 0) aboard += units.load[id];
     }
@@ -808,12 +810,10 @@ async function start(): Promise<void> {
       .map((k, i) => (n[i] > 0 ? `${n[i]} ${k.name.toLowerCase()}` : ''))
       .filter((p) => p !== '');
     if (aboard > 0) parts.push(`${aboard} squads aboard`);
-    const starving = units
-      .selectedIds()
-      .filter((id) => (units.task[id] & TASK_HUNGRY) !== 0).length;
+    const starving = ids.filter((id) => (units.task[id] & TASK_HUNGRY) !== 0).length;
     if (starving > 0) parts.push(`${starving} out of supply: half fire rate`);
     const under = new Map<number, number>();
-    for (const id of units.selectedIds()) {
+    for (const id of ids) {
       if (units.cmdr[id] >= 0) under.set(units.cmdr[id], (under.get(units.cmdr[id]) ?? 0) + 1);
     }
     const led = [...under].map(([slot, count]) => `${count} under ${COMMANDER_NAMES[slot]}`);
@@ -1057,7 +1057,9 @@ async function start(): Promise<void> {
       sc.far = 900;
       sc.updateProjectionMatrix();
     }
-    if (flareLights.length > 0) {
+    if (flareLights.length > 0 && units.flares.length === 0) {
+      for (const l of flareLights) l.intensity = 0;
+    } else if (flareLights.length > 0) {
       const seconds = now / 1000;
       const byDist = units.flares
         .map((f) => ({ f, d: Math.hypot(f.x - focus.x, f.z - focus.z) }))

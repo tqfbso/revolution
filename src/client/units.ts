@@ -227,6 +227,9 @@ export interface LodStats {
  * between the last two 20 Hz snapshots, cull against the view frustum, pick a level of
  * detail by distance, and write the instance into that level's batch.
  */
+/** Room a unit batch starts with; it doubles as needed up to its capacity (see Batch). */
+const UNIT_BATCH_START = 256;
+
 export class UnitView {
   readonly group = new THREE.Group();
   readonly rings: THREE.InstancedMesh;
@@ -371,7 +374,7 @@ export class UnitView {
     const shadows = look.shadows;
     this.nearBudget = look.quality === 'low' ? 120 : look.quality === 'high' ? 500 : 300;
     const batch = (g: THREE.BufferGeometry, cap: number, lod: number, men = false) => {
-      const b = new Batch(g, material, cap);
+      const b = new Batch(g, material, cap, UNIT_BATCH_START);
       // Far LOD is a few pixels: no shadow work for it. Soldiers are five meshes a squad, so
       // only the nearest cast any; a vehicle keeps its shadow one level further out.
       b.mesh.castShadow = shadows && lod < (men ? 1 : 2);

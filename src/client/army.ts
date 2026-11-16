@@ -1,7 +1,7 @@
 // Which faction each army is (M10, sim/factions.ts), for everything on screen that names a
 // unit, prices it or draws how far it sees. Set once by main.ts before the views are made.
 import { pricesOf, type UnitPrice } from '../sim/economy';
-import { FACTIONS, type Faction } from '../sim/factions';
+import { FACTIONS } from '../sim/factions';
 import type { UnitKind } from '../sim/units';
 
 const factions = [0, 0, 0, 0];
@@ -15,8 +15,6 @@ export function setArmies(list: readonly number[], team: number): void {
 
 /** The faction of the army of `team`. */
 export const factionOf = (team: number): number => factions[team] ?? 0;
-/** The player's own faction. */
-export const myFaction = (): Faction => FACTIONS[mine];
 /** The player's version of every kind of unit. */
 export const myKinds = (): readonly UnitKind[] => FACTIONS[mine].kinds;
 /** What the player pays for each kind (a kind it does not field comes from no building). */

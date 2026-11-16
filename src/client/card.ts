@@ -35,7 +35,7 @@ import {
 } from '../sim/economy';
 import { fx } from '../sim/fixed';
 import { FELL_CELLS } from '../sim/demolish';
-import { MAP_CELLS, S_BUILDING, T_FOREST, canPlace, type GameMap } from '../sim/map';
+import { MAP_CELLS, MAP_SIZE, S_BUILDING, T_FOREST, canPlace, type GameMap } from '../sim/map';
 import {
   CAMERA_COST,
   KINDS,
@@ -64,7 +64,8 @@ import type { Terrain } from './terrain';
 import type { UnitView } from './units';
 import type { WorksView } from './works';
 
-const CELL = 4;
+/** World units per map cell. */
+const CELL = MAP_SIZE / MAP_CELLS;
 const QUEUE_SLOTS = 8;
 /** Names short enough for a queue slot, and what each unit is for (the button's tooltip). */
 const SHORT = [
