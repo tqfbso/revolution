@@ -459,6 +459,56 @@ From the proposal in the "Design tactical attack formations" thread.
       Menu: Armies). The others are computers; co-op players share red.
 - [ ] People against people in a free-for-all (the lobby knows two sides only)
 
+## Inspiration build order (decision 136, planned)
+
+From the inspiration review of 2026-11-16 (screenshots of another isometric RTS, used for
+ideas only: our own look, units and interface). Design and drawings are in the Revolution
+Hub, section 4A. Fabio answered the open questions the same day. This comes after the
+review fixes and the order-ownership refactor agreed on 2026-11-15, which stay first.
+
+- [ ] I1 Deaths you can see (client only). A man a squad loses becomes a body: thrown
+      away from a high-explosive hit, crumpled where he stood from bullets. Bodies stay all
+      game in six to eight poses, mirrored and turned; far ones are one pre-posed instance
+      each, and past a budget the oldest far ones are baked into the ground wear texture.
+      Also: troops visibly leave carriers by the ramp or tailgate on the existing unload
+      event; buildings lose their top floors first as health falls (same thresholds), with
+      soot and fire in the windows. No blood.
+- [ ] I2 Front line (client only). A line between your ground and the enemy's, from what
+      your army knows (units, garrisons, held flags, enemies seen recently), teeth on the
+      enemy side, on the minimap and on the zoomed-out map.
+- [ ] I3 Lethal open ground and squad gunners (rules, new golden hash). High-explosive
+      direct fire (tank, missile, helicopter, strike drone) gets a small blast against men
+      in the open; rubble and sandbags halve it, a trench quarters it, walls as today. One
+      man in every rifle squad carries a light machine gun: a rest bonus on rubble,
+      sandbags, sills and broken walls, and fire that pins infantry (the first suppression
+      rule). Measured against `tests/assault.test.ts` and computer army mixes, because
+      tank spam must still not win.
+- [ ] I4 Formations. One button on any selection and on every commander. Default on roads
+      and streets: convoy (vehicles in file at fixed gaps, infantry on both pavements,
+      corners cleared before vehicles cross). Default in the open: the doctrine shape for
+      the ground (road march column, wedge in fields, line facing a known enemy, echelon
+      to an open flank, infantry first in woods, bounding overwatch near contact,
+      herringbone or coil at a halt). Any shape can be forced, convoy in a field included,
+      and commanders keep the shape they are given.
+- [ ] I5 Ground-floor collapse and fire (rules). No floor orders: a garrison places itself.
+      Shells, mortars, rockets and air strikes hit the top floors; point-blank tank fire,
+      charges and vehicles blowing up against the wall hit the ground floor, a share of the
+      same health. When that share is gone the block pancakes. Fire climbs a floor at a
+      time and moves men down and out by itself. Average times to level stay where they
+      are (checked with `tools/toll.ts`).
+- [ ] I6 Mortars, rooftops, ambush. A mortar team for every army (the one new kind of
+      unit); a Roof order with reach and top attack on tanks, at the price of exposure; an
+      ambush stance that holds fire until a vehicle enters a drawn zone.
+- [ ] I7 Air strikes for the three big armies only, on a long cooldown, each with its own
+      flavour (one guided bomb, a stick of bombs, a drone swarm). Today's civilian fine is
+      the only penalty (Fabio: the cost today is fine).
+- [ ] I8 The guerrilla. The No faction choice becomes the guerrilla army (which gives the
+      game its name; Fabio will share the story later). Faction 0 stays as a hidden base
+      table for tests and the golden hash. Technicals, heavy drones, militia raised in held
+      towns, rocket teams; no tanks, helicopters, guns or air strikes. Balanced by cover
+      among civilians, informants in held towns, knowing the city and ambushes. Built with
+      the M10 unique units and the authored models.
+
 ## M10 Factions
 
 - [x] Three factions (decision 123): Western alliance, Russia, China. Each is its own

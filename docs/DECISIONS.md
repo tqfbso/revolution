@@ -2830,3 +2830,31 @@ Measured in the cloud (`units.update` alone, clash scenario, camera 160 m out): 
 units 6.3 to 2.4 ms, 4,000 units 8.5 to 1.5 ms; per-frame upload 5.8 to 1.0 MB. The
 shader-posed rig (review's proper fix) is still the foundation for authored animation.
 Client only; the sim and the golden hash are untouched.
+
+## 136. The inspiration build order (2026-11-16)
+
+Fabio sent screenshots of another isometric RTS as inspiration, mainly for the look. We
+take ideas only; its art, interface and units are not copied. The review (Hub, section
+4A) found the cause of his main complaint in the code: a rifle squad is one unit drawn as
+several men, a rocket takes part of its health, and the men that health no longer covers
+stop being drawn. Nobody falls, and the squad beside it is untouched because only
+artillery has a blast. So a hit reads as a miss.
+
+Fabio's answers, the same day:
+
+- No faction becomes a guerrilla army. Faction 0 stays as the base table under the tests.
+- Today's civilian fine is enough; no extra penalty.
+- Bodies stay all game, in several poses.
+- Both the floor-by-floor look and the ground-floor collapse, without floor orders. The
+  weapon decides which floor it hits; the ground floor is a share of the same health, so
+  average destruction times hold.
+- Air strikes for the three big armies only; the guerrilla is balanced by other means.
+- A machine gunner in every rifle squad rather than a new team.
+- A formation button with defaults: convoy on roads and streets, doctrine shapes in the
+  open, either forced on any selection or commander.
+- New from Fabio: a front line drawn on the minimap and the zoomed-out map.
+
+Order: drawing-only work first (deaths, dismount, floors, front line), then the rules
+that change how infantry fights (blast in the open, squad gunners), then formations, the
+ground-floor collapse, mortars and rooftops, air strikes, and the guerrilla last, with
+the unique units and authored models. All of it after the review fixes.
