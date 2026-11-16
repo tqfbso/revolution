@@ -348,7 +348,7 @@ function place(w: World, team: number, type: number, x: number, y: number, done:
   // New units gather just south of the building until the player says otherwise.
   w.sRallyX[s] = ((2 * x + b.w) << CELL_SHIFT) >> 1;
   w.sRallyY[s] = clampInt(((y + b.h) << CELL_SHIFT) + fx(9), 0, MAP_SIZE_FX - 1);
-  markTopology();
+  markTopology(w);
   return s;
 }
 
