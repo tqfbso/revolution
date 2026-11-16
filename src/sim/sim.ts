@@ -94,6 +94,8 @@ import {
   DIR_Y,
   UNREACHABLE,
   buildField,
+  growField,
+  seedField,
   clearLine,
   flowDirection,
   newField,
@@ -1457,7 +1459,9 @@ function acquireField(w: World, goal: number, layer: number): number {
 function fillField(w: World, f: number): void {
   const dist = (w.fieldDist[f] ??= newField());
   goalScratch[0] = w.fieldGoal[f];
-  buildField(w.map, w.fieldClass[f], dist, goalScratch, 1, UNREACHABLE - 1);
+  // Searched only as far as units on it need (see fieldDirection).
+  seedField(w.map, w.fieldClass[f], dist, goalScratch, 1);
+  w.fieldSettled[f] = -1;
   w.fieldStale[f] = 0;
   // A field costs a few milliseconds and a city gives every squad and truck its own goal:
   // build a few a tick and let the rest walk straight until theirs is made.
@@ -1505,6 +1509,22 @@ function routeGoal(map: GameMap, cls: number, goal: number): number {
   )
     ? mid
     : own;
+}
+
+/** Which way field `f` leads from `cell` for layer `cls`, searching on first if need be. */
+function fieldDirection(w: World, cls: number, f: number, cell: number): number {
+  const dist = w.fieldDist[f]!;
+  if (dist[cell] > w.fieldSettled[f]) {
+    w.fieldSettled[f] = growField(
+      w.map,
+      w.fieldClass[f],
+      dist,
+      w.fieldSettled[f],
+      cell,
+      UNREACHABLE - 1,
+    );
+  }
+  return flowDirection(w.map, cls, dist, cell);
 }
 
 /** Bring stale field `f` up to date if this tick's budget allows. True if it was rebuilt. */
@@ -3072,13 +3092,13 @@ function steer(w: World): void {
         if (field < 0) field = w.path[i] = acquireField(w, routeGoal(map, cls, w.goal[i]), cls);
       }
       if (field >= 0) {
-        dir = flowDirection(map, cls, w.fieldDist[field]!, cell);
+        dir = fieldDirection(w, cls, field, cell);
         if (
           w.fieldStale[field] !== 0 &&
           (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0) &&
           rebuildField(w, field)
         ) {
-          dir = flowDirection(map, cls, w.fieldDist[field]!, cell);
+          dir = fieldDirection(w, cls, field, cell);
         }
         if (w.fieldStale[field] !== 0 && (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0)) {
           // An old route has run into new ground: wait a tick for it to be redrawn.
@@ -3093,7 +3113,7 @@ function steer(w: World): void {
               field = -1;
             } else {
               field = w.path[i] = acquireField(w, own, cls);
-              if (field >= 0) dir = flowDirection(map, cls, w.fieldDist[field]!, cell);
+              if (field >= 0) dir = fieldDirection(w, cls, field, cell);
             }
           }
         }

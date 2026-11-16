@@ -39,15 +39,18 @@ const bucketHead = new Int32Array(BUCKETS);
 const entryCell = new Int32Array(CELL_COUNT * 8 + 8);
 const entryNext = new Int32Array(CELL_COUNT * 8 + 8);
 
+/** How many fields have been started in this process: a measuring aid, never part of the game. */
+export const fieldStats = { builds: 0 };
+
+/** `growField`'s answer once a field's search has nothing left to do. */
+export const FIELD_DONE = 0x7fffffff;
+
 /**
  * Fill `dist` with the travel cost from every cell to the nearest of `goals` for the
  * movement layer `layer` (see layerOf), not searching past `limit`. Diagonal steps never
  * cut a blocked corner. A field work in the way is a very expensive step, not a wall: the
  * route goes through one only if there is no way round.
  */
-/** How many fields have been built in this process: a measuring aid, never part of the game. */
-export const fieldStats = { builds: 0 };
-
 export function buildField(
   map: GameMap,
   layer: number,
@@ -56,23 +59,65 @@ export function buildField(
   goalCount: number,
   limit: number,
 ): void {
+  seedField(map, layer, dist, goals, goalCount);
+  growField(map, layer, dist, -1, -1, limit);
+}
+
+/**
+ * Start a field that `growField` then searches as far as it is needed: every cell
+ * unreached but the goals. The search so far is "settled up to -1".
+ */
+export function seedField(
+  map: GameMap,
+  layer: number,
+  dist: Uint16Array,
+  goals: ArrayLike<number>,
+  goalCount: number,
+): void {
   fieldStats.builds++;
   const cost = map.pathCost[layer];
-  const hard = map.cost[layer];
   dist.fill(UNREACHABLE);
+  for (let g = 0; g < goalCount; g++) if (cost[goals[g]] !== 0) dist[goals[g]] = 0;
+}
+
+/**
+ * Carry on the search of a field whose costs are final up to `settled`, until the cost of
+ * `cell` is final too and the search has gone a good way past it (-1: to the end).
+ * Returns how far costs are now final, or FIELD_DONE.
+ *
+ * Dijkstra settles cells in order of cost, so a field searched in steps holds exactly the
+ * same costs as one searched in one go, wherever it stopped: a cell the search has not
+ * settled yet costs more than every settled one, and `flowDirection` at a settled cell
+ * never steps to such a cell either way. Most move orders cross a fraction of the map, and
+ * a search that stops past the units that asked for it costs that fraction.
+ */
+export function growField(
+  map: GameMap,
+  layer: number,
+  dist: Uint16Array,
+  settled: number,
+  cell: number,
+  limit: number,
+): number {
+  const cost = map.pathCost[layer];
+  const hard = map.cost[layer];
   bucketHead.fill(-1);
   let entries = 0;
   let pending = 0;
-  for (let g = 0; g < goalCount; g++) {
-    const c = goals[g];
-    if (cost[c] === 0 || dist[c] === 0) continue;
-    dist[c] = 0;
+  // The frontier is every cell reached but not settled: its cost so far is in `dist`.
+  for (let c = 0; c < CELL_COUNT; c++) {
+    const v = dist[c];
+    if (v <= settled || v === UNREACHABLE) continue;
+    const nb = v & (BUCKETS - 1);
     entryCell[entries] = c;
-    entryNext[entries] = bucketHead[0];
-    bucketHead[0] = entries++;
+    entryNext[entries] = bucketHead[nb];
+    bucketHead[nb] = entries++;
     pending++;
   }
-  for (let d = 0; pending > 0; d++) {
+  let stopAt = -1;
+  // Offsets of the eight neighbours.
+  const off = DIR_CELL;
+  for (let d = settled + 1; pending > 0; d++) {
     const b = d & (BUCKETS - 1);
     for (let e = bucketHead[b]; e >= 0; e = entryNext[e]) {
       pending--;
@@ -80,16 +125,23 @@ export function buildField(
       if (dist[c] !== d) continue;
       const x = c & (W - 1);
       const y = c >> 8;
+      // Away from the edge of the map no neighbour needs a bounds check.
+      const inside = x > 0 && y > 0 && x < W - 1 && y < W - 1;
       for (let k = 0; k < 8; k++) {
-        const nx = x + NX[k];
-        const ny = y + NY[k];
-        if (nx < 0 || ny < 0 || nx >= W || ny >= W) continue;
-        const n = ny * W + nx;
+        if (!inside) {
+          const nx = x + NX[k];
+          const ny = y + NY[k];
+          if (nx < 0 || ny < 0 || nx >= W || ny >= W) continue;
+        }
+        const n = c + off[k];
         const step = cost[n];
         if (step === 0) continue;
-        const diagonal = (k & 1) !== 0;
-        if (diagonal && (hard[c + NX[k]] === 0 || hard[c + NY[k] * W] === 0)) continue;
-        const nd = d + (diagonal ? DIAGONAL : STRAIGHT) * step;
+        let nd: number;
+        if ((k & 1) !== 0) {
+          // A diagonal step never cuts a blocked corner.
+          if (hard[c + NX[k]] === 0 || hard[c + NY[k] * W] === 0) continue;
+          nd = d + DIAGONAL * step;
+        } else nd = d + STRAIGHT * step;
         if (nd < dist[n] && nd <= limit) {
           dist[n] = nd;
           const nb = nd & (BUCKETS - 1);
@@ -101,7 +153,15 @@ export function buildField(
       }
     }
     bucketHead[b] = -1;
+    if (cell < 0) continue;
+    if (stopAt < 0 && dist[cell] <= d) {
+      // Settled: go on half as far again and some, so that the rest of the units of the
+      // order, and the next order near here, seldom need the search carried on.
+      stopAt = d + 600 + (d >> 1);
+    }
+    if (stopAt >= 0 && d >= stopAt && pending > 0) return d;
   }
+  return FIELD_DONE;
 }
 
 /**
