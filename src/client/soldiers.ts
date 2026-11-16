@@ -9,7 +9,8 @@
 // The figure is modelled in metres at true proportions and scaled to the map, where a man
 // stands a little taller than scale so he reads from an RTS camera. Forward is +Z, his
 // right is -X, the origin is the ground under his hips.
-import type * as THREE from 'three/webgpu';
+import * as THREE from 'three/webgpu';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Batch } from './batch';
 import { box, cyl, merge } from './models';
 import { loft, setWear, type Ring } from './shape';
@@ -68,6 +69,48 @@ const FIELDS = STAND_READY.length;
 export const NEAR_MEN = 4096;
 export const FAR_MEN = 20000;
 
+/**
+ * The still figures of the distance (decision 135): the middle-distance man baked whole in
+ * a few fixed poses, one instance a man instead of eight posed pieces. Six stances and a
+ * stride of eight frames. Each is [kneel, prone, run, aim, stride].
+ */
+const STILLS: [number, number, number, number, number][] = [
+  [0, 0, 0, 0, 0],
+  [0, 0, 0, 1, 0],
+  [1, 0, 0, 0, 0],
+  [1, 0, 0, 1, 0],
+  [0, 1, 0, 0, 0],
+  [0, 1, 0, 1, 0],
+];
+export const STRIDE_FRAMES = 8;
+for (let k = 0; k < STRIDE_FRAMES; k++)
+  STILLS.push([0, 0, 1, 0, (k / STRIDE_FRAMES) * Math.PI * 2]);
+/** Room in each still pose's batch: a pose at the halt may hold most of an army, a stride frame an eighth of the runners. */
+const STILL_MEN = 8192;
+const STRIDE_MEN = 4096;
+
+/** Which still pose stands for a man in this blend of stances (the inputs of `man`). */
+export function stillPose(
+  kneel: number,
+  prone: number,
+  run: number,
+  aim: number,
+  stride: number,
+): number {
+  const wP = prone;
+  const wK = kneel * (1 - prone);
+  const wS = 1 - wP - wK;
+  if (wS >= wP && wS >= wK && run * wS > 0.5) {
+    const turn = stride / (Math.PI * 2);
+    const k = Math.round((turn - Math.floor(turn)) * STRIDE_FRAMES) % STRIDE_FRAMES;
+    return 6 + k;
+  }
+  const fire = aim > 0.5 ? 1 : 0;
+  if (wP >= wK && wP > wS) return 4 + fire;
+  if (wK > wS) return 2 + fire;
+  return fire;
+}
+
 /** Builds one batch for a piece of the figure at a level of detail. */
 export type MakeBatch = (g: THREE.BufferGeometry, capacity: number, lod: number) => Batch;
 
@@ -86,6 +129,12 @@ export class Soldiers {
   private readonly shin1: Batch;
   private readonly rifle1: Batch;
   private readonly arm1: Batch;
+  /** One batch per still pose, and where each pose's muzzle is in the man's own frame. */
+  private readonly stills: Batch[];
+  private readonly stillMuzzle: Float32Array;
+  /** While baking the still poses: the pieces `put` would have drawn, and their frames. */
+  private capture: { piece: THREE.BufferGeometry; f: number[] }[] | null = null;
+  private readonly pieceOf = new Map<Batch, THREE.BufferGeometry>();
   private readonly p = new Float32Array(FIELDS);
   private readonly f = new Float32Array(12);
   private ox = 0;
@@ -112,6 +161,83 @@ export class Soldiers {
     this.shin1 = make(m.shin1, FAR_MEN * 2, 1);
     this.rifle1 = make(m.rifle1, FAR_MEN, 1);
     this.arm1 = make(m.arm1, FAR_MEN * 2, 1);
+
+    // Bake the still poses from the very pieces and posing the middle distance uses, so a
+    // man crossing from one to the other changes at most the angle of a knee.
+    const pieces: [Batch, THREE.BufferGeometry][] = [
+      [this.body1, m.body1],
+      [this.thigh1, m.thigh1],
+      [this.shin1, m.shin1],
+      [this.rifle1, m.rifle1],
+      [this.arm1, m.arm1],
+    ];
+    for (const [b, g] of pieces) this.pieceOf.set(b, g);
+    this.stillMuzzle = new Float32Array(STILLS.length * 3);
+    const frame = new THREE.Matrix4();
+    this.stills = STILLS.map(([kneel, prone, run, aim, stride], k) => {
+      this.capture = [];
+      this.man(1, 0, 0, 0, 0, 1, kneel, prone, run, aim, stride, 0, 1, 1, 1, 0);
+      this.stillMuzzle.set(this.muzzle.subarray(0, 3), k * 3);
+      const parts = this.capture.map(({ piece, f }) => {
+        frame.set(
+          f[0],
+          f[3],
+          f[6],
+          f[9],
+          f[1],
+          f[4],
+          f[7],
+          f[10],
+          f[2],
+          f[5],
+          f[8],
+          f[11],
+          0,
+          0,
+          0,
+          1,
+        );
+        const g = piece.clone();
+        g.deleteAttribute('aTint'); // the middle-distance batch's own, not the shape's
+        return g.applyMatrix4(frame);
+      });
+      this.capture = null;
+      const g = mergeGeometries(parts);
+      for (const p of parts) p.dispose();
+      return make(g, k < 6 ? STILL_MEN : STRIDE_MEN, 1);
+    });
+  }
+
+  /**
+   * Draw one distant man as a still figure: `pose` from `stillPose`, standing at (x, y, z)
+   * facing (sin, cos). Sets `muzzle` like `man`. False when that pose has no room left this
+   * frame, and the caller poses him in pieces instead.
+   */
+  still(
+    pose: number,
+    x: number,
+    y: number,
+    z: number,
+    sin: number,
+    cos: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+  ): boolean {
+    const batch = this.stills[pose];
+    if (batch.n >= batch.capacity) return false;
+    batch.put(x, y, z, sin, cos, 1, r, g, b, a);
+    const q = pose * 3;
+    const lx = this.stillMuzzle[q];
+    const lz = this.stillMuzzle[q + 2];
+    const mz = this.muzzle;
+    mz[0] = x + lx * cos + lz * sin;
+    mz[1] = y + this.stillMuzzle[q + 1];
+    mz[2] = z + lz * cos - lx * sin;
+    mz[3] = sin;
+    mz[4] = cos;
+    return true;
   }
 
   /** Whether another man fits at full detail this frame. */
@@ -386,6 +512,7 @@ export class Soldiers {
   ): void {
     const f = this.f;
     const s = this.sin;
+    const capture = this.capture;
     const c = this.cos;
     f[0] = (xx * c + xz * s) * S;
     f[1] = xy * S;
@@ -399,7 +526,8 @@ export class Soldiers {
     f[9] = this.ox + (jx * c + jz * s) * S;
     f[10] = this.oy + jy * S;
     f[11] = this.oz + (jz * c - jx * s) * S;
-    b.frame(f, this.r, this.g, this.b, this.a);
+    if (capture) capture.push({ piece: this.pieceOf.get(b)!, f: Array.from(f) });
+    else b.frame(f, this.r, this.g, this.b, this.a);
   }
 }
 
