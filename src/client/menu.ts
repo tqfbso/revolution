@@ -8,12 +8,12 @@ import { FACTIONS, factionByName } from '../sim/factions';
 declare const __BUILD__: string;
 
 /** The version this build is, shown on the main menu. Bump it with each milestone. */
-export const VERSION = '1.0';
+export const VERSION = '0.9';
 
 /** What's new, newest first: one short entry per milestone, in plain words. */
 const RELEASES: { version: string; notes: string[] }[] = [
   {
-    version: '1.0',
+    version: '0.9',
     notes: [
       'Menus: a main menu, a New battle screen for the map, armies, time, weather and opponent, plus settings and how to play.',
       'A glass battle screen with a commander board: every commander and its orders in one list.',
