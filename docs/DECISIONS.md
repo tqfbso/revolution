@@ -2892,4 +2892,3 @@ untouched, so a shared game stays in step whatever each player's screen shows.
   each storey goes, then smouldering; a gutted shell burns out over two minutes. The
   thresholds and times are the sim's own, so destruction takes exactly as long as before.
 - Civilians who die still fade after a while, as before (their own figures).
-
