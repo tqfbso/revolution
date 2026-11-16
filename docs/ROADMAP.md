@@ -435,6 +435,8 @@ From the proposal in the "Design tactical attack formations" thread.
 - Concentrate: a commander's troops on one exact spot, key R. BUILT (decision 117)
 - Demolish for engineers, key O: charges on buildings, felling woods; people still in a
   house that is brought down die. BUILT (decision 118)
+- Helicopters that come down stay down: they fall, burn and lie as scorched wrecks all game.
+  BUILT 2026-11-16 (decision 144, client only)
 - More civilians: 1,400 a map, most round the flags, one in three sheltering at home.
   BUILT (decision 119)
 - Buildings a sixth easier to bring down. BUILT (decision 120)
