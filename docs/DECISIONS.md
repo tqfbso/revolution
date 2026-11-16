@@ -3028,3 +3028,27 @@ The inner loop also skips bounds checks away from the map's edge.
 Measured (`tools/simbench.ts`, hard vs hard, 25 minutes, seed 1): city mean tick 0.87 to
 0.73 ms, ticks over 5 ms 2.7% to 1.7%; four armies 1.33 to 1.08 ms, 5.3% to 3.1%. Since
 the review: city 1.22 to 0.73 ms, four armies 2.09 to 1.08 ms.
+
+## 143. Gameplay loose ends: engineers that demolish, gunships that dodge air defence (2026-11-16)
+
+Four small gaps left over from earlier decisions, none touching damage rules:
+
+- **The computer's engineers lay charges** (decision 118 said they did not). In `press`, once
+  its infantry is within 45 m of the house under attack, the engineers of the force go in
+  with the charge order on that house, next to the guns and tanks. Houses only; the house is
+  the strong point it already chose (one the enemy is known to hold), so empty houses are not
+  razed for nothing. Sub-commanders use the same code. Woods are still not felled by the
+  computer.
+- **Gunships avoid known air defence.** `AA_AVOID` 52 m (the guns reach 40, a gunship's
+  rockets 28). Hunting helicopters (`huntHelis`, so also the player's idle ones) will not take
+  a target within that of air defence their army has in sight. The computer's escorting
+  gunships (`escort`) also remember air defence seen for 90 s, skip prey under it or on the
+  way past it, and fly out of the reach of any they find themselves in. Helicopters under a
+  direct player order do what they are told.
+- **Way points on the minimap.** The routes of the selected troops are drawn there in the
+  same green with a diamond on each way point (`RouteView.polylines`, `Minimap.drawRoutes`).
+- **The fourth army's score.** `STAT_TEAMS` is 4, so the victory screen counts all four
+  armies instead of dashes. The score is not in the hash.
+
+Golden hashes unchanged. Tests: `tests/commanders.test.ts` (air defence, charges),
+`tests/score.test.ts` (fourth army).
