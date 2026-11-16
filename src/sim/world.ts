@@ -398,6 +398,8 @@ export interface World {
    * once a second (`supplyTick` is when, -1 = never), so not part of the hash.
    */
   ration: Uint8Array;
+  /** Until which tick the unit is pinned by machine-gun fire (see PIN_TICKS); 0 = never was. */
+  pinned: Int32Array;
   supplyMap: Uint8Array;
   supplyTick: number;
   /**
@@ -610,6 +612,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     cSeq: new Uint16Array(MAX_TEAMS * MAX_COMMANDERS),
     cEst: new Int16Array(MAX_TEAMS * MAX_COMMANDERS * KIND_SLOTS),
     ration: new Uint8Array(MAX_UNITS),
+    pinned: new Int32Array(MAX_UNITS),
     supplyMap: new Uint8Array(MAX_TEAMS * (MAP_CELLS >> 2) * (MAP_CELLS >> 2)),
     supplyTick: -1,
     routeOf: new Int32Array(MAX_UNITS),
@@ -856,7 +859,8 @@ export function hashWorld(w: World): number {
     mix(w.aimY[i]);
     mix(w.spotted[i]);
     mix(w.state[i] | (w.kind[i] << 8) | ((w.hp[i] & 0xffff) << 16));
-    mix(w.cooldown[i]);
+    // (Pinned time left rides along, nothing when there is none: older hashes hold.)
+    mix(w.cooldown[i] ^ (w.pinned[i] > w.tick ? (w.pinned[i] - w.tick) << 16 : 0));
     mix(w.attack[i]);
     mix(w.strikeAt[i]);
     mix(w.orderSpeed[i] ^ (w.path[i] << 20));

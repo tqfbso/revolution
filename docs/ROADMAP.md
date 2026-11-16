@@ -476,13 +476,14 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
 - [x] I2 Front line (client only, decision 138). A line between your ground and the enemy's, from what
       your army knows (units, garrisons, held flags, enemies seen recently), teeth on the
       enemy side, on the minimap and on the zoomed-out map.
-- [ ] I3 Lethal open ground and squad gunners (rules, new golden hash). High-explosive
-      direct fire (tank, missile, helicopter, strike drone) gets a small blast against men
-      in the open; rubble and sandbags halve it, a trench quarters it, walls as today. One
-      man in every rifle squad carries a light machine gun: a rest bonus on rubble,
-      sandbags, sills and broken walls, and fire that pins infantry (the first suppression
-      rule). Measured against `tests/assault.test.ts` and computer army mixes, because
-      tank spam must still not win.
+- [x] I3 Lethal open ground and squad gunners (rules, new golden hash, decision 143).
+      High-explosive direct fire (tank, missile, helicopter, strike drone) bursts among
+      enemy men on foot round its target in the open; rubble and sandbags halve it, a
+      trench quarters it, walls stop it. Every rifle and paratroop squad has a light
+      machine gun: a third more to men on foot from a rest (a window, a ruin, sandbags, a
+      trench), and its fire pins infantry caught in the open (half speed, a quarter slower
+      fire, three seconds). Measured against `tests/assault.test.ts`, `tools/pointduel.ts`
+      and computer army mixes: equal cost in the open still goes to the squads.
 - [ ] I4 Formations. One button on any selection and on every commander. Default on roads
       and streets: convoy (vehicles in file at fixed gaps, infantry on both pavements,
       corners cleared before vehicles cross). Default in the open: the doctrine shape for

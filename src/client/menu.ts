@@ -18,6 +18,7 @@ const RELEASES: { version: string; notes: string[] }[] = [
   {
     version: '0.9',
     notes: [
+      'Open ground kills: tank rounds, missiles and helicopter rockets burst among men in the open and throw them. Ruins, trenches and walls protect. Every rifle squad has a machine gun that pins infantry caught in the open.',
       'Menus: a main menu, a New battle screen for the map, armies, time, weather and opponent, plus settings and how to play.',
       'A glass battle screen with a commander board: every commander and its orders in one list.',
       'Co-op with friends: two to four of you command one army against the computer, with one link for everyone.',

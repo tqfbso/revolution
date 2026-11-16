@@ -730,6 +730,30 @@ export class Effects {
   }
 
   /** A squad going down: dust and a little smoke, nothing theatrical. */
+  /** A tank round or a rocket bursting on open ground among men (I3): a flash and thrown earth. */
+  burst(x: number, y: number, z: number): void {
+    this.emit(ADDITIVE, x, y + 0.4, z, 0, 0, 0, 0.1, 1.6, 3.6, 1, 0.85, 0.55, 1);
+    for (let k = 0; k < 5; k++) {
+      const up = 3 + Math.random() * 5;
+      this.emit(
+        SMOKE,
+        x + rnd(0.5),
+        y + 0.3,
+        z + rnd(0.5),
+        rnd(1.8),
+        up,
+        rnd(1.8),
+        1.1 + Math.random() * 0.8,
+        0.7,
+        2.2 + up * 0.15,
+        0.19,
+        0.16,
+        0.12,
+        0.8,
+      );
+    }
+  }
+
   squadHit(x: number, y: number, z: number): void {
     for (let k = 0; k < 3; k++) {
       this.emit(

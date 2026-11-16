@@ -6,7 +6,7 @@ import { UNIT_PRICE } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
 import { flatMap } from '../src/sim/map';
 import { step } from '../src/sim/sim';
-import { KIND_ATGM, KIND_INFANTRY, KIND_TANK, KINDS } from '../src/sim/units';
+import { KIND_ATGM, KIND_HELI, KIND_IFV, KIND_INFANTRY, KIND_TANK, KINDS } from '../src/sim/units';
 import { STATE_ALIVE, createWorld } from '../src/sim/world';
 
 type Side = [kind: number, count: number][];
@@ -79,3 +79,29 @@ show(
   ],
 );
 show([[KIND_TANK, 4]], [[KIND_ATGM, 5]]);
+// Open ground (I3): helicopters and mixed forces against massed squads.
+for (const n of [6, 12, 24]) show([[KIND_HELI, 2]], [[KIND_INFANTRY, n]]);
+show(
+  [
+    [KIND_TANK, 2],
+    [KIND_INFANTRY, 16],
+  ],
+  [[KIND_INFANTRY, 48]],
+);
+show([[KIND_IFV, 4]], [[KIND_INFANTRY, 27]]);
+show([[KIND_INFANTRY, 30]], [[KIND_INFANTRY, 30]]);
+// Equal army points, with and without missile teams among the squads.
+show(
+  [[KIND_TANK, 3]],
+  [
+    [KIND_INFANTRY, 11],
+    [KIND_ATGM, 4],
+  ],
+);
+show(
+  [[KIND_TANK, 6]],
+  [
+    [KIND_INFANTRY, 22],
+    [KIND_ATGM, 8],
+  ],
+);
