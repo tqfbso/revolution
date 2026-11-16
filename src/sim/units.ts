@@ -592,6 +592,12 @@ export const HUNT_GROUND = fx(110);
 export const HUNT_AIR = fx(220);
 /** How often a hunting helicopter looks again, in ticks. */
 export const HUNT_PERIOD = 20;
+/**
+ * A gunship keeps this far from air defence its army knows of: the guns reach 40, its own
+ * rockets 28. Hunting helicopters and the computer's gunships both leave alone what stands
+ * under such guns.
+ */
+export const AA_AVOID = fx(52);
 /** Helicopters an army can keep per finished helipad: landing space is what limits them. */
 export const HELIS_PER_PAD = 3;
 /** Paratroop squads that can wait in reserve, and the most one plane takes. */

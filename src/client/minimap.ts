@@ -108,6 +108,8 @@ export class Minimap {
     () => [];
 
   /** Draw attention to a world point: an alert happened there. */
+  /** Set by the client: the routes of the selected troops (x, z pairs, start first). */
+  routes: () => number[][] = () => [];
   /** Set by the client: the front line to draw, in the player's colour. */
   front: FrontLine | null = null;
 
@@ -194,6 +196,46 @@ export class Minimap {
       ctx.stroke();
     }
     ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
+  }
+
+  /** The way the selected troops are going: a green line with a mark on each way point. */
+  private drawRoutes(): void {
+    const lines = this.routes();
+    if (lines.length === 0) return;
+    const ctx = this.ctx;
+    const k = N / MAP_SIZE;
+    ctx.lineJoin = 'round';
+    for (const [width, style] of [
+      [2.8, 'rgba(8,12,16,0.7)'],
+      [1.3, 'rgb(125,255,138)'],
+    ] as const) {
+      ctx.lineWidth = width;
+      ctx.strokeStyle = style;
+      ctx.beginPath();
+      for (const p of lines) {
+        ctx.moveTo(p[0] * k, p[1] * k);
+        for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * k, p[i + 1] * k);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgb(125,255,138)';
+    ctx.strokeStyle = 'rgba(8,12,16,0.8)';
+    ctx.lineWidth = 0.8;
+    for (const p of lines) {
+      for (let i = 2; i < p.length; i += 2) {
+        const x = p[i] * k;
+        const y = p[i + 1] * k;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 2.6);
+        ctx.lineTo(x + 2.6, y);
+        ctx.lineTo(x, y + 2.6);
+        ctx.lineTo(x - 2.6, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
     ctx.lineJoin = 'miter';
   }
 
@@ -299,6 +341,7 @@ export class Minimap {
     }
 
     if (this.front) this.drawFront(this.front);
+    this.drawRoutes();
 
     // Commanders: a letter on their troops, a line to where they have been sent.
     ctx.font = 'bold 10px sans-serif';

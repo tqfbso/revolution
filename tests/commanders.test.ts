@@ -39,6 +39,7 @@ import {
 import { fortified } from '../src/sim/urban';
 import {
   KIND_DRONE,
+  KIND_AD,
   KIND_ENGINEER,
   KIND_HELI,
   KIND_IFV,
@@ -420,6 +421,65 @@ describe('sub-commanders: the staff', () => {
       if (w.state[h] !== STATE_ALIVE) continue;
       expect(Math.hypot(w.posX[h] - fx(300), w.posY[h] - fx(760))).toBeLessThan(fx(45));
     }
+  }, 60000);
+
+  it('gunships keep out of the reach of air defence they have seen', () => {
+    const { w, st } = field();
+    const ids = add(w, [
+      spawn(0, KIND_INFANTRY, 6, 300, 760),
+      spawn(0, KIND_RECON, 1, 304, 760),
+      spawn(0, KIND_HELI, 2, 296, 766),
+    ]);
+    const helis = ids.filter((i) => w.kind[i] === KIND_HELI);
+    step(w, [{ type: CMD_ASSIGN, units: ids, slot: 3 }, mission(3, M_HOLD, fx(300), fx(760))]);
+    play(w, st, 20);
+    // The same vehicles as above, now with air defence beside them. They are in sight.
+    const aa = add(w, [spawn(1, KIND_AD, 1, 349, 760)]);
+    add(w, [spawn(1, KIND_IFV, 3, 352, 760)]);
+    let nearest = 1e9;
+    play(w, st, 90, () => {
+      for (const h of helis) {
+        if (w.state[h] !== STATE_ALIVE) continue;
+        nearest = Math.min(
+          nearest,
+          Math.hypot(w.posX[h] - w.posX[aa[0]], w.posY[h] - w.posY[aa[0]]),
+        );
+      }
+    });
+    expect(alive(w, helis)).toBe(2);
+    expect(nearest).toBeGreaterThan(fx(46));
+  }, 60000);
+
+  it('engineers lay charges on the house under attack once the infantry is up with it', () => {
+    const { w, st } = field();
+    const t = town(w, 'Ridgetop');
+    const map = w.map;
+    let house = -1;
+    for (let s = 0; s < map.structCount && house < 0; s++) {
+      if (map.sKind[s] === S_BUILDING && map.sTown[s] === t) house = s;
+    }
+    const hx = ((2 * map.sX[house] + map.sW[house]) * 4) / 2;
+    const hy = ((2 * map.sY[house] + map.sH[house]) * 4) / 2;
+    const foes = add(w, [spawn(1, KIND_INFANTRY, 2, hx, hy + 6)]);
+    step(w, [{ type: CMD_GARRISON, units: foes, structure: house }]);
+    for (let k = 0; k < 10 * TICK_RATE; k++) step(w, []);
+    w.sHp[house] = 10_000_000;
+    const ids = add(w, [
+      spawn(0, KIND_INFANTRY, 4, hx - 30, hy),
+      spawn(0, KIND_ENGINEER, 2, hx - 36, hy),
+    ]);
+    const sappers = ids.filter((i) => w.kind[i] === KIND_ENGINEER);
+    step(w, [
+      { type: CMD_ASSIGN, units: ids, slot: 0 },
+      mission(0, M_ATTACK, map.townX[t], map.townY[t]),
+    ]);
+    let charged = false;
+    play(w, st, 40, () => {
+      for (const i of sappers) {
+        if ((w.flags[i] & FLAG_SIEGE) !== 0 && w.orderStruct[i] === house) charged = true;
+      }
+    });
+    expect(charged).toBe(true);
   }, 60000);
 
   it('hold: goes there, digs into the houses and stays put under attack', () => {
