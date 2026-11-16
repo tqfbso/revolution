@@ -3014,3 +3014,17 @@ for a seventeenth resizes world arrays and moves the golden hash, so it waits fo
 new unit. The client's parallel per-kind tables (models, icons, sounds, production buttons)
 are best folded into one row per kind by the thread that builds per-faction models, which
 rewrites most of them anyway.
+
+## 142. A route is searched only as far as it is needed (2026-11-16)
+
+The review's third route fix. A move order's field is seeded with its goal and searched
+(`growField` in `path.ts`) only until the cell of the unit that needs it is settled, then
+half as far again and 60 cells more; a unit standing on a cell the search has not reached
+carries it on. Dijkstra settles cells in order of cost, so the costs and the way out of
+every settled cell are exactly those of a full search: the golden hashes did not move, and
+25-minute AI games end on the same hash. `tests/fields.test.ts` checks it cell by cell.
+The inner loop also skips bounds checks away from the map's edge.
+
+Measured (`tools/simbench.ts`, hard vs hard, 25 minutes, seed 1): city mean tick 0.87 to
+0.73 ms, ticks over 5 ms 2.7% to 1.7%; four armies 1.33 to 1.08 ms, 5.3% to 3.1%. Since
+the review: city 1.22 to 0.73 ms, four armies 2.09 to 1.08 ms.
