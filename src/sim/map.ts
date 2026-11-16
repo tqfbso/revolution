@@ -233,6 +233,56 @@ export interface GameMap {
  */
 export type Layout = 'river' | 'ridge' | 'city' | 'euro' | 'four';
 
+/** A battlefield as the menu, the lobby, the tests and the tools know it. */
+export interface MapInfo {
+  id: Layout;
+  name: string;
+  /** One line for the menu. */
+  blurb: string;
+  /** How many armies it has a base for. */
+  armies: number;
+}
+
+/**
+ * Every battlefield there is, in the order the menu offers them (architecture review F4).
+ * A new map is a generator, a case in `generateMap` and a row here; nothing else names it.
+ */
+export const MAPS: readonly MapInfo[] = [
+  {
+    id: 'city',
+    name: 'City',
+    blurb: 'A dense modern city of nine districts: street fighting from the first minute.',
+    armies: 2,
+  },
+  {
+    id: 'euro',
+    name: 'European city',
+    blurb: 'An old city on a river: cathedral square, station, park and a motorway round it.',
+    armies: 2,
+  },
+  {
+    id: 'ridge',
+    name: 'Ridge',
+    blurb: 'Open country, woods and a ridge, with several ways round.',
+    armies: 2,
+  },
+  {
+    id: 'river',
+    name: 'River',
+    blurb: 'The first battlefield: a river between the armies, crossed at its bridges.',
+    armies: 2,
+  },
+  {
+    id: 'four',
+    name: 'Four corners',
+    blurb: 'An army in each corner and nine towns between them.',
+    armies: 4,
+  },
+];
+
+/** The battlefield called `id` in an address or a message, if there is one. */
+export const mapInfo = (id: unknown): MapInfo | undefined => MAPS.find((m) => m.id === id);
+
 /** What a cell is paved with (GameMap.road): nothing, a carriageway, or a yard or square. */
 export const ROAD_NONE = 0;
 export const ROAD_STREET = 1;

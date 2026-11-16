@@ -3,18 +3,13 @@
 // always did; this is the one place that reads those choices and the one that writes them.
 import type { AiLevel } from '../sim/ai';
 import { FACTIONS, factionByName } from '../sim/factions';
-import type { Layout } from '../sim/map';
+import { MAPS, mapInfo, type Layout } from '../sim/map';
 import { AI_LEVELS, isVersus, type ArmySetup, type Match, type Scenario } from '../sim/match';
 import { WEATHER_NAMES } from '../sim/units';
 import { MAX_TEAMS, MAX_UNITS } from '../sim/world';
 
-export const MAP_LABEL: Record<string, string> = {
-  city: 'City',
-  euro: 'European city',
-  ridge: 'Ridge',
-  river: 'River',
-  four: 'Four corners',
-};
+/** The map a free-for-all of three or four is fought on: the first with a base for each. */
+export const FREE_MAP: Layout = (MAPS.find((m) => m.armies >= MAX_TEAMS) ?? MAPS[0]).id;
 
 /** The keys of an address that describe the battle itself. */
 export const MATCH_KEYS = [
@@ -57,13 +52,11 @@ export function matchFromParams(params: URLSearchParams): Match {
   const n = skirmish ? Math.min(Math.max(Number(params.get('armies') ?? 2) | 0, 2), MAX_TEAMS) : 2;
   // The skirmish is fought in the city unless another map is asked for; the other
   // scenarios are laid out for the river.
-  const asked = n > 2 ? 'four' : params.get('map');
-  const map: Layout =
-    !skirmish || asked === 'river'
-      ? 'river'
-      : asked === 'four' || asked === 'ridge' || asked === 'euro'
-        ? asked
-        : 'city';
+  const map: Layout = !skirmish
+    ? 'river'
+    : n > 2
+      ? FREE_MAP
+      : (mapInfo(params.get('map'))?.id ?? MAPS[0].id);
   // Only the skirmish has factions and weather: the measuring scenarios keep the plain
   // table and the clear day their numbers were taken on (`none` gives the table here too).
   const pick = (key: string, fallback: string): number =>
@@ -129,7 +122,7 @@ export function opponentOf(m: Match): AiLevel | 'off' {
 /** The battlefield in a few words: the map, the time of day and the weather. */
 export function fieldLabel(m: Match): string {
   return (
-    `${MAP_LABEL[m.map]} · ${m.night ? 'night' : 'day'}` +
+    `${mapInfo(m.map)?.name ?? m.map} · ${m.night ? 'night' : 'day'}` +
     `${m.weather > 0 ? ` · ${WEATHER_NAMES[m.weather]}` : ''}`
   );
 }

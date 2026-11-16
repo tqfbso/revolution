@@ -2988,3 +2988,29 @@ Consequences: `?control=all` and the stress-test button send unsigned orders and
 only in a game alone. In a shared game nobody, the host included, can conjure troops or
 order another army. The lobby still offers two sides; the Match and the wire no longer
 assume it, which is what human free-for-all and per-player ownership needed.
+
+## 141. Damage by target profile, and a list of maps (2026-11-16)
+
+Architecture review F3 (first half) and F4 (the registry).
+
+The damage table was a row of sixteen numbers per unit, one per target kind, so a new kind
+of unit meant a new column written by hand into every row. The sixteen columns were only
+ten different ones: rifle squads, recon teams, engineers and paratroops take the same from
+every weapon, so do air defence, the jammer and the truck, and so do the two helicopters.
+Each kind now names its **profile** as a target (`PROFILE_*` in `src/sim/units.ts`) and
+each row gives its damage against the ten profiles (`vs`). `damage[target kind]` is filled
+in from that when the table loads, so every reader of it is unchanged and so is every
+number: the full table of every faction was compared before and after, and the golden
+hashes pass untouched. A new kind names a profile and needs no column; a kind that should
+take damage differently gets a profile of its own, one number per row.
+
+The maps are a list (`MAPS` in `src/sim/map.ts`: id, name, the menu's line, how many armies
+it has a base for). The menu's choices, the names on the lobby and the end screen, the
+check of a Match from another player and the map a free-for-all is sent to all read it. A
+new map is a generator, a case in `generateMap` and a row.
+
+Left for later, on purpose. The table of kinds is still full (`KIND_SLOTS` 16): making room
+for a seventeenth resizes world arrays and moves the golden hash, so it waits for the first
+new unit. The client's parallel per-kind tables (models, icons, sounds, production buttons)
+are best folded into one row per kind by the thread that builds per-faction models, which
+rewrites most of them anyway.

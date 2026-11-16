@@ -45,6 +45,26 @@ export const KIND_PARA = 14;
 export const KIND_PLANE = 15;
 export const KIND_COUNT = 16;
 
+/**
+ * What a unit is as a target (architecture review F3). The damage table has a column per
+ * profile, not per kind: every kind with the same profile takes the same from every
+ * weapon. A new kind of unit names its profile and needs no column of its own; a new
+ * profile is one more number in each `vs` row.
+ */
+export const PROFILE_TANK = 0;
+/** Men on foot: rifle squads, recon teams, engineers, paratroops. */
+export const PROFILE_FOOT = 1;
+export const PROFILE_ATGM = 2;
+export const PROFILE_IFV = 3;
+export const PROFILE_ARTILLERY = 4;
+export const PROFILE_DRONE = 5;
+export const PROFILE_STRIKE = 6;
+/** Unarmoured vehicles: air defence, the jammer, trucks. */
+export const PROFILE_SOFT = 7;
+export const PROFILE_HELI = 8;
+export const PROFILE_PLANE = 9;
+export const PROFILE_COUNT = 10;
+
 export interface UnitKind {
   name: string;
   /** Movement class: decides which terrain it can cross (see src/sim/map.ts). */
@@ -56,7 +76,12 @@ export interface UnitKind {
   range: number;
   /** Ticks between shots. */
   reload: number;
-  /** Damage per shot against each target kind (this is where armour lives). */
+  /** What it is as a target (PROFILE_*): what a shot of each kind does to it. */
+  profile: number;
+  /**
+   * Damage per shot against each target kind (this is where armour lives). Filled in from
+   * the table's `vs` rows and the targets' profiles: read it as `damage[target's kind]`.
+   */
   damage: readonly number[];
   /** Damage per shot against buildings and bridges. Rifles do nothing to masonry. */
   siege: number;
@@ -112,7 +137,13 @@ const PLAIN = { spotter: false, stealth: false, jam: 0, kamikaze: false, enginee
 export const BLAST_STRAY = 16;
 const DIRECT = { indirect: false, minRange: 0, blast: 0 };
 
-const BASE_KINDS: readonly UnitKind[] = [
+/** A row of the table as it is written: damage by the target's profile. */
+type UnitSpec = Omit<UnitKind, 'damage'> & {
+  /** Damage per shot against a target of each profile, in PROFILE_* order. */
+  vs: readonly number[];
+};
+
+const SPECS: readonly UnitSpec[] = [
   {
     name: 'Main battle tank',
     cls: CLASS_VEHICLE,
@@ -120,7 +151,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.3),
     range: fx(26),
     reload: 60,
-    damage: [60, 75, 75, 80, 90, 75, 0, 0, 90, 90, 90, 75, 0, 0, 75, 0],
+    profile: PROFILE_TANK,
+    vs: [60, 75, 75, 80, 90, 0, 0, 90, 0, 0],
     siege: 60,
     stray: 30,
     garrison: false,
@@ -143,7 +175,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.16),
     range: fx(15),
     reload: 24,
-    damage: [3, 9, 9, 5, 10, 9, 1, 1, 10, 10, 10, 9, 2, 2, 9, 0],
+    profile: PROFILE_FOOT,
+    vs: [3, 9, 9, 5, 10, 1, 1, 10, 2, 0],
     siege: 2,
     stray: 5,
     garrison: true,
@@ -164,7 +197,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.15),
     range: fx(34),
     reload: 140,
-    damage: [134, 0, 0, 130, 130, 0, 0, 0, 130, 130, 130, 0, 0, 0, 0, 0],
+    profile: PROFILE_ATGM,
+    vs: [134, 0, 0, 130, 130, 0, 0, 130, 0, 0],
     siege: 40,
     stray: 20,
     garrison: true,
@@ -183,7 +217,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.4),
     range: fx(20),
     reload: 8,
-    damage: [3, 11, 11, 7, 9, 11, 2, 2, 9, 9, 9, 11, 3, 3, 11, 0],
+    profile: PROFILE_IFV,
+    vs: [3, 11, 11, 7, 9, 2, 2, 9, 3, 0],
     siege: 4,
     stray: 4,
     garrison: false,
@@ -205,7 +240,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.22),
     range: fx(110),
     reload: 120,
-    damage: [50, 70, 70, 60, 80, 70, 0, 0, 80, 80, 80, 70, 0, 0, 70, 0],
+    profile: PROFILE_ARTILLERY,
+    vs: [50, 70, 70, 60, 80, 0, 0, 80, 0, 0],
     siege: 160,
     stray: 0,
     garrison: false,
@@ -228,7 +264,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.2),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    profile: PROFILE_FOOT,
+    vs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: true,
@@ -249,7 +286,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.6),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    profile: PROFILE_DRONE,
+    vs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -272,7 +310,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.8),
     range: fx(1.5),
     reload: 1,
-    damage: [75, 50, 60, 150, 120, 50, 0, 0, 130, 130, 130, 50, 0, 0, 50, 0],
+    profile: PROFILE_STRIKE,
+    vs: [75, 50, 60, 150, 120, 0, 0, 130, 0, 0],
     siege: 0,
     stray: 40,
     garrison: false,
@@ -293,7 +332,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.32),
     range: fx(40),
     reload: 12,
-    damage: [0, 0, 0, 0, 0, 0, 10, 12, 0, 0, 0, 0, 11, 11, 0, 20],
+    profile: PROFILE_SOFT,
+    vs: [0, 0, 0, 0, 0, 10, 12, 0, 11, 20],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -313,7 +353,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.3),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    profile: PROFILE_SOFT,
+    vs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -335,7 +376,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.34),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    profile: PROFILE_SOFT,
+    vs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -357,7 +399,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.16),
     range: fx(13),
     reload: 50,
-    damage: [2, 10, 10, 4, 8, 10, 0, 0, 8, 8, 8, 10, 1, 1, 10, 0],
+    profile: PROFILE_FOOT,
+    vs: [2, 10, 10, 4, 8, 0, 0, 8, 1, 0],
     siege: 90,
     stray: 5,
     garrison: true,
@@ -382,7 +425,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.62),
     range: fx(28),
     reload: 40,
-    damage: [80, 40, 40, 70, 70, 40, 0, 0, 70, 70, 70, 40, 35, 35, 40, 0],
+    profile: PROFILE_HELI,
+    vs: [80, 40, 40, 70, 70, 0, 0, 70, 35, 0],
     siege: 20,
     stray: 20,
     garrison: false,
@@ -401,7 +445,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.66),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    profile: PROFILE_HELI,
+    vs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -422,7 +467,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(0.17),
     range: fx(16),
     reload: 22,
-    damage: [5, 11, 11, 7, 12, 11, 1, 1, 12, 12, 12, 11, 2, 2, 11, 0],
+    profile: PROFILE_FOOT,
+    vs: [5, 11, 11, 7, 12, 1, 1, 12, 2, 0],
     siege: 3,
     stray: 5,
     garrison: true,
@@ -441,7 +487,8 @@ const BASE_KINDS: readonly UnitKind[] = [
     speed: fx(1.1),
     range: 0,
     reload: 1000,
-    damage: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    profile: PROFILE_PLANE,
+    vs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     siege: 0,
     stray: 0,
     garrison: false,
@@ -454,6 +501,12 @@ const BASE_KINDS: readonly UnitKind[] = [
     sight: fx(20),
   },
 ];
+
+/** The table with every row's damage spread out over the kinds it can be fired at. */
+const BASE_KINDS: readonly UnitKind[] = SPECS.map(({ vs, ...kind }) => {
+  if (vs.length !== PROFILE_COUNT) throw new Error(`${kind.name}: a damage per profile`);
+  return { ...kind, damage: SPECS.map((target) => vs[target.profile]) };
+});
 
 /**
  * Pacing (decision 058): fights last about 1.7 times longer. Rather than shave the damage

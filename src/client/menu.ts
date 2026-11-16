@@ -4,7 +4,8 @@
 // one is asked for, and a battle is asked for by loading the page again with its choices in
 // the address, exactly as the links and the test flags always did.
 import { FACTIONS, factionByName } from '../sim/factions';
-import { MATCH_KEYS, matchFromParams, matchToParams } from './setup';
+import { MAPS, mapInfo } from '../sim/map';
+import { FREE_MAP, MATCH_KEYS, matchFromParams, matchToParams } from './setup';
 import { esc } from './wire';
 
 declare const __BUILD__: string;
@@ -89,17 +90,7 @@ const DEFAULTS: Setup = {
   foe: 'russia',
 };
 
-const MAPS: Choice[] = [
-  ['city', 'City', 'A dense modern city of nine districts: street fighting from the first minute.'],
-  [
-    'euro',
-    'European city',
-    'An old city on a river: cathedral square, station, park and a motorway round it.',
-  ],
-  ['ridge', 'Ridge', 'Open country, woods and a ridge, with several ways round.'],
-  ['river', 'River', 'The first battlefield: a river between the armies, crossed at its bridges.'],
-  ['four', 'Four corners', 'An army in each corner and nine towns between them.'],
-];
+const MAP_CHOICES: Choice[] = MAPS.map((m) => [m.id, m.name, m.blurb]);
 const ARMIES: Choice[] = [
   ['2', 'Two', 'You against one computer.'],
   [
@@ -266,7 +257,7 @@ export function openMenu(params: URLSearchParams): void {
     const free = setup.armies !== '2' && mode !== 'versus';
     const title =
       mode === 'skirmish' ? 'New battle' : mode === 'coop' ? 'Co-op with friends' : 'Versus';
-    let left = seg('map', 'Map', MAPS, free ? 'four' : setup.map);
+    let left = seg('map', 'Map', MAP_CHOICES, free ? FREE_MAP : setup.map);
     if (mode !== 'versus') left += seg('armies', 'Armies', ARMIES, setup.armies);
     left +=
       seg('time', 'Time', TIMES, setup.time) + seg('weather', 'Weather', WEATHERS, setup.weather);
@@ -384,7 +375,7 @@ export function openMenu(params: URLSearchParams): void {
     } else if (set && set in setup) {
       setup[set as keyof Setup] = v;
       // Three or four armies fight on the four corners; another map is for two.
-      if (set === 'map' && v !== 'four') setup.armies = '2';
+      if (set === 'map' && (mapInfo(v)?.armies ?? 2) < 3) setup.armies = '2';
     }
     const top = root.scrollTop;
     render();
