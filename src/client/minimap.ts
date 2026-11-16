@@ -14,6 +14,7 @@ import {
   type GameMap,
 } from '../sim/map';
 import type { Fog } from './fog';
+import type { FrontLine } from './front';
 import { GRID } from './grid';
 import type { StructureView } from './structures';
 import type { UnitView } from './units';
@@ -28,7 +29,7 @@ const TERRAIN_RGB: Record<number, [number, number, number]> = {
 };
 const OPEN_RGB: [number, number, number] = [104, 116, 74];
 // Readability layer: brighter than the paint on the models, on purpose.
-const TEAM_RGB = [
+export const TEAM_RGB = [
   [235, 70, 55],
   [70, 140, 255],
   [240, 190, 60],
@@ -107,6 +108,9 @@ export class Minimap {
     () => [];
 
   /** Draw attention to a world point: an alert happened there. */
+  /** Set by the client: the front line to draw, in the player's colour. */
+  front: FrontLine | null = null;
+
   /** Co-op: the middle of each other player's view. */
   partners: { x: number; z: number }[] = [];
 
@@ -145,6 +149,52 @@ export class Minimap {
       const lift = Math.min(1.25, Math.max(0.85, 0.95 + map.heights[c + ((c / N) | 0)] / 40000));
       for (let k = 0; k < 3; k++) this.base[3 * c + k] = rgb[k] * lift;
     }
+  }
+
+  /**
+   * The front line, staff-map style: a line in the player's colour on a dark casing, with
+   * small teeth in the colour of the army they face.
+   */
+  private drawFront(front: FrontLine): void {
+    const ctx = this.ctx;
+    const k = N / MAP_SIZE;
+    const mine = TEAM_RGB[this.units.playerTeam] ?? TEAM_RGB[0];
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const [width, style] of [
+      [3.6, 'rgba(8,12,16,0.75)'],
+      [1.8, `rgb(${mine[0]},${mine[1]},${mine[2]})`],
+    ] as const) {
+      ctx.lineWidth = width;
+      ctx.strokeStyle = style;
+      ctx.beginPath();
+      for (const p of front.paths) {
+        ctx.moveTo(p.pts[0] * k, p.pts[1] * k);
+        for (let i = 2; i < p.pts.length; i += 2) ctx.lineTo(p.pts[i] * k, p.pts[i + 1] * k);
+        if (p.closed) ctx.closePath();
+      }
+      ctx.stroke();
+    }
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = 'rgba(8,12,16,0.75)';
+    for (const t of front.teeth) {
+      const foe = TEAM_RGB[t.foe] ?? TEAM_RGB[0];
+      const x = t.x * k;
+      const y = t.z * k;
+      // A triangle: base along the line, point toward the enemy.
+      const half = 2.4;
+      const tall = 3.8;
+      ctx.fillStyle = `rgb(${foe[0]},${foe[1]},${foe[2]})`;
+      ctx.beginPath();
+      ctx.moveTo(x - t.nz * half, y + t.nx * half);
+      ctx.lineTo(x + t.nx * tall, y + t.nz * tall);
+      ctx.lineTo(x + t.nz * half, y - t.nx * half);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
   }
 
   /** Redraw at most ten times a second. */
@@ -247,6 +297,8 @@ export class Minimap {
       ctx.arc(this.map.townX[t] / 4096, this.map.townY[t] / 4096, 5, 0, Math.PI * 2);
       ctx.stroke();
     }
+
+    if (this.front) this.drawFront(this.front);
 
     // Commanders: a letter on their troops, a line to where they have been sent.
     ctx.font = 'bold 10px sans-serif';

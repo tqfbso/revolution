@@ -196,7 +196,9 @@ describe('field works', () => {
     run(w, 600, [{ type: CMD_MOVE, units: [0], x: mid(140), y: mid(100) }]);
     expect(w.posX[0]).toBeLessThan(mid(137));
     expect(w.workCount).toBe(cells.length);
-    run(w, 1500, [{ type: CMD_MOVE, units: [1], x: mid(140), y: mid(100) }]);
+    // The tank drives through where the squad meets the wire (the squad heads for the
+    // middle of the square its spot lies in, see routeGoal in sim.ts).
+    run(w, 1500, [{ type: CMD_MOVE, units: [1], x: mid(140), y: mid(102) }]);
     expect(w.workCount).toBeLessThan(cells.length);
     // The squad was waiting at the wire and goes through the gap the tank made.
     expect(Math.abs(w.posX[0] - mid(140))).toBeLessThan(fx(6));

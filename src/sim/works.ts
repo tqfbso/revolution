@@ -264,7 +264,7 @@ function finish(w: World, cell: number): void {
   map.type[cell] = work.terrain;
   map.workTeam[cell] = w.wTeam[cell] === NO_ARMY ? NO_OWNER : w.wTeam[cell];
   if (kind === WORK_GATE) map.gates[w.wTeam[cell]]++;
-  if (blocks(kind)) markWorks(true);
+  if (blocks(kind)) markWorks(w, true);
   w.worksRev++;
   w.events.push(EV_WORK, cell, kind | (w.wTeam[cell] << 8));
 }
@@ -278,7 +278,7 @@ export function remove(w: World, cell: number, lost: boolean): void {
     map.type[cell] = map.baseType[cell];
     map.workTeam[cell] = NO_OWNER;
     if (kind === WORK_GATE) map.gates[w.wTeam[cell]]--;
-    if (blocks(kind)) markWorks(false);
+    if (blocks(kind)) markWorks(w, false);
   }
   if (lost) w.events.push(EV_WORK_LOST, cell, kind);
   const k = w.wIndex[cell];

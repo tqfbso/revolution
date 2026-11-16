@@ -466,6 +466,18 @@ export interface World {
   /** Flowfields for move orders: goal cell (-1 = unused), movement class, cost-to-goal. */
   fieldGoal: Int32Array;
   fieldClass: Uint8Array;
+  /**
+   * Set on every field when the ground changed after it was built. A stale field is still
+   * followed (a route seldom changes much when one house falls) and rebuilt only when a unit
+   * on it finds its next step blocked or reaches its end (see steer).
+   */
+  fieldStale: Uint8Array;
+  /** The ground changed this tick (a structure fell or was rebuilt, trees were felled). */
+  groundChanged: boolean;
+  /** Only field works changed this tick: the cheaper update of passability will do. */
+  worksChanged: boolean;
+  /** A base building or blocking work went up this tick: whoever stands on it steps off. */
+  plotTaken: boolean;
   fieldDist: (Uint16Array | null)[];
   /** Tick on which every field slot was found in use (no more are tried that tick). */
   fieldsFullTick: number;
@@ -627,6 +639,10 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     civFieldAt: 0,
     fieldGoal: new Int32Array(MAX_FIELDS).fill(-1),
     fieldClass: new Uint8Array(MAX_FIELDS),
+    fieldStale: new Uint8Array(MAX_FIELDS),
+    groundChanged: false,
+    worksChanged: false,
+    plotTaken: false,
     fieldDist: new Array<Uint16Array | null>(MAX_FIELDS).fill(null),
     fieldsFullTick: -1,
     fieldsBuilt: 0,
@@ -683,7 +699,8 @@ export function hashWorld(w: World): number {
   mix(w.rng[0]);
   mix(w.map.hash);
   mix(w.fieldsFullTick);
-  for (let f = 0; f < MAX_FIELDS; f++) mix(w.fieldGoal[f] ^ (w.fieldClass[f] << 24));
+  for (let f = 0; f < MAX_FIELDS; f++)
+    mix(w.fieldGoal[f] ^ (w.fieldClass[f] << 24) ^ (w.fieldStale[f] << 30));
   for (let f = 0; f < OLD_TEAMS * CLASS_COUNT; f++)
     mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
   for (let c = 0; c < MAX_CAMERAS; c++) {

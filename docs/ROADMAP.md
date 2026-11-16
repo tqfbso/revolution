@@ -466,14 +466,14 @@ ideas only: our own look, units and interface). Design and drawings are in the R
 Hub, section 4A. Fabio answered the open questions the same day. This comes after the
 review fixes and the order-ownership refactor agreed on 2026-11-15, which stay first.
 
-- [x] I1 Deaths you can see (client only, decision 137). A man a squad loses becomes a body: thrown
+- [x] I1 Deaths you can see (client only, decision 139). A man a squad loses becomes a body: thrown
       away from a high-explosive hit, crumpled where he stood from bullets. Bodies stay all
       game in six to eight poses, mirrored and turned; far ones are one pre-posed instance
       each, and past a budget the oldest far ones are baked into the ground wear texture.
       Also: troops visibly leave carriers by the ramp or tailgate on the existing unload
       event; buildings lose their top floors first as health falls (same thresholds), with
       soot and fire in the windows. No blood.
-- [ ] I2 Front line (client only). A line between your ground and the enemy's, from what
+- [x] I2 Front line (client only, decision 138). A line between your ground and the enemy's, from what
       your army knows (units, garrisons, held flags, enemies seen recently), teeth on the
       enemy side, on the minimap and on the zoomed-out map.
 - [ ] I3 Lethal open ground and squad gunners (rules, new golden hash). High-explosive

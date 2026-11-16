@@ -105,7 +105,11 @@ const SMOKE_SECONDS = 90;
 /** How far a base building of yours sees, in cells. */
 const BASE_SIGHT = 7;
 /** Side of a square of ground whose buildings share one mesh, in metres and in squares. */
-const CHUNK = 128;
+/**
+ * Buildings are merged into one mesh per CHUNK x CHUNK m square. When one changes, its
+ * square is merged again and uploaded: 64 m keeps that to about a megabyte.
+ */
+const CHUNK = 64;
 const CHUNKS = Math.ceil(MAP_SIZE / CHUNK);
 
 function rand(seed: number, k: number): number {
@@ -278,7 +282,176 @@ function band(row: { lo: number; hi: number; p: Part; along: number }): Part {
   return { size, at, color: 0x4b4f50, gloss: 0.45 };
 }
 
+/** Unit shapes that most parts are scaled copies of (see `build`). */
+let unitBox: THREE.BufferGeometry | null = null;
+const unitSlabs: (THREE.BufferGeometry | null)[] = [null, null, null];
+let unitPlane: THREE.BufferGeometry | null = null;
+const tmpMatrix = new THREE.Matrix4();
+const tmpEuler = new THREE.Euler();
+const tmpColor = new THREE.Color();
+
+/**
+ * One geometry for a list of parts. A box, slab or sign is a unit shape scaled, turned and
+ * moved, written straight into the output: a house is hundreds of parts and this is the
+ * cost of every change of state, so no geometry is made per part. Roofs and tapered boxes
+ * are made as their own geometry first. The result is the same as `buildEach`.
+ */
 export function build(parts: Part[]): THREE.BufferGeometry {
+  const n = parts.length;
+  const srcs: THREE.BufferGeometry[] = new Array(n);
+  const scaled = new Uint8Array(n);
+  let verts = 0;
+  let indices = 0;
+  for (let p = 0; p < n; p++) {
+    const part = parts[p];
+    let g: THREE.BufferGeometry;
+    if (part.sign !== undefined) {
+      g = unitPlane ??= new THREE.PlaneGeometry(1, 1);
+      scaled[p] = 1;
+    } else if (part.hip !== undefined || part.taper) {
+      g = ownShape(part);
+    } else {
+      const size = part.size;
+      const k = slabAxis(size);
+      g = k < 0 ? (unitBox ??= new THREE.BoxGeometry(1, 1, 1)) : (unitSlabs[k] ??= unitSlab(k));
+      scaled[p] = 1;
+    }
+    srcs[p] = g;
+    verts += g.getAttribute('position').count;
+    indices += g.index!.count;
+  }
+  const pos = new Float32Array(verts * 3);
+  const nor = new Float32Array(verts * 3);
+  const uv = new Float32Array(verts * 2);
+  const surf = new Float32Array(verts);
+  const sign = new Float32Array(verts);
+  const col = new Float32Array(verts * 3);
+  const gloss = new Float32Array(verts);
+  const index = verts > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+  let v = 0;
+  let i = 0;
+  for (let p = 0; p < n; p++) {
+    const part = parts[p];
+    const g = srcs[p];
+    const sp = g.getAttribute('position').array as Float32Array;
+    const sn = g.getAttribute('normal').array as Float32Array;
+    const su = g.getAttribute('uv')?.array as Float32Array | undefined;
+    const count = sp.length / 3;
+    const sx = scaled[p] ? part.size[0] : 1;
+    const sy = scaled[p] ? part.size[1] : 1;
+    const sz = scaled[p] ? (part.sign !== undefined ? 1 : part.size[2]) : 1;
+    let e: ArrayLike<number> | null = null;
+    if (part.rot) {
+      tmpEuler.set(part.rot[0], part.rot[1], part.rot[2]);
+      e = tmpMatrix.makeRotationFromEuler(tmpEuler).elements;
+    }
+    const [ax, ay, az] = part.at;
+    for (let k = 0; k < count; k++) {
+      let x = sp[3 * k] * sx;
+      let y = sp[3 * k + 1] * sy;
+      let z = sp[3 * k + 2] * sz;
+      let nx = sn[3 * k];
+      let ny = sn[3 * k + 1];
+      let nz = sn[3 * k + 2];
+      if (e) {
+        const rx = e[0] * x + e[4] * y + e[8] * z;
+        const ry = e[1] * x + e[5] * y + e[9] * z;
+        const rz = e[2] * x + e[6] * y + e[10] * z;
+        x = rx;
+        y = ry;
+        z = rz;
+        const mx = e[0] * nx + e[4] * ny + e[8] * nz;
+        const my = e[1] * nx + e[5] * ny + e[9] * nz;
+        const mz = e[2] * nx + e[6] * ny + e[10] * nz;
+        nx = mx;
+        ny = my;
+        nz = mz;
+      }
+      const o = 3 * (v + k);
+      pos[o] = x + ax;
+      pos[o + 1] = y + ay;
+      pos[o + 2] = z + az;
+      nor[o] = nx;
+      nor[o + 1] = ny;
+      nor[o + 2] = nz;
+    }
+    if (part.sign !== undefined) {
+      const [u0, v0, du, dv] = signUV(part.sign);
+      for (let k = 0; k < count; k++) {
+        uv[2 * (v + k)] = u0 + su![2 * k] * du;
+        uv[2 * (v + k) + 1] = v0 + su![2 * k + 1] * dv;
+      }
+    } else if (su) uv.set(su, 2 * v);
+    surf.fill(part.surf ?? 0, v, v + count);
+    sign.fill(part.sign === undefined ? 0 : 1, v, v + count);
+    tmpColor.set(part.color).multiplyScalar(part.shade ?? 1);
+    for (let k = 0; k < count; k++) tmpColor.toArray(col, 3 * (v + k));
+    // One window in eight has a light on behind it (seen at night only). It is marked in
+    // the gloss itself, which costs no extra attribute: LIT_GLOSS instead of 1.
+    let gl = part.gloss ?? 0;
+    if (gl === 1 && Math.max(part.size[0], part.size[1], part.size[2]) < 0.7) {
+      const h = Math.sin(ax * 12.9898 + ay * 78.233 + az * 37.719) * 43758.5453;
+      if (h - Math.floor(h) < 0.125) gl = LIT_GLOSS;
+    }
+    gloss.fill(gl, v, v + count);
+    const si = g.index!.array;
+    for (let k = 0; k < si.length; k++) index[i + k] = si[k] + v;
+    if (!scaled[p]) g.dispose();
+    v += count;
+    i += si.length;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.setAttribute('surf', new THREE.BufferAttribute(surf, 1));
+  out.setAttribute('sign', new THREE.BufferAttribute(sign, 1));
+  out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setAttribute('gloss', new THREE.BufferAttribute(gloss, 1));
+  out.setIndex(new THREE.BufferAttribute(index, 1));
+  return out;
+}
+
+/** The axis along which a box is thin enough to be a slab (see boxOrSlab), or -1. */
+function slabAxis(size: [number, number, number]): number {
+  let k = -1;
+  for (let a = 0; a < 3; a++) {
+    if (size[a] > 0.06) continue;
+    if (k >= 0) return -1;
+    k = a;
+  }
+  return k;
+}
+
+/** The slab along axis `k` of a unit box. */
+function unitSlab(k: number): THREE.BufferGeometry {
+  const size: [number, number, number] = [1, 1, 1];
+  size[k] = 0.05;
+  const g = boxOrSlab(size);
+  g.scale(k === 0 ? 20 : 1, k === 1 ? 20 : 1, k === 2 ? 20 : 1);
+  return g;
+}
+
+/** A roof or a tapered box: a geometry of its own, at its own size. */
+function ownShape(p: Part): THREE.BufferGeometry {
+  const g =
+    p.hip === undefined
+      ? new THREE.BoxGeometry(...p.size)
+      : roofGeometry(p.size[0], p.size[1], p.size[2], p.hip, p.ridge);
+  if (p.taper) {
+    const q = g.getAttribute('position');
+    for (let i = 0; i < q.count; i++) {
+      if (q.getY(i) <= 0) continue;
+      q.setX(i, q.getX(i) - Math.sign(q.getX(i)) * p.taper[0]);
+      q.setZ(i, q.getZ(i) - Math.sign(q.getZ(i)) * p.taper[1]);
+    }
+    g.computeVertexNormals();
+  }
+  return g;
+}
+
+/** `build` the plain way, a geometry per part merged: kept to check `build` against. */
+export function buildEach(parts: Part[]): THREE.BufferGeometry {
   const c = new THREE.Color();
   const geometries = parts.map((p) => {
     const g =
@@ -332,11 +505,98 @@ export function build(parts: Part[]): THREE.BufferGeometry {
   return merged;
 }
 
+/**
+ * One square's buildings as one geometry: each building's vertices and indices come from
+ * its new look in `fresh` if it has one, else are copied from where `ranges` says they lie
+ * in `old`, the square's mesh until now. Writes the new places back into `ranges` (first
+ * vertex, vertex count, first index, index count, four per structure). Null if empty.
+ */
+function remerge(
+  list: readonly number[],
+  ranges: Int32Array,
+  old: THREE.BufferGeometry | null,
+  fresh: ReadonlyMap<number, { near: THREE.BufferGeometry; far: THREE.BufferGeometry | null }>,
+  far: boolean,
+): THREE.BufferGeometry | null {
+  let verts = 0;
+  let indices = 0;
+  let model: THREE.BufferGeometry | null = null;
+  for (const s of list) {
+    const f = fresh.get(s);
+    if (f) {
+      const g = far ? f.far : f.near;
+      if (g) {
+        verts += g.getAttribute('position').count;
+        indices += g.index!.count;
+        model ??= g;
+      }
+    } else {
+      verts += ranges[4 * s + 1];
+      indices += ranges[4 * s + 3];
+    }
+  }
+  model ??= old;
+  if (verts === 0 || !model) return null;
+  const out = new THREE.BufferGeometry();
+  const names = Object.keys(model.attributes);
+  const arrays: Float32Array[] = [];
+  for (const name of names) {
+    const size = model.getAttribute(name).itemSize;
+    const array = new Float32Array(verts * size);
+    arrays.push(array);
+    out.setAttribute(name, new THREE.BufferAttribute(array, size));
+  }
+  const index = verts > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+  let v = 0;
+  let i = 0;
+  for (const s of list) {
+    const f = fresh.get(s);
+    const r = 4 * s;
+    let src: THREE.BufferGeometry | null;
+    let v0: number;
+    let vn: number;
+    let i0: number;
+    let iN: number;
+    if (f) {
+      src = far ? f.far : f.near;
+      v0 = 0;
+      vn = src ? src.getAttribute('position').count : 0;
+      i0 = 0;
+      iN = src ? src.index!.count : 0;
+    } else {
+      src = old;
+      v0 = ranges[r];
+      vn = ranges[r + 1];
+      i0 = ranges[r + 2];
+      iN = ranges[r + 3];
+    }
+    ranges[r] = v;
+    ranges[r + 1] = vn;
+    ranges[r + 2] = i;
+    ranges[r + 3] = iN;
+    if (vn === 0 || !src) continue;
+    for (let a = 0; a < names.length; a++) {
+      const from = src.getAttribute(names[a]) as THREE.BufferAttribute;
+      const size = from.itemSize;
+      arrays[a].set((from.array as Float32Array).subarray(v0 * size, (v0 + vn) * size), v * size);
+    }
+    const idx = src.index!.array;
+    const shift = v - v0;
+    for (let k = 0; k < iN; k++) index[i + k] = idx[i0 + k] + shift;
+    v += vn;
+    i += iN;
+  }
+  out.setIndex(new THREE.BufferAttribute(index, 1));
+  out.computeBoundingSphere();
+  out.computeBoundingBox();
+  return out;
+}
+
 /** How far the roof of the building last drawn stands above its counted floors. */
 let crest = 0.9;
 
 /** A house: foundation, walls, rows of windows, a flat roof with a parapet and clutter. */
-function buildingParts(
+export function buildingParts(
   id: number,
   x0: number,
   z0: number,
@@ -1566,7 +1826,7 @@ const SITE_UI = [
   [0.95, 0.66, 0.1],
 ];
 
-function rubbleParts(
+export function rubbleParts(
   id: number,
   x0: number,
   z0: number,
@@ -1781,13 +2041,24 @@ export class StructureView {
   private readonly material: THREE.MeshStandardNodeMaterial;
   private readonly meshes: (THREE.Mesh | null)[] = [];
   /**
-   * The map's own buildings are not drawn one by one (a city has hundreds): each keeps its
-   * geometry here, and all those of a square of ground are merged into one mesh, rebuilt
-   * when one of them changes state.
+   * The map's own buildings are not drawn one by one (a city has hundreds): all those of a
+   * square of ground are merged into one mesh. A building keeps no geometry of its own:
+   * where it lies in its square's mesh is in `near` and `far` (first vertex, vertices,
+   * first index, indices), and when it changes, its new geometry waits in `fresh` until
+   * the square is merged again from the old mesh and the new pieces.
    */
-  private readonly geoms: (THREE.BufferGeometry | null)[] = [];
-  /** The same building as drawn from far off (farParts). */
-  private readonly farGeoms: (THREE.BufferGeometry | null)[] = [];
+  private readonly near = new Int32Array(MAX_STRUCTS * 4);
+  private readonly far = new Int32Array(MAX_STRUCTS * 4);
+  private readonly fresh = new Map<
+    number,
+    { near: THREE.BufferGeometry; far: THREE.BufferGeometry | null }
+  >();
+  /** Buildings whose look changed and is still to be built (structure id to `shown` key). */
+  private readonly pending = new Map<number, number>();
+  /** Per square: how many of its buildings are still in `pending`. */
+  private readonly pendingIn = new Int32Array(CHUNKS * CHUNKS);
+  /** Set once the town is built: from then on, changed buildings are rebuilt a few a frame. */
+  private ready = false;
   private readonly chunks: (THREE.Mesh | null)[] = new Array(CHUNKS * CHUNKS).fill(null);
   private readonly farChunks: (THREE.Mesh | null)[] = new Array(CHUNKS * CHUNKS).fill(null);
   /** Which squares are drawn simplified just now. */
@@ -1915,6 +2186,7 @@ export class StructureView {
     if (poles.length > 0) this.group.add(this.mesh(build(poles)));
     for (let s = 0; s < map.structCount; s++) this.show(s, 0);
     this.flush(CHUNKS * CHUNKS);
+    this.ready = true;
     for (let k = 0; k < map.siteCount; k++) {
       const x = fromFx(map.siteX[k]);
       const z = fromFx(map.siteY[k]);
@@ -1971,9 +2243,55 @@ export class StructureView {
   private show(s: number, state: number): void {
     const holes = state === 2 || state === 3 ? 0 : this.breached[s];
     const fort = state === 2 || state === 3 ? 0 : this.fort[s];
+    // How far it has burnt down from the top (I1): only a shot-up building shows it.
     const level = state === 1 ? this.broken[s] : 0;
     const key = state + 8 * holes + 128 * fort + 256 * level;
-    if (this.shown[s] === key) return;
+    if (this.shown[s] === key && !this.pending.has(s)) return;
+    if (this.pending.get(s) === key) return;
+    if (this.map.sKind[s] === S_BUILDING && this.ready) {
+      // Building one costs a few milliseconds: they are built in `update`, a few a frame,
+      // so a bombardment that changes ten houses at once does not stall a frame.
+      if (!this.pending.has(s)) this.pendingIn[this.chunkAt(s)]++;
+      this.pending.set(s, key);
+      this.mark(s, state);
+      return;
+    }
+    this.draw(s, key);
+    this.mark(s, state);
+  }
+
+  /** The square of ground a map building is merged into. */
+  private chunkAt(s: number): number {
+    const m = this.map;
+    const cx = (m.sX[s] * CELL + (m.sW[s] * CELL) / 2) / CHUNK;
+    const cz = (m.sY[s] * CELL + (m.sH[s] * CELL) / 2) / CHUNK;
+    return Math.min(CHUNKS - 1, Math.floor(cz)) * CHUNKS + Math.min(CHUNKS - 1, Math.floor(cx));
+  }
+
+  /** What a change of state means beyond the look: sight lines, decks, the version. */
+  private mark(s: number, state: number): void {
+    const m = this.map;
+    // Units drive on a standing deck; a standing house blocks the view.
+    if (m.sKind[s] === S_BRIDGE) this.terrain.bridgeUp[s] = state === 2 ? 0 : 1;
+    else {
+      for (let j = m.sY[s]; j < m.sY[s] + m.sH[s]; j++) {
+        for (let i = m.sX[s]; i < m.sX[s] + m.sW[s]; i++) {
+          this.fog.setWall(j * MAP_CELLS + i, state !== 2);
+        }
+      }
+    }
+    this.version++;
+  }
+
+  /**
+   * Build the look of structure `s` for `shown` key `key` (state, breached faces, fort,
+   * broken level).
+   */
+  private draw(s: number, key: number): void {
+    const state = key & 7;
+    const holes = (key >> 3) & 15;
+    const fort = (key >> 7) & 1;
+    const level = key >> 8;
     const sm = this.map;
     if (sm.sKind[s] === S_BASE) {
       // A base building takes the place of whatever hedge or fence stood there.
@@ -2020,15 +2338,14 @@ export class StructureView {
             );
     if (m.sKind[s] === S_BUILDING) {
       this.crest[s] = level > 0 ? 0.6 : state === 0 || state === 1 ? Math.max(0.9, crest) : 0.9;
-      const k =
-        Math.min(CHUNKS - 1, Math.floor((z0 + d / 2) / CHUNK)) * CHUNKS +
-        Math.min(CHUNKS - 1, Math.floor((x0 + w / 2) / CHUNK));
-      if (this.geoms[s]) this.geoms[s]!.dispose();
-      else this.chunkOf[k].push(s);
-      this.farGeoms[s]?.dispose();
-      this.geoms[s] = build(parts);
+      const k = this.chunkAt(s);
+      const old = this.fresh.get(s);
+      if (old) {
+        old.near.dispose();
+        old.far?.dispose();
+      } else if (this.near[4 * s + 1] === 0) this.chunkOf[k].push(s);
       const far = farParts(parts);
-      this.farGeoms[s] = far.length > 0 ? build(far) : null;
+      this.fresh.set(s, { near: build(parts), far: far.length > 0 ? build(far) : null });
       this.dirty.add(k);
     } else {
       const mesh = this.mesh(build(parts));
@@ -2036,47 +2353,66 @@ export class StructureView {
       this.group.add(mesh);
     }
     this.shown[s] = key;
-    // Units drive on a standing deck; a standing house blocks the view.
-    if (bridge) this.terrain.bridgeUp[s] = state === 2 ? 0 : 1;
-    else {
-      for (let j = m.sY[s]; j < m.sY[s] + m.sH[s]; j++) {
-        for (let i = m.sX[s]; i < m.sX[s] + m.sW[s]; i++) {
-          this.fog.setWall(j * MAP_CELLS + i, state !== 2);
-        }
-      }
-    }
-    this.version++;
   }
 
-  /** Merge anew the squares of ground in which a building changed, a few a frame at most. */
+  /**
+   * Build the looks still pending, for about `ms` milliseconds (at least one), oldest
+   * change first.
+   */
+  private drawPending(ms: number): void {
+    const t0 = performance.now();
+    for (const [s, key] of this.pending) {
+      this.pending.delete(s);
+      this.pendingIn[this.chunkAt(s)]--;
+      this.draw(s, key);
+      if (performance.now() - t0 > ms) break;
+    }
+  }
+
+  /**
+   * Merge anew the squares of ground in which a building changed, `limit` at most. A
+   * square with a building whose new look is not built yet waits for it.
+   */
   private flush(limit: number): void {
     let done = 0;
     for (const k of this.dirty) {
-      if (done++ >= limit) break;
+      if (done >= limit) break;
+      if (this.pendingIn[k] > 0) continue;
+      done++;
       this.dirty.delete(k);
-      const old = this.chunks[k];
-      if (old) {
-        this.group.remove(old);
-        old.geometry.dispose();
+      const list = this.chunkOf[k];
+      const near = this.chunks[k];
+      const far = this.farChunks[k];
+      const nearGeo = remerge(list, this.near, near?.geometry ?? null, this.fresh, false);
+      const farGeo = remerge(list, this.far, far?.geometry ?? null, this.fresh, true);
+      for (const s of list) {
+        const f = this.fresh.get(s);
+        if (!f) continue;
+        f.near.dispose();
+        f.far?.dispose();
+        this.fresh.delete(s);
       }
-      const oldFar = this.farChunks[k];
-      if (oldFar) {
-        this.group.remove(oldFar);
-        oldFar.geometry.dispose();
+      if (near) {
+        this.group.remove(near);
+        near.geometry.dispose();
+        this.chunks[k] = null;
+      }
+      if (far) {
+        this.group.remove(far);
+        far.geometry.dispose();
         this.farChunks[k] = null;
       }
-      const parts = this.chunkOf[k].map((s) => this.geoms[s]!);
-      if (parts.length === 0) continue;
-      const mesh = this.mesh(parts.length === 1 ? parts[0].clone() : mergeGeometries(parts));
-      this.chunks[k] = mesh;
-      this.group.add(mesh);
-      const far = this.chunkOf[k].map((s) => this.farGeoms[s]).filter((g) => g !== null);
-      if (far.length > 0) {
-        const farMesh = this.mesh(far.length === 1 ? far[0].clone() : mergeGeometries(far));
-        this.farChunks[k] = farMesh;
-        this.group.add(farMesh);
+      if (nearGeo) {
+        const mesh = this.mesh(nearGeo);
+        this.chunks[k] = mesh;
+        this.group.add(mesh);
       }
-      mesh.visible = this.isFar[k] === 0 || !this.farChunks[k];
+      if (farGeo) {
+        const mesh = this.mesh(farGeo);
+        this.farChunks[k] = mesh;
+        this.group.add(mesh);
+      }
+      if (this.chunks[k]) this.chunks[k]!.visible = this.isFar[k] === 0 || !this.farChunks[k];
       if (this.farChunks[k]) this.farChunks[k]!.visible = this.isFar[k] === 1;
     }
   }
@@ -2328,7 +2664,10 @@ export class StructureView {
 
   update(seconds: number, dt: number): void {
     const m = this.map;
-    if (this.dirty.size > 0) this.flush(2);
+    // About 2 ms a frame for changed buildings: a wall that turns to rubble a frame or two
+    // late is not seen; a dropped frame is.
+    if (this.pending.size > 0) this.drawPending(2);
+    if (this.dirty.size > 0) this.flush(this.pending.size > 0 ? 1 : 2);
     const pips = this.pips;
     pips.n = 0;
     for (let s = 0; s < m.structCount; s++) {

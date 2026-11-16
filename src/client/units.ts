@@ -1103,6 +1103,28 @@ export class UnitView {
     return this.aim[id] !== NO_AIM;
   }
 
+  /**
+   * Every living ground unit the player knows of, for the front line: all of their own, and
+   * enemies in sight (in a building only once their fire has given them away).
+   */
+  eachKnownGround(add: (x: number, z: number, team: number, weight: number) => void): void {
+    const pos = this.curr;
+    for (let i = 0; i < this.count; i++) {
+      if (!this.isAlive(i)) continue;
+      const k = this.kind[i];
+      if (IS_AIR[k] || k === KIND_PLANE) continue;
+      const x = pos[2 * i];
+      const z = pos[2 * i + 1];
+      const team = this.teamOf(i);
+      if (team !== this.playerTeam) {
+        const info = this.info[i];
+        if ((info & INFO_INSIDE) !== 0 && (info & INFO_REVEALED) === 0) continue;
+        if (!this.fog.sees(x, z)) continue;
+      }
+      add(x, z, team, IS_VEHICLE[k] ? 2 : 1);
+    }
+  }
+
   /** A living unit of the player's army. */
   isMine(id: number): boolean {
     // The transport plane flies itself: nobody selects it or gives it orders.
