@@ -466,7 +466,7 @@ ideas only: our own look, units and interface). Design and drawings are in the R
 Hub, section 4A. Fabio answered the open questions the same day. This comes after the
 review fixes and the order-ownership refactor agreed on 2026-11-15, which stay first.
 
-- [ ] I1 Deaths you can see (client only). A man a squad loses becomes a body: thrown
+- [x] I1 Deaths you can see (client only, decision 137). A man a squad loses becomes a body: thrown
       away from a high-explosive hit, crumpled where he stood from bullets. Bodies stay all
       game in six to eight poses, mirrored and turned; far ones are one pre-posed instance
       each, and past a budget the oldest far ones are baked into the ground wear texture.

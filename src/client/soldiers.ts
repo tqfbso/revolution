@@ -89,6 +89,24 @@ for (let k = 0; k < STRIDE_FRAMES; k++)
 const STILL_MEN = 8192;
 const STRIDE_MEN = 4096;
 
+/**
+ * How the dead lie (I1, decision 136): a stance of `man`, then a turn of the whole figure
+ * to put it on the ground, and which side the rifle fell. Each is [kneel, prone, run,
+ * stride, roll about the line of his body from front to back, pitch about his hips,
+ * rifle side]. No two read alike from above, so a field of them is not a field of copies.
+ */
+const DEAD: [number, number, number, number, number, number, number][] = [
+  [0, 1, 0, 0, 0, 0, 1], // face down, arms out ahead
+  [0, 1, 0, 0, Math.PI, 0, -1], // rolled onto his back
+  [1, 0, 0, 0, Math.PI / 2, 0, 1], // on his side, knees drawn up
+  [0, 0, 1, Math.PI / 2, Math.PI / 2, 0, -1], // down on his side in mid-stride
+  [0, 0, 1, (3 * Math.PI) / 2, -Math.PI / 2, 0, 1], // the same, the other way
+  [0, 0, 0, 0, -Math.PI / 2, 0.35, 1], // on his other side, legs straight
+  [0, 0, 0, 0, 0, -Math.PI / 2, -1], // flat on his back
+  [0, 0.55, 0, 0, -Math.PI / 2, 0, -1], // curled on his side
+];
+export const DEAD_POSES = DEAD.length;
+
 /** Which still pose stands for a man in this blend of stances (the inputs of `man`). */
 export function stillPose(
   kneel: number,
@@ -172,6 +190,17 @@ export class Soldiers {
       [this.arm1, m.arm1],
     ];
     for (const [b, g] of pieces) this.pieceOf.set(b, g);
+    // The near pieces too: the dead are baked from them (deadPoses).
+    for (const [b, g] of [
+      [this.torso, m.torso],
+      [this.head, m.head],
+      [this.thigh, m.thigh],
+      [this.shin, m.shin],
+      [this.upper, m.upper],
+      [this.fore, m.fore],
+      [this.rifle, m.rifle],
+    ] as const)
+      this.pieceOf.set(b, g);
     this.stillMuzzle = new Float32Array(STILLS.length * 3);
     const frame = new THREE.Matrix4();
     this.stills = STILLS.map(([kneel, prone, run, aim, stride], k) => {
@@ -238,6 +267,73 @@ export class Soldiers {
     mz[3] = sin;
     mz[4] = cos;
     return true;
+  }
+
+  /**
+   * The dead (I1): each pose of `DEAD` baked whole, as the near (`lod` 0) or the middle
+   * figure, lying on the ground with its origin at the middle of the body, and the rifle
+   * beside it. Bodies stay all game, so a body is one instance and nothing else.
+   */
+  deadPoses(lod: number): THREE.BufferGeometry[] {
+    const gun = [...this.pieceOf].find(([b]) => b === (lod === 0 ? this.rifle : this.rifle1));
+    const rifle = gun ? gun[1] : null;
+    const frame = new THREE.Matrix4();
+    return DEAD.map(([kneel, prone, run, stride, roll, pitch, side]) => {
+      this.capture = [];
+      this.man(lod, 0, 0, 0, 0, 1, kneel, prone, run, 0, stride, 0, 1, 1, 1, 0);
+      const parts = this.capture
+        .filter(({ piece }) => piece !== rifle)
+        .map(({ piece, f }) => {
+          frame.set(
+            f[0],
+            f[3],
+            f[6],
+            f[9],
+            f[1],
+            f[4],
+            f[7],
+            f[10],
+            f[2],
+            f[5],
+            f[8],
+            f[11],
+            0,
+            0,
+            0,
+            1,
+          );
+          const g = piece.clone();
+          g.deleteAttribute('aTint');
+          return g.applyMatrix4(frame);
+        });
+      this.capture = null;
+      const body = mergeGeometries(parts);
+      for (const p of parts) p.dispose();
+      body.applyMatrix4(
+        new THREE.Matrix4().makeRotationX(pitch).multiply(new THREE.Matrix4().makeRotationZ(roll)),
+      );
+      body.computeBoundingBox();
+      const bb = body.boundingBox!;
+      body.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y - 0.006, -(bb.min.z + bb.max.z) / 2);
+      if (rifle === null) return body;
+      // The rifle where it fell: on its side, a little off the line of the body.
+      const g = rifle.clone();
+      g.deleteAttribute('aTint');
+      g.scale(S, S, S)
+        .rotateZ(Math.PI / 2)
+        .rotateY(0.5 * side + 0.2);
+      g.computeBoundingBox();
+      const rb = g.boundingBox!;
+      g.translate(
+        side * ((bb.max.x - bb.min.x) / 2 + 0.06) - (rb.min.x + rb.max.x) / 2,
+        -rb.min.y,
+        0.05 * side - (rb.min.z + rb.max.z) / 2,
+      );
+      const out = mergeGeometries([body, g]);
+      body.dispose();
+      g.dispose();
+      return out;
+    });
   }
 
   /** Whether another man fits at full detail this frame. */

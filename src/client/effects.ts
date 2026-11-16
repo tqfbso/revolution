@@ -799,6 +799,70 @@ export class Effects {
     }
   }
 
+  /**
+   * Fire in a burning building (I1): tongues of flame out of a window, leaning out of the
+   * wall (normal nx, nz; zero for flames off a broken top), and dark smoke going up.
+   * `heat` 1 is a fresh fire, a quarter a smouldering one.
+   */
+  windowFire(x: number, y: number, z: number, nx: number, nz: number, heat: number): void {
+    const tongues = 1 + Math.round(heat * 2);
+    for (let k = 0; k < tongues; k++) {
+      this.emit(
+        ADDITIVE,
+        x + rnd(0.35) + nx * 0.1,
+        y + Math.random() * 0.25,
+        z + rnd(0.35) + nz * 0.1,
+        nx * 0.5 + rnd(0.3),
+        1.2 + Math.random() * 1.4,
+        nz * 0.5 + rnd(0.3),
+        0.4 + Math.random() * 0.35,
+        0.55 + heat * 0.35,
+        0.2,
+        1,
+        0.48 + Math.random() * 0.12,
+        0.12,
+        0.55 + heat * 0.3,
+      );
+    }
+    if (this.night) {
+      this.emit(
+        ADDITIVE,
+        x + nx * 0.6,
+        y,
+        z + nz * 0.6,
+        0,
+        0.1,
+        0,
+        0.5,
+        4,
+        5,
+        1,
+        0.5,
+        0.16,
+        0.05 * heat,
+      );
+    }
+    if (Math.random() < 0.65) {
+      const g = 0.06 + Math.random() * 0.05;
+      this.emit(
+        SMOKE,
+        x + nx * 0.4,
+        y + 0.6,
+        z + nz * 0.4,
+        nx * 0.4 + rnd(0.3),
+        1.8 + Math.random() * 1.2,
+        nz * 0.4 + rnd(0.3),
+        4 + Math.random() * 3,
+        0.9,
+        4 + heat * 2.5,
+        g,
+        g,
+        g * 1.05,
+        0.3 + heat * 0.25,
+      );
+    }
+  }
+
   update(dt: number, camera: THREE.Camera): void {
     // Billboard basis from the camera.
     const e = camera.matrixWorld.elements;
