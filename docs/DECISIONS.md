@@ -3028,3 +3028,18 @@ The inner loop also skips bounds checks away from the map's edge.
 Measured (`tools/simbench.ts`, hard vs hard, 25 minutes, seed 1): city mean tick 0.87 to
 0.73 ms, ticks over 5 ms 2.7% to 1.7%; four armies 1.33 to 1.08 ms, 5.3% to 3.1%. Since
 the review: city 1.22 to 0.73 ms, four armies 2.09 to 1.08 ms.
+
+## 143. Helicopters that come down stay down (2026-11-16)
+
+Fabio liked the bodies that stay all game (decision 139) and asked for the same for downed
+helicopters. Client only, the sim and the golden hashes are untouched. A shot-down aircraft
+used to vanish (the sim frees a wreck's slot after a while and `units.ts` never drew a dead
+aircraft). Now `src/client/wrecks.ts` keeps its own record: on the death event a gunship or
+lift helicopter falls the last metres with a smoke trail, hits the ground (a second blast, a
+scorched patch, a thud) and lies there for the rest of the game, smouldering for 50 s and
+then cold. Three ways to lie (on its side, nose in with the tail snapped off, upright and
+broken), each with a bent rotor blade beside it, built from the flying model's own parts
+(`buildHelicopterWrecks`) and scorched by the same burn paint as tank wrecks. No glow.
+Enemy wrecks show once the spot is explored. At most 512 are kept (oldest replaced); the
+list is rewritten only on a fall, a new wreck or every half second for the fog, and costs
+nothing with none. Drones and the transport plane are not covered.
