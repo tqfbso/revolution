@@ -112,7 +112,7 @@ async function start(): Promise<void> {
   // and always the plain skirmish.
   const coop = await openCoop(params);
   if (coop) for (const k of ['control', 'speed']) params.delete(k);
-  // What is being played (decision 139): the one description of the game. Everything below
+  // What is being played (decision 140): the one description of the game. Everything below
   // that needs to know the map, the armies or the players reads it from here, and the sim
   // is built from the same object.
   const match = coop ? coop.match : matchFromParams(params);
@@ -309,7 +309,7 @@ async function start(): Promise<void> {
   };
   const deliver = (command: Command) => {
     // Who gave it is not ours to say: the sim that takes the order in signs it with our
-    // seat and our army (decision 139). We say only which picture we were looking at, so
+    // seat and our army (decision 140). We say only which picture we were looking at, so
     // that a unit that has since taken a dead one's number is left out.
     command.seen = seenTick;
     if (guest()) coop?.sendCommand(command);

@@ -1,4 +1,4 @@
-// The order path's guard (security review, findings 4 and 5; decision 139).
+// The order path's guard (security review, findings 4 and 5; decision 140).
 //
 // `validCommand` is a shape check every sim runs on every order before it applies it: an
 // order that is not an object of a known type, or whose lists are not lists of numbers,

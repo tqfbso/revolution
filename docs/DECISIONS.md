@@ -2911,7 +2911,45 @@ fades in between 280 m and 420 m of camera distance (the game opens at 260 m), s
 strategic view and never sits on a close fight. Flat colour, no glow. `?front=0` turns it
 off.
 
-## 139. One description of a game, and every order signed with its army (2026-11-16)
+## 139. Deaths you can see (2026-11-16)
+
+Roadmap I1, from decision 136. Drawing only: the sim, its rules and the golden hash are
+untouched, so a shared game stays in step whatever each player's screen shows.
+
+- **Bodies.** When a squad's health no longer covers a man, the man who drops out leaves a
+  body where he stood (`dropMen`, `layFallen` in `units.ts`; `bodies.ts`). Eight poses
+  (`DEAD` in `soldiers.ts`: face down, on the back, on either side, curled, in mid-stride),
+  each turned its own way and with the rifle beside him, baked whole at start from the
+  same pieces the living men are drawn with: one instance a body. Near (under 120 m) the
+  full figure, out to 340 m the middle one, then a small dark shape to 640 m.
+- **All game.** Bodies are kept in 64 m squares and the instance lists are rewritten only
+  when the camera moves, a body lands or one is in the air; a still camera over a field of
+  the dead costs nothing on the CPU. A square keeps 4,096 bodies, then the oldest there
+  gives way. Roadmap I1 said far ones would be baked into the ground wear past a budget:
+  not needed at these numbers, so not done; each thrown body still marks the ground where
+  it lands.
+- **Thrown.** A man killed within a moment of a tank round, missile, helicopter rocket,
+  strike drone, artillery shell landing near him, or (weaker) an autocannon burst, is
+  thrown away from the blast and turns over in the air before he lands in his pose, with
+  dust where he comes down. A man shot falls where he stood. No blood, nothing torn.
+- **Fog.** Your own dead show at once; the enemy's only once your troops see the spot.
+- **Dismount.** On the unload event the men of each squad climb out of the back of the
+  carrier one after another (0.2 s apart) and run to their places; out of a helicopter
+  they come down from it. The squad is in play at once, as before.
+- **Burning down from the top.** Between the sim's damaged line (90 %) and gutted line
+  (40 %) a building now shows how far it has burnt (`brokenLevel` in `structures.ts`):
+  first the roof goes, then a storey per step, with ragged walls where the lost storeys
+  stood, charred beams, the roof in heaps on the floor that held and soot up the face.
+  Flames come out of the windows of the top storey left and off the broken top, hot after
+  each storey goes, then smouldering; a gutted shell burns out over two minutes. The
+  thresholds and times are the sim's own, so destruction takes exactly as long as before.
+- Civilians who die still fade after a while, as before (their own figures).
+
+Measured in the cloud (clash, 4,000 units): rewriting the body lists while the camera moves
+costs 0.3 ms with 2,000 bodies in view and 1.0 ms with 10,000 in view; with the camera
+still, nothing. On the GPU a body costs what a living man at the same distance costs.
+
+## 140. One description of a game, and every order signed with its army (2026-11-16)
 
 The architecture review's findings F1 and F2, fixed together because the second needs the
 first.
