@@ -3029,7 +3029,46 @@ Measured (`tools/simbench.ts`, hard vs hard, 25 minutes, seed 1): city mean tick
 0.73 ms, ticks over 5 ms 2.7% to 1.7%; four armies 1.33 to 1.08 ms, 5.3% to 3.1%. Since
 the review: city 1.22 to 0.73 ms, four armies 2.09 to 1.08 ms.
 
-## 143. Open ground kills: bursts and the squad machine gun (2026-11-17)
+## 143. Gameplay loose ends: engineers that demolish, gunships that dodge air defence (2026-11-16)
+
+Four small gaps left over from earlier decisions, none touching damage rules:
+
+- **The computer's engineers lay charges** (decision 118 said they did not). In `press`, once
+  its infantry is within 45 m of the house under attack, the engineers of the force go in
+  with the charge order on that house, next to the guns and tanks. Houses only; the house is
+  the strong point it already chose (one the enemy is known to hold), so empty houses are not
+  razed for nothing. Sub-commanders use the same code. Woods are still not felled by the
+  computer.
+- **Gunships avoid known air defence.** `AA_AVOID` 52 m (the guns reach 40, a gunship's
+  rockets 28). Hunting helicopters (`huntHelis`, so also the player's idle ones) will not take
+  a target within that of air defence their army has in sight. The computer's escorting
+  gunships (`escort`) also remember air defence seen for 90 s, skip prey under it or on the
+  way past it, and fly out of the reach of any they find themselves in. Helicopters under a
+  direct player order do what they are told.
+- **Way points on the minimap.** The routes of the selected troops are drawn there in the
+  same green with a diamond on each way point (`RouteView.polylines`, `Minimap.drawRoutes`).
+- **The fourth army's score.** `STAT_TEAMS` is 4, so the victory screen counts all four
+  armies instead of dashes. The score is not in the hash.
+
+Golden hashes unchanged. Tests: `tests/commanders.test.ts` (air defence, charges),
+`tests/score.test.ts` (fourth army).
+
+## 144. Helicopters that come down stay down (2026-11-16)
+
+Fabio liked the bodies that stay all game (decision 139) and asked for the same for downed
+helicopters. Client only, the sim and the golden hashes are untouched. A shot-down aircraft
+used to vanish (the sim frees a wreck's slot after a while and `units.ts` never drew a dead
+aircraft). Now `src/client/wrecks.ts` keeps its own record: on the death event a gunship or
+lift helicopter falls the last metres with a smoke trail, hits the ground (a second blast, a
+scorched patch, a thud) and lies there for the rest of the game, smouldering for 50 s and
+then cold. Three ways to lie (on its side, nose in with the tail snapped off, upright and
+broken), each with a bent rotor blade beside it, built from the flying model's own parts
+(`buildHelicopterWrecks`) and scorched by the same burn paint as tank wrecks. No glow.
+Enemy wrecks show once the spot is explored. At most 512 are kept (oldest replaced); the
+list is rewritten only on a fall, a new wreck or every half second for the fog, and costs
+nothing with none. Drones and the transport plane are not covered.
+
+## 145. Open ground kills: bursts and the squad machine gun (2026-11-17)
 
 I3 of the inspiration review. Fabio's ask: men caught in the open by a tank round or a
 helicopter's rockets should die and be thrown, so that crossing open ground under those

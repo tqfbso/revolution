@@ -148,7 +148,7 @@ describe('the army mix after the armour rule', () => {
     }
     expect(left).toBe(0);
     // (More than 10 before I3; tank rounds now burst among the teams. Over 16 seeds the
-    // defenders win 9 times, 10 before: see decision 143.)
+    // defenders win 9 times, 10 before: see decision 145.)
     expect(own).toBeGreaterThan(5);
   });
 });

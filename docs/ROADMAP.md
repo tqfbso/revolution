@@ -435,6 +435,8 @@ From the proposal in the "Design tactical attack formations" thread.
 - Concentrate: a commander's troops on one exact spot, key R. BUILT (decision 117)
 - Demolish for engineers, key O: charges on buildings, felling woods; people still in a
   house that is brought down die. BUILT (decision 118)
+- Helicopters that come down stay down: they fall, burn and lie as scorched wrecks all game.
+  BUILT 2026-11-16 (decision 144, client only)
 - More civilians: 1,400 a map, most round the flags, one in three sheltering at home.
   BUILT (decision 119)
 - Buildings a sixth easier to bring down. BUILT (decision 120)
@@ -476,7 +478,7 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
 - [x] I2 Front line (client only, decision 138). A line between your ground and the enemy's, from what
       your army knows (units, garrisons, held flags, enemies seen recently), teeth on the
       enemy side, on the minimap and on the zoomed-out map.
-- [x] I3 Lethal open ground and squad gunners (rules, new golden hash, decision 143).
+- [x] I3 Lethal open ground and squad gunners (rules, new golden hash, decision 145).
       High-explosive direct fire (tank, missile, helicopter, strike drone) bursts among
       enemy men on foot round its target in the open; rubble and sandbags halve it, a
       trench quarters it, walls stop it. Every rifle and paratroop squad has a light

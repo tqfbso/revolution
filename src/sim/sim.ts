@@ -167,9 +167,11 @@ import {
   KIND_RECON,
   NIGHT_SIGHT_PCT,
   WEATHER_SIGHT_PCT,
+  AA_AVOID,
   HUNT_AIR,
   HUNT_GROUND,
   HUNT_PERIOD,
+  KIND_AD,
   KIND_HELI,
 } from './units';
 import {
@@ -1954,6 +1956,7 @@ function acquireTargets(w: World): void {
 const HUNT_GROUND_SQ = HUNT_GROUND * HUNT_GROUND;
 const HUNT_AIR_SQ = HUNT_AIR * HUNT_AIR;
 const HUNT_HOME_SQ = fx(6) * fx(6);
+const AA_AVOID_SQ = AA_AVOID * AA_AVOID;
 
 /**
  * Attack helicopters with nothing to do go looking (decision 116). One that stands without
@@ -1965,6 +1968,8 @@ function huntHelis(w: World): void {
   const n = w.count;
   const tick = w.tick;
   const dmg = KINDS[KIND_HELI].damage;
+  // Air defence, for whoever knows where it is (found when the first gunship needs it).
+  let guns: number[] | null = null;
   for (let i = 0; i < n; i++) {
     if (w.kind[i] !== KIND_HELI || w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     if ((tick + i) % HUNT_PERIOD !== 0) continue;
@@ -1978,6 +1983,12 @@ function huntHelis(w: World): void {
     const hx = hunting ? w.aimX[i] : x;
     const hy = hunting ? w.aimY[i] : y;
     const team = w.team[i];
+    if (guns === null) {
+      guns = [];
+      for (let j = 0; j < n; j++)
+        if (w.kind[j] === KIND_AD && w.state[j] === STATE_ALIVE) guns.push(j);
+    }
+    const aa = guns.filter((g) => w.team[g] !== team && w.spotted[g] > tick && w.carrier[g] < 0);
     let best = -1;
     let bestKey = 0;
     for (let j = 0; j < n; j++) {
@@ -1985,6 +1996,12 @@ function huntHelis(w: World): void {
       if (w.spotted[j] <= tick || w.carrier[j] >= 0 || w.inside[j] >= 0) continue;
       const kj = w.kind[j];
       if (dmg[kj] === 0) continue;
+      // Not what stands under the guns of air defence.
+      if (
+        aa.some((g) => (w.posX[j] - w.posX[g]) ** 2 + (w.posY[j] - w.posY[g]) ** 2 < AA_AVOID_SQ)
+      ) {
+        continue;
+      }
       const flying = IS_AIR[kj];
       const ox = w.posX[j] - hx;
       const oy = w.posY[j] - hy;

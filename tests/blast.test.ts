@@ -1,4 +1,4 @@
-// I3 (decision 143): high-explosive direct fire bursts among men in the open, and every
+// I3 (decision 145): high-explosive direct fire bursts among men in the open, and every
 // rifle squad has a machine gun that pins.
 import { describe, expect, it } from 'vitest';
 import { CMD_MOVE, CMD_SPAWN, type Command } from '../src/sim/commands';

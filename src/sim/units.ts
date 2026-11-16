@@ -115,7 +115,7 @@ export interface UnitKind {
   minRange: number;
   blast: number;
   /**
-   * Direct fire with a high-explosive round (I3, decision 143): besides what the shot does
+   * Direct fire with a high-explosive round (I3, decision 145): besides what the shot does
    * to its target, every enemy squad on foot within `burst` of it takes `burstDamage` (at
    * the target, half at the rim). Rubble and sandbags halve that, a trench quarters it,
    * and men behind walls are not touched. 0 = no burst.
@@ -641,6 +641,12 @@ export const HUNT_GROUND = fx(110);
 export const HUNT_AIR = fx(220);
 /** How often a hunting helicopter looks again, in ticks. */
 export const HUNT_PERIOD = 20;
+/**
+ * A gunship keeps this far from air defence its army knows of: the guns reach 40, its own
+ * rockets 28. Hunting helicopters and the computer's gunships both leave alone what stands
+ * under such guns.
+ */
+export const AA_AVOID = fx(52);
 /** Helicopters an army can keep per finished helipad: landing space is what limits them. */
 export const HELIS_PER_PAD = 3;
 /** Paratroop squads that can wait in reserve, and the most one plane takes. */

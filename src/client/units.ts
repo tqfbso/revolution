@@ -78,6 +78,7 @@ import {
 import { Batch } from './batch';
 import { Soldiers, stillPose } from './soldiers';
 import { Bodies } from './bodies';
+import { Wrecks } from './wrecks';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import { COMMANDER_RGB, ICON_FROM, ICON_FULL, ICON_PENNANT, Icons } from './icons';
@@ -94,6 +95,7 @@ import {
   buildReconDrone,
   buildStrikeDrone,
   buildHelicopter,
+  buildHelicopterWrecks,
   buildTransportPlane,
   box,
   buildInfantry,
@@ -295,6 +297,8 @@ export class UnitView {
   private readonly diedAt = new Float32Array(MAX_UNITS).fill(-1e9);
   /** The dead, who stay where they fell all game (I1). */
   readonly bodies: Bodies;
+  /** Helicopters that came down stay where they fell (wrecks.ts). */
+  readonly wrecks: Wrecks;
   /** The last blast that hit each unit (client seconds), its strength and where it came from. */
   private readonly blastAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private readonly blastPow = new Float32Array(MAX_UNITS);
@@ -443,6 +447,28 @@ export class UnitView {
       effects,
       TEAM_RGB,
     );
+    const crashed = (gunship: boolean) =>
+      buildHelicopterWrecks(gunship).map((g) => {
+        const b = new Batch(g, material, 256, 16);
+        b.mesh.castShadow = shadows;
+        b.mesh.receiveShadow = shadows;
+        this.group.add(b.mesh);
+        return b;
+      });
+    this.wrecks = new Wrecks(
+      [crashed(true), crashed(false)],
+      terrain,
+      fog,
+      effects,
+      TEAM_RGB,
+      (x, z, seen) => {
+        // It hits the ground: a second blast, a scorched patch, a thud.
+        this.scars.add(x, z, 1.6, true);
+        this.terrain.stamp(x, z, 2, 60);
+        this.sound?.at(SND_EXPLOSION, x, z, seen);
+        if (seen) effects.explosion(x, this.terrain.heightAt(x, z), z);
+      },
+    );
     this.squads[KIND_INFANTRY] = {
       figures: SQUAD_OFFSETS.map(([x, z]) => ({ x, z })),
       drill: DRILL_SQUAD,
@@ -540,6 +566,7 @@ export class UnitView {
       this.flares.length = 0;
       this.scars.clear();
       this.bodies.clear();
+      this.wrecks.clear();
       this.impacts.length = 0;
       this.blastAt.fill(-1e9);
       this.pinnedUntil.fill(-1e9);
@@ -1073,6 +1100,21 @@ export class UnitView {
           this.scars.add(ax, az, 2.3, true);
           this.terrain.stamp(ax, az, 2.6, 70);
           this.sound?.at(SND_EXPLOSION, ax, az, this.fog.sees(ax, az));
+        }
+        const kindDead = this.kind[a];
+        if (kindDead === KIND_HELI || kindDead === KIND_LIFT) {
+          const team = this.teamOf(a);
+          const coat = factionOf(team) * SEEDS;
+          this.wrecks.add(
+            ax,
+            az,
+            ay - this.terrain.heightAt(ax, az),
+            this.heading[a],
+            kindDead === KIND_HELI ? 0 : 1,
+            team,
+            (a % SEEDS) + coat + BURN_BASE + BURN_SCALE,
+            team === this.playerTeam || this.fog.sees(ax, az),
+          );
         }
         if (near === LOD_HIDDEN) continue;
         if (veh && !air) fx.explosion(ax, ay, az);
@@ -1623,6 +1665,7 @@ export class UnitView {
     this.stats.culled = culled;
     this.stats.still = stillCount;
     this.bodies.update(seconds, dt, camera, nearNow, this.lodFar);
+    this.wrecks.update(seconds, dt, camera);
     for (const b of batches) b.flush();
     this.jamRings.flush();
     this.shade.flush();
