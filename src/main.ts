@@ -622,7 +622,7 @@ async function start(): Promise<void> {
     supply,
   );
   minimap.pick = (x, z) => input.pickAt(x, z);
-  // The front line (decision 137): traced four times a second from what the army knows,
+  // The front line (decision 138): traced four times a second from what the army knows,
   // on the minimap and, zoomed out, on the ground. ?front=0 turns it off.
   const front = new URLSearchParams(location.search).get('front') === '0' ? null : new FrontLine();
   const frontSources = {

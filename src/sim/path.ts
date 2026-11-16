@@ -45,6 +45,9 @@ const entryNext = new Int32Array(CELL_COUNT * 8 + 8);
  * cut a blocked corner. A field work in the way is a very expensive step, not a wall: the
  * route goes through one only if there is no way round.
  */
+/** How many fields have been built in this process: a measuring aid, never part of the game. */
+export const fieldStats = { builds: 0 };
+
 export function buildField(
   map: GameMap,
   layer: number,
@@ -53,6 +56,7 @@ export function buildField(
   goalCount: number,
   limit: number,
 ): void {
+  fieldStats.builds++;
   const cost = map.pathCost[layer];
   const hard = map.cost[layer];
   dist.fill(UNREACHABLE);

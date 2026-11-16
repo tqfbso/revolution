@@ -473,7 +473,7 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
       Also: troops visibly leave carriers by the ramp or tailgate on the existing unload
       event; buildings lose their top floors first as health falls (same thresholds), with
       soot and fire in the windows. No blood.
-- [x] I2 Front line (client only, decision 137). A line between your ground and the enemy's, from what
+- [x] I2 Front line (client only, decision 138). A line between your ground and the enemy's, from what
       your army knows (units, garrisons, held flags, enemies seen recently), teeth on the
       enemy side, on the minimap and on the zoomed-out map.
 - [ ] I3 Lethal open ground and squad gunners (rules, new golden hash). High-explosive

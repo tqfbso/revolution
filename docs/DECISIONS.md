@@ -2859,7 +2859,30 @@ that change how infantry fights (blast in the open, squad gunners), then formati
 ground-floor collapse, mortars and rooftops, air strikes, and the guerrilla last, with
 the unique units and authored models. All of it after the review fixes.
 
-## 137. The front line (2026-11-16)
+## 137. An order shares its routes, and old routes are kept until they fail (2026-11-16)
+
+From the performance review (finding 2): route fields were 57% of sim time in a real game,
+and 93% of the fields built were near-copies of one already built or rebuilds of one just
+thrown away.
+
+- A unit on a move order routes to a cell near the middle of the 4 x 4 cell (16 m) square
+  its own spot lies in (`routeGoal` in `sim.ts`), then walks the last stretch straight.
+  Where that cell is more than a square from the spot, or not in plain sight of it, the
+  unit routes to its own spot as before; if it gets to the shared cell and cannot see its
+  spot, it asks for its own route then.
+- A change to the ground (a house falls, a base building goes up, a work is built or
+  breached, trees are felled) no longer wipes every route. Routes are marked stale and
+  still followed; one is redrawn only when a unit on it finds its next step blocked or
+  reaches its end (the unit waits a tick if this tick's budget of three is spent).
+- The three "ground changed" flags moved from module scope into the world.
+
+Measured with `tools/simbench.ts`, hard AI against hard AI, 25 minutes, seed 1: city fields
+built 7,479 to 3,953, mean tick 1.22 to 0.85 ms, ticks over 5 ms 6.9% to 2.6%; four armies
+17,142 to 8,533 fields, 2.09 to 1.36 ms, 16.3% to 5.5%. Co-op rejoin replays the game, so
+it gets about a third faster. Units move the same way to the eye; the golden hashes moved
+on purpose.
+
+## 138. The front line (2026-11-16)
 
 Fabio asked for a military front line, traced where the battle is, on the minimap and in
 a clearer form on the zoomed-out map (roadmap I2). Built client only; the sim and the
