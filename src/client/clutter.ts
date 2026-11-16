@@ -1,6 +1,6 @@
 // The small things that stand on the land (see land.ts): hedges, bushes, bales, fences,
-// poles, lamps, sheds. Instanced, one batch per kind and per 128 m square so that what is
-// off screen is culled. Cosmetic only: units walk through them, and they are taken away
+// poles, lamps, sheds. Instanced, one batch per kind and per square of ground so that what
+// is off screen is culled (see BATCH_SQUARE). Cosmetic only: units walk through them, and they are taken away
 // where something is built.
 import { weathered } from './weather';
 import * as THREE from 'three/webgpu';
@@ -30,8 +30,16 @@ import {
 import type { Look } from './look';
 import type { Terrain } from './terrain';
 
-const CHUNK = 128;
-const CHUNKS = Math.ceil(MAP_SIZE / CHUNK);
+/**
+ * A common kind is batched per BATCH_SQUARE m square, so that what is off screen is culled;
+ * a kind with fewer than WHOLE_MAP_UNDER props on the map is one batch for the whole map.
+ * Every batch is a draw call (two with shadows): 128 m squares made 475 of them for 14,000
+ * props, about 30 each. Merging the props into static meshes instead would cut that further
+ * but store 1.6 million vertices twice (CPU and GPU) for the same work on the GPU.
+ */
+const BATCH_SQUARE = 256;
+const SQUARES = Math.ceil(MAP_SIZE / BATCH_SQUARE);
+const WHOLE_MAP_UNDER = 400;
 /** Things too small to see from far off are not drawn from far off. */
 const SMALL_WITHIN = 170;
 
@@ -213,26 +221,34 @@ interface Batch {
   /** x, z per instance; NaN once taken away. */
   at: Float32Array;
   small: boolean;
+  /** The ground its props stand on: min x, min z, max x, max z. */
+  box: [number, number, number, number];
 }
 
 export class Clutter {
   readonly group = new THREE.Group();
-  private readonly batches: Batch[][] = [];
+  private readonly batches: Batch[] = [];
   private smallShown = true;
 
   constructor(terrain: Terrain, fog: Fog, look: Look) {
-    for (let c = 0; c < CHUNKS * CHUNKS; c++) this.batches.push([]);
     const land = terrain.land;
     if (!land) return;
     const geometry = shapes();
     const material = new THREE.MeshLambertNodeMaterial();
     const vary = hash(instanceIndex).mul(0.36).add(0.82);
     material.colorNode = weathered(attribute('color', 'vec3').mul(vary)).mul(fog.shade());
-    // Sort the props by square and kind.
+    // Sort the props by kind and, for the common kinds, by square.
+    const inside = (p: Prop) => p.x >= 0 && p.z >= 0 && p.x < MAP_SIZE && p.z < MAP_SIZE;
+    const perKind = new Array<number>(P_KINDS).fill(0);
+    for (const p of land.props) if (inside(p)) perKind[p.kind]++;
     const lists = new Map<number, Prop[]>();
     for (const p of land.props) {
-      if (p.x < 0 || p.z < 0 || p.x >= MAP_SIZE || p.z >= MAP_SIZE) continue;
-      const key = (Math.floor(p.z / CHUNK) * CHUNKS + Math.floor(p.x / CHUNK)) * P_KINDS + p.kind;
+      if (!inside(p)) continue;
+      const square =
+        perKind[p.kind] < WHOLE_MAP_UNDER
+          ? 0
+          : Math.floor(p.z / BATCH_SQUARE) * SQUARES + Math.floor(p.x / BATCH_SQUARE);
+      const key = square * P_KINDS + p.kind;
       const list = lists.get(key);
       if (list) list.push(p);
       else lists.set(key, [p]);
@@ -246,7 +262,12 @@ export class Clutter {
       const kind = key % P_KINDS;
       const mesh = new THREE.InstancedMesh(geometry[kind], material, list.length);
       const at = new Float32Array(list.length * 2);
+      const box: Batch['box'] = [Infinity, Infinity, -Infinity, -Infinity];
       list.forEach((p, n) => {
+        box[0] = Math.min(box[0], p.x);
+        box[1] = Math.min(box[1], p.z);
+        box[2] = Math.max(box[2], p.x);
+        box[3] = Math.max(box[3], p.z);
         pos.set(p.x, terrain.heightAt(p.x, p.z) - 0.04, p.z);
         q.setFromAxisAngle(up, p.rot);
         // Fences stretch along their length only.
@@ -261,7 +282,7 @@ export class Clutter {
       mesh.castShadow = look.shadows && !NO_SHADOW.has(kind);
       mesh.receiveShadow = look.shadows;
       this.group.add(mesh);
-      this.batches[Math.floor(key / P_KINDS)].push({ mesh, at, small: SMALL.has(kind) });
+      this.batches.push({ mesh, at, small: SMALL.has(kind), box });
     }
     if (look.night && look.rich) this.lightLamps(land.props, terrain, fog);
   }
@@ -313,25 +334,18 @@ export class Clutter {
   /** Take away whatever stands within the rectangle (world units): something is built there. */
   clear(x0: number, z0: number, x1: number, z1: number): void {
     const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-    const c0 = Math.max(0, Math.floor(x0 / CHUNK));
-    const c1 = Math.min(CHUNKS - 1, Math.floor(x1 / CHUNK));
-    const r0 = Math.max(0, Math.floor(z0 / CHUNK));
-    const r1 = Math.min(CHUNKS - 1, Math.floor(z1 / CHUNK));
-    for (let r = r0; r <= r1; r++) {
-      for (let c = c0; c <= c1; c++) {
-        for (const b of this.batches[r * CHUNKS + c]) {
-          let changed = false;
-          for (let n = 0; n < b.at.length / 2; n++) {
-            const x = b.at[2 * n];
-            const z = b.at[2 * n + 1];
-            if (!(x >= x0 && x <= x1 && z >= z0 && z <= z1)) continue;
-            b.mesh.setMatrixAt(n, zero);
-            b.at[2 * n] = NaN;
-            changed = true;
-          }
-          if (changed) b.mesh.instanceMatrix.needsUpdate = true;
-        }
+    for (const b of this.batches) {
+      if (b.box[0] > x1 || b.box[2] < x0 || b.box[1] > z1 || b.box[3] < z0) continue;
+      let changed = false;
+      for (let n = 0; n < b.at.length / 2; n++) {
+        const x = b.at[2 * n];
+        const z = b.at[2 * n + 1];
+        if (!(x >= x0 && x <= x1 && z >= z0 && z <= z1)) continue;
+        b.mesh.setMatrixAt(n, zero);
+        b.at[2 * n] = NaN;
+        changed = true;
       }
+      if (changed) b.mesh.instanceMatrix.needsUpdate = true;
     }
   }
 
@@ -343,6 +357,6 @@ export class Clutter {
     const show = this.small && distance < SMALL_WITHIN;
     if (show === this.smallShown) return;
     this.smallShown = show;
-    for (const chunk of this.batches) for (const b of chunk) if (b.small) b.mesh.visible = show;
+    for (const b of this.batches) if (b.small) b.mesh.visible = show;
   }
 }
