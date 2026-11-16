@@ -13,7 +13,7 @@ import { FACTIONS, factionByName } from './sim/factions';
 import * as THREE from 'three/webgpu';
 import { CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
-import { generateMap, type Layout } from './sim/map';
+import { generateMap, MAX_TEAMS, type Layout } from './sim/map';
 import { MAP_SIZE, MAX_UNITS, M_FOCUS, M_NONE, TICK_RATE } from './sim/world';
 import { ALERT_NOTE, Alerts } from './client/alerts';
 import { SAY_URGENT } from './client/voice';
@@ -39,6 +39,8 @@ import { Fog } from './client/fog';
 import { GridOverlay, gridRef } from './client/grid';
 import { RouteView } from './client/routes';
 import { Minimap } from './client/minimap';
+import { FrontLine, W_BASE, W_TOWN } from './client/front';
+import { FrontOverlay } from './client/frontmesh';
 import { ProductionCentre } from './client/production';
 import { COMMANDER_NAMES, MissionBoard } from './client/missions';
 import { Scars } from './client/scars';
@@ -620,6 +622,39 @@ async function start(): Promise<void> {
     supply,
   );
   minimap.pick = (x, z) => input.pickAt(x, z);
+  // The front line (decision 137): traced four times a second from what the army knows,
+  // on the minimap and, zoomed out, on the ground. ?front=0 turns it off.
+  const front = new URLSearchParams(location.search).get('front') === '0' ? null : new FrontLine();
+  const frontSources = {
+    me: units.playerTeam,
+    units: (add: (x: number, z: number, team: number, weight: number) => void) =>
+      units.eachKnownGround(add),
+    places: (add: (x: number, z: number, team: number, weight: number, radius: number) => void) => {
+      for (let t = 0; t < map.townCount; t++) {
+        const owner = structures.townOwner[t];
+        if (owner >= MAX_TEAMS) continue;
+        // A held town claims the ground around it too, so two armies' towns a street or
+        // two apart already have a line between them.
+        add(map.townX[t] / 1024, map.townY[t] / 1024, owner, W_TOWN, map.townR[t] / 1024 + 90);
+      }
+      for (let s = 0; s < map.structCount; s++) {
+        const team = structures.baseTeam[s];
+        if (team < 0 || structures.hp[s] === 0 || structures.hidden(s)) continue;
+        add((map.sX[s] + map.sW[s] / 2) * 4, (map.sY[s] + map.sH[s] / 2) * 4, team, W_BASE, 40);
+      }
+    },
+    sees: (x: number, z: number) => fog.sees(x, z),
+  };
+  const frontOverlay = front
+    ? new FrontOverlay(
+        front,
+        (x, z) => terrain.heightAt(x, z),
+        () => units.playerTeam,
+      )
+    : null;
+  if (frontOverlay) scene.add(frontOverlay.mesh);
+  minimap.front = front;
+  let frontAt = -1e9;
   minimap.commanders = () =>
     board.info
       .filter((c) => c.count > 0)
@@ -1002,6 +1037,12 @@ async function start(): Promise<void> {
       }
       minimap.partners = coop.live ? coop.partners.filter((p) => p.x >= 0) : [];
     }
+    if (front && now - frontAt > 250) {
+      frontAt = now;
+      frontSources.me = units.playerTeam;
+      front.update(frontSources, now / 1000);
+    }
+    frontOverlay?.update(rts.distance);
     minimap.update(now);
     alerts?.update(now / 1000);
     // The shadow map follows the point the camera looks at and covers only what is close
