@@ -14,6 +14,7 @@ export interface PerfStats {
   alive: number[];
   /** Units drawn per level of detail, units off-screen, live effect particles. */
   lod: number[];
+  still: number;
   culled: number;
   particles: number;
   backend: string;
@@ -43,6 +44,7 @@ export class Hud {
     selected: 0,
     alive: [],
     lod: [0, 0, 0],
+    still: 0,
     culled: 0,
     particles: 0,
     backend: '',
@@ -124,7 +126,7 @@ export class Hud {
       `Sim tick   ${s.simMs.toFixed(2)} ms (worst ${s.simMsMax.toFixed(2)}) @ ${TICK_RATE} Hz\n` +
       `Units      ${s.alive.reduce((a, b) => a + b, 0)} alive   selected ${s.selected}\n` +
       `Armies     red ${s.alive[0] ?? 0}   blue ${s.alive[1] ?? 0}   gold ${s.alive[2] ?? 0}   green ${s.alive[3] ?? 0}\n` +
-      `Detail     near ${s.lod[0]}  mid ${s.lod[1]}  far ${s.lod[2]}  off-screen ${s.culled}  fx ${s.particles}\n` +
+      `Detail     near ${s.lod[0]}  mid ${s.lod[1]} (still ${s.still})  far ${s.lod[2]}  off-screen ${s.culled}  fx ${s.particles}\n` +
       `Renderer   ${s.backend}   ${s.drawCalls} draws, ${(s.triangles / 1000).toFixed(0)}k tris, scale ${(s.scale * 100).toFixed(0)}%\n` +
       `CPU/frame  units ${s.cpuUnits.toFixed(1)}  fx ${s.cpuFx.toFixed(1)}  draw submit ${s.cpuDraw.toFixed(1)} ms   camera ${s.zoom.toFixed(0)} m away\n` +
       `Governor   ${s.governor}\n` +

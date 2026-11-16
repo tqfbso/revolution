@@ -285,6 +285,7 @@ async function start(): Promise<void> {
   units.sound = sound;
   const lodNear = units.lodNear * lodScale;
   const lodFar = units.lodFar * lodScale;
+  const lodStill = units.lodStill * lodScale;
   const rts = new RtsCamera(canvas, terrain);
   const hud = new Hud();
   hud.stats.backend = `${backend}, ${quality} detail${shadows ? '' : ', no shadows'}`;
@@ -919,6 +920,7 @@ async function start(): Promise<void> {
     hud.stats.scale = l.scale;
     units.lodNear = lodNear * l.lod;
     units.lodFar = lodFar * l.lod;
+    units.lodStill = lodStill * l.lod;
     clutter.small = l.props;
     hud.stats.governor = governor.describe();
   };
@@ -1052,6 +1054,7 @@ async function start(): Promise<void> {
     hud.stats.drawCalls = renderer.info.render.drawCalls;
     hud.stats.triangles = renderer.info.render.triangles;
     hud.stats.lod = units.stats.lod;
+    hud.stats.still = units.stats.still;
     hud.stats.culled = units.stats.culled;
     hud.stats.particles = effects.count;
     hud.frame(dtMs);

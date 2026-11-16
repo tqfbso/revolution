@@ -2806,3 +2806,27 @@ name chips under the table. He chose option 5 of the design canvas.
 
 Client only (`src/client/missions.ts`, CSS in `index.html`); the sim and the golden hash
 are untouched. The ticker rule of decision 127 holds for the sentence.
+
+## 135. Distant soldiers are still figures (2026-11-16)
+
+From the performance review (finding 1): between 120 and 340 m every man was posed limb by
+limb on the CPU, eight instances a man, for figures 3 to 8 pixels tall. That was most of
+the frame at 4,000 units.
+
+- A third band inside the middle level. From 135 m (`UnitView.lodStill`, scaled by the
+  governor's detail lever like the others) out to `lodFar`, a man is one instance of a
+  pre-posed figure: stand, kneel and lie, each at ease and aiming, and an eight-frame
+  stride for the run (`STILLS`, `stillPose` in `soldiers.ts`).
+- The still figures are baked at start from the very pieces and posing code of the
+  middle level, so crossing the line changes at most the angle of a knee: no pop, same
+  proportions, same paint and wear, no new material.
+- Like the near level, the jointed middle band has a budget (`midBudget`, 300 units): in a
+  crowd the still figures come closer, never nearer than 80 m (a man is about 11 px
+  there).
+- Muzzle flashes come from each pose's baked muzzle, so firing still shows.
+- If a pose's batch is full, the man is posed in pieces as before; nothing vanishes.
+
+Measured in the cloud (`units.update` alone, clash scenario, camera 160 m out): 3,000
+units 6.3 to 2.4 ms, 4,000 units 8.5 to 1.5 ms; per-frame upload 5.8 to 1.0 MB. The
+shader-posed rig (review's proper fix) is still the foundation for authored animation.
+Client only; the sim and the golden hash are untouched.

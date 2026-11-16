@@ -66,7 +66,7 @@ import {
   type Snapshot,
 } from '../worker/protocol';
 import { Batch } from './batch';
-import { Soldiers } from './soldiers';
+import { Soldiers, stillPose } from './soldiers';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import { COMMANDER_RGB, ICON_FROM, ICON_FULL, ICON_PENNANT, Icons } from './icons';
@@ -116,6 +116,8 @@ const HULL_TURN = 2.6; // rad/s, visual only
 const TURRET_TURN = 3.2;
 const SOLDIER_TURN = 9;
 const CULL_RADIUS = 4;
+/** Still figures never come nearer than this, however big the crowd: a man is 11 px tall here. */
+const STILL_MIN = 80;
 const WRECK_SMOKE_SECONDS = 50;
 const LOD_HIDDEN = 3;
 /** What the men of a foot unit do when it halts. */
@@ -195,6 +197,8 @@ export function flareHeight(
 export interface LodStats {
   /** Units drawn at each level of detail this frame, and units culled as off-screen. */
   lod: [number, number, number];
+  /** Of the middle level, the units drawn as still figures (decision 135). */
+  still: number;
   culled: number;
 }
 
@@ -213,10 +217,21 @@ export class UnitView {
   selectedCount = 0;
   /** Latest per-unit state/kind/team bits from the sim (see INFO_* in the protocol). */
   readonly info = new Uint8Array(MAX_UNITS);
-  readonly stats: LodStats = { lod: [0, 0, 0], culled: 0 };
+  readonly stats: LodStats = { lod: [0, 0, 0], still: 0, culled: 0 };
   /** Distances (world units) at which units drop to LOD 1 and LOD 2. */
   lodNear = 120;
   lodFar = 340;
+  /**
+   * From here out to `lodFar` a foot soldier is a still figure: one instance in a fixed pose
+   * instead of eight posed pieces (decision 135). A man there is under seven pixels tall.
+   */
+  lodStill = 135;
+  /**
+   * Units posed in pieces at the middle level at most this many: in a crowd the still
+   * figures come in closer (never nearer than `STILL_MIN`), as the near level does.
+   */
+  midBudget = 300;
+  private stillScale = 1;
   /**
    * Full-detail units drawn at most this many (the nearest distance shrinks until it is so,
    * and grows back when there is room): looking down into a battle from close by must not
@@ -949,6 +964,10 @@ export class UnitView {
     const nearNow = this.lodNear * this.nearScale;
     const near2 = nearNow * nearNow;
     const far2 = this.lodFar * this.lodFar;
+    const stillNow = Math.max(nearNow, STILL_MIN, this.lodStill * this.stillScale);
+    const still2 = stillNow * stillNow;
+    let stillCount = 0;
+    let jointedCount = 0;
 
     const batches = this.batches;
     for (const b of batches) b.n = 0;
@@ -1216,6 +1235,9 @@ export class UnitView {
           }
           const drill = squad.drill;
           const near = lod === 0 && this.soldiers.roomNear ? 0 : 1;
+          const still = lod === 1 && d2 >= still2;
+          if (still) stillCount++;
+          else if (lod === 1) jointedCount++;
           for (let k = 0; k < men; k++) {
             const f = figures[k];
             const sx = x + f.x * cos + f.z * sin;
@@ -1240,29 +1262,47 @@ export class UnitView {
             const burst = since * 7 + k * 0.37;
             const firing = since < 0.9 && halted > 0.6 && ((burst | 0) + k) % 2 === 0;
             const phase = burst - (burst | 0);
-            this.soldiers.man(
-              near,
-              sx,
-              sy,
-              sz,
-              fs,
-              fc,
-              kneel,
-              prone,
-              1 - halted,
-              fight * halted,
-              seconds * 11 + i * 1.3 + k * 2.1,
-              firing ? 0.035 * (1 - phase) : 0,
-              team[0],
-              team[1],
-              team[2],
-              seed,
-              // At the halt and out of a fight each man watches his own arc, in his own time.
-              halted *
-                (1 - fight) *
-                0.75 *
-                Math.sin(seconds * (0.35 + ((i * 7 + k * 3) % 5) * 0.06) + i * 2.3 + k * 1.9),
-            );
+            const run = 1 - halted;
+            const aim = fight * halted;
+            const stride = seconds * 11 + i * 1.3 + k * 2.1;
+            if (
+              !still ||
+              !this.soldiers.still(
+                stillPose(kneel, prone, run, aim, stride),
+                sx,
+                sy,
+                sz,
+                fs,
+                fc,
+                team[0],
+                team[1],
+                team[2],
+                seed,
+              )
+            )
+              this.soldiers.man(
+                near,
+                sx,
+                sy,
+                sz,
+                fs,
+                fc,
+                kneel,
+                prone,
+                run,
+                aim,
+                stride,
+                firing ? 0.035 * (1 - phase) : 0,
+                team[0],
+                team[1],
+                team[2],
+                seed,
+                // At the halt and out of a fight each man watches his own arc, in his own time.
+                halted *
+                  (1 - fight) *
+                  0.75 *
+                  Math.sin(seconds * (0.35 + ((i * 7 + k * 3) % 5) * 0.06) + i * 2.3 + k * 1.9),
+              );
             if (firing && phase < dt * 7) {
               const mz = this.soldiers.muzzle;
               fx.thin = 0;
@@ -1282,6 +1322,7 @@ export class UnitView {
       }
     }
     this.stats.culled = culled;
+    this.stats.still = stillCount;
     for (const b of batches) b.flush();
     this.jamRings.flush();
     this.shade.flush();
@@ -1296,6 +1337,15 @@ export class UnitView {
       );
     } else if (lodCount[0] < this.nearBudget * 0.7)
       this.nearScale = Math.min(1, this.nearScale * 1.03);
+    // And the number posed in pieces at the middle level near its own budget.
+    const jointed = jointedCount;
+    if (jointed > this.midBudget) {
+      this.stillScale = Math.max(
+        0.2,
+        this.stillScale * Math.max(0.5, Math.sqrt(this.midBudget / jointed)),
+      );
+    } else if (jointed < this.midBudget * 0.7)
+      this.stillScale = Math.min(1, this.stillScale * 1.03);
     if (ringCount > 0) {
       const attr = this.rings.instanceMatrix;
       attr.clearUpdateRanges();
