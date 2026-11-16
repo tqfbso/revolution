@@ -7,7 +7,7 @@ import { aiThink, createAi, type Ai, type AiLevel } from './ai';
 import { CMD_FACTION, CMD_NIGHT, CMD_WEATHER, type Command } from './commands';
 import { FACTIONS } from './factions';
 import { authorize } from './guard';
-import { generateMap, type Layout } from './map';
+import { generateMap, mapInfo, type Layout } from './map';
 import { assaultCommands, battleCommands, skirmishCommands, stressTestCommands } from './scenarios';
 import { step } from './sim';
 import { createStaff, staffThink, type Staff } from './staff';
@@ -17,7 +17,6 @@ import { MAX_TEAMS, MAX_UNITS, createWorld, type World } from './world';
 /** skirmish: build a base and beat whoever else is on the map, from an even start. */
 export type Scenario = 'skirmish' | 'assault' | 'clash' | 'roam';
 
-export const LAYOUTS: readonly Layout[] = ['city', 'euro', 'ridge', 'river', 'four'];
 export const SCENARIOS: readonly Scenario[] = ['skirmish', 'assault', 'clash', 'roam'];
 export const AI_LEVELS: readonly AiLevel[] = ['recruit', 'easy', 'normal', 'hard'];
 /** The most players in one game, the host included. */
@@ -91,9 +90,7 @@ export function validMatch(v: unknown): v is Match {
   if (typeof v !== 'object' || v === null) return false;
   const m = v as Record<string, unknown>;
   if (!isInt(m.seed, -(2 ** 31), 2 ** 31 - 1)) return false;
-  if (!LAYOUTS.includes(m.map as Layout) || !SCENARIOS.includes(m.scenario as Scenario)) {
-    return false;
-  }
+  if (!mapInfo(m.map) || !SCENARIOS.includes(m.scenario as Scenario)) return false;
   if (!isInt(m.units, 0, MAX_UNITS) || typeof m.night !== 'boolean') return false;
   if (!isInt(m.weather, 0, WEATHERS - 1)) return false;
   const { armies, players } = m;
