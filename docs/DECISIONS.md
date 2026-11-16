@@ -2882,7 +2882,36 @@ built 7,479 to 3,953, mean tick 1.22 to 0.85 ms, ticks over 5 ms 6.9% to 2.6%; f
 it gets about a third faster. Units move the same way to the eye; the golden hashes moved
 on purpose.
 
-## 138. One description of a game, and every order signed with its army (2026-11-16)
+## 138. The front line (2026-11-16)
+
+Fabio asked for a military front line, traced where the battle is, on the minimap and in
+a clearer form on the zoomed-out map (roadmap I2). Built client only; the sim and the
+golden hash are untouched.
+
+How it is traced (`src/client/front.ts`): the map is cut into 64 by 64 squares of 16 m.
+Each army's presence is summed into them: its ground units (a vehicle counts double), its
+base buildings (40 m around each), and the towns it holds, which claim their circle plus
+90 m, so two armies' towns a street or two apart already have a line between them while
+towns across an empty map do not. For enemies only what the
+player knows counts: troops in sight now (in a building only once their fire gave them
+away), base buildings already found, and the towns, whose owners every player sees
+already. A square where enemy troops were seen keeps them in memory, fading to half in
+40 s, and is cleared the moment it is in sight and empty. So the line never shows what the
+fog hides, but it does not vanish the instant a scout looks away. Presence is blurred
+(three box passes, about 55 m), saturated so a big army does not push the line back to the
+weaker one's gate, and eased over time so the line glides. The line is where your presence
+equals that of the strongest enemy there, traced by marching squares, only where both
+sides are present, joined into paths and smoothed. Teeth every 28 m point to the enemy
+side and take the colour of the army met there, so with three or four armies each stretch
+shows whom it faces. About a millisecond, four times a second.
+
+How it is drawn: on the minimap a line in your colour on a dark casing with small
+triangles; on the battlefield a ribbon laid over the ground, thicker the further out, that
+fades in between 280 m and 420 m of camera distance (the game opens at 260 m), so it is a map symbol for the
+strategic view and never sits on a close fight. Flat colour, no glow. `?front=0` turns it
+off.
+
+## 139. One description of a game, and every order signed with its army (2026-11-16)
 
 The architecture review's findings F1 and F2, fixed together because the second needs the
 first.

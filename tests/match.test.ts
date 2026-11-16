@@ -30,7 +30,7 @@ import type { Frame } from '../src/worker/protocol';
 import { matchFromParams, matchLabel, matchToParams } from '../src/client/setup';
 import { legacy, playerOrders, toMatch, type LegacySetup } from './legacy';
 
-// Decision 138: one description of a game, and every order signed with the army that gave
+// Decision 139: one description of a game, and every order signed with the army that gave
 // it and checked against that army inside the sim.
 
 const unitsOf = (g: Game, army: number, kind = -1): number[] => {

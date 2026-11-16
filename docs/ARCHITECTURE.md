@@ -276,7 +276,7 @@ canvas ten times a second. Selection, control groups and the minimap are client 
 
 - Your base buildings lift the fog for 28 units around them, on the client only: in the
   sim a building spots nothing. Enemy base buildings are drawn from the start.
-- A game is described by one Match (decision 138, `src/sim/match.ts`), and every order a
+- A game is described by one Match (decision 139, `src/sim/match.ts`), and every order a
   player, a computer or a staff gives is signed with its army and checked against it inside
   the sim (`admit` in `src/sim/guard.ts`). The sim does not yet know which player of a
   shared army a unit belongs to: `seat` on a unit is only who last ordered it.

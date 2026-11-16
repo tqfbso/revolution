@@ -217,7 +217,7 @@ export function openMenu(params: URLSearchParams): void {
 
   const start = (): void => {
     write('revolution.setup', JSON.stringify(setup));
-    // The choices as a Match (decision 138), written into the address the battle loads
+    // The choices as a Match (decision 139), written into the address the battle loads
     // with: the same reading and writing as every link and test flag goes through.
     const asked = new URLSearchParams({
       ...setup,

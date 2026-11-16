@@ -1,4 +1,4 @@
-// One description of a game (decision 138): the map, the seed, the night and the weather,
+// One description of a game (decision 139): the map, the seed, the night and the weather,
 // every army with its faction and who plays it, and every player with the army he commands.
 // The address of the page is read into one, the menu and the lobby edit one, the host sends
 // it to the guests, and `createGame` builds the world, the computers and the staffs from it.
