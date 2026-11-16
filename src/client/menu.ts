@@ -356,7 +356,9 @@ export function openMenu(params: URLSearchParams): void {
   const news = (): string => {
     const releases = RELEASES.map(
       (r) =>
-        `<h2>Version ${r.version}</h2><ul>` + r.notes.map((n) => `<li>${n}</li>`).join('') + `</ul>`,
+        `<h2>Version ${r.version}</h2><ul>` +
+        r.notes.map((n) => `<li>${n}</li>`).join('') +
+        `</ul>`,
     ).join('');
     return (
       `<div class="top"><h1>What's new</h1><span>Esc to go back</span></div>` +
