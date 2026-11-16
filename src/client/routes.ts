@@ -56,6 +56,39 @@ export class RouteView {
     this.group.add(this.lines);
   }
 
+  /**
+   * Every route that has someone selected on it, flat (x, z, x, z, ...) from where the
+   * selected troops are, for the minimap.
+   */
+  polylines(): number[][] {
+    const r = this.routes;
+    const u = this.units;
+    const out: number[][] = [];
+    if (u.selectedCount === 0) return out;
+    for (let at = 0; at + 2 <= r.length;) {
+      const members = r[at];
+      const count = r[at + 1];
+      const ids = at + 2;
+      const first = ids + members;
+      at = first + 2 * count;
+      let sx = 0;
+      let sz = 0;
+      let n = 0;
+      for (let k = 0; k < members; k++) {
+        const id = r[ids + k];
+        if (!u.selected[id] || !u.isAlive(id)) continue;
+        sx += u.renderPos[3 * id];
+        sz += u.renderPos[3 * id + 2];
+        n++;
+      }
+      if (n === 0 || count === 0) continue;
+      const line = [sx / n, sz / n];
+      for (let k = 0; k < 2 * count; k++) line.push(r[first + k]);
+      out.push(line);
+    }
+    return out;
+  }
+
   /** Line segments (pairs of points) for every route that has someone selected on it. */
   private build(): number[] {
     const r = this.routes;

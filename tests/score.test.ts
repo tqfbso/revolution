@@ -68,3 +68,13 @@ describe('the score (decision 103)', () => {
     expect(hashWorld(a)).toBe(hashWorld(b));
   });
 });
+
+describe('the score for four armies', () => {
+  it('counts the fourth army too', () => {
+    const w = createWorld(7, flatMap());
+    step(w, [spawnAt(3, KIND_TANK, 3, 500, 500), spawnAt(0, KIND_INFANTRY, 2, 530, 500)]);
+    for (let t = 0; t < 1200; t++) step(w, []);
+    expect(w.stats[STAT_STRIDE * 3 + STAT_KILLS]).toBe(2);
+    expect(w.stats[STAT_STRIDE * 0 + STAT_LOST]).toBe(2);
+  });
+});
