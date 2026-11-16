@@ -2892,3 +2892,7 @@ untouched, so a shared game stays in step whatever each player's screen shows.
   each storey goes, then smouldering; a gutted shell burns out over two minutes. The
   thresholds and times are the sim's own, so destruction takes exactly as long as before.
 - Civilians who die still fade after a while, as before (their own figures).
+
+Measured in the cloud (clash, 4,000 units): rewriting the body lists while the camera moves
+costs 0.3 ms with 2,000 bodies in view and 1.0 ms with 10,000 in view; with the camera
+still, nothing. On the GPU a body costs what a living man at the same distance costs.
