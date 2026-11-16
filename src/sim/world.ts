@@ -480,6 +480,8 @@ export interface World {
    * on it finds its next step blocked or reaches its end (see steer).
    */
   fieldStale: Uint8Array;
+  /** How far each field's search has gone: costs up to this are final (see growField). */
+  fieldSettled: Int32Array;
   /** The ground changed this tick (a structure fell or was rebuilt, trees were felled). */
   groundChanged: boolean;
   /** Only field works changed this tick: the cheaper update of passability will do. */
@@ -650,6 +652,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     fieldGoal: new Int32Array(MAX_FIELDS).fill(-1),
     fieldClass: new Uint8Array(MAX_FIELDS),
     fieldStale: new Uint8Array(MAX_FIELDS),
+    fieldSettled: new Int32Array(MAX_FIELDS),
     groundChanged: false,
     worksChanged: false,
     plotTaken: false,
