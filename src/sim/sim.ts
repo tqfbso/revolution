@@ -27,6 +27,8 @@ import {
   CMD_UNLOAD,
   type Command,
   type SpawnCommand,
+  CMD_DUTY,
+  CMD_GIVE,
 } from './commands';
 import { applyEconomyCommand, dropBuilds, updateEconomy } from './economy';
 import { applyCommanderCommand } from './commanders';
@@ -135,6 +137,7 @@ import {
   PIN_TICKS,
   REST_PCT,
   KINDS,
+  DUTY_KINDS,
   KIND_COUNT,
   IS_DRONE,
   KIND_INFANTRY,
@@ -485,7 +488,55 @@ export function step(w: World, commands: readonly Command[]): void {
   w.tick++;
 }
 
+/**
+ * Whose a new unit of `kind` in army `team` is: the player of that army whose role covers
+ * the kind (players with the same role take turns), or nobody's in particular.
+ */
+function ownerFor(w: World, kind: number, team: number): number {
+  let n = 0;
+  for (let s = 0; s < STAT_SEATS; s++) {
+    if (w.seatArmy[s] === team && DUTY_KINDS[w.duty[s]]?.includes(kind)) n++;
+  }
+  if (n === 0) return NO_SEAT;
+  let turn = n === 1 ? 0 : w.dutyTurn++ % n;
+  for (let s = 0; s < STAT_SEATS; s++) {
+    if (w.seatArmy[s] === team && DUTY_KINDS[w.duty[s]]?.includes(kind) && turn-- === 0) return s;
+  }
+  return NO_SEAT;
+}
+
+/** Hand-overs and roles in a shared army (decision 146). They interrupt nothing. */
+function applyTeamCommand(w: World, cmd: Command): boolean {
+  if (cmd.type === CMD_DUTY) {
+    const by = cmd.by;
+    if (
+      by !== undefined &&
+      by >= 0 &&
+      by < STAT_SEATS &&
+      cmd.duty >= 0 &&
+      cmd.duty < DUTY_KINDS.length
+    ) {
+      w.duty[by] = cmd.duty;
+    }
+    return true;
+  }
+  if (cmd.type === CMD_GIVE) {
+    const to = cmd.to;
+    if (to !== -1 && !(Number.isInteger(to) && to >= 0 && to < STAT_SEATS && w.seatArmy[to] >= 0)) {
+      return true;
+    }
+    for (const id of cmd.units) {
+      if (id < 0 || id >= w.count || w.state[id] !== STATE_ALIVE) continue;
+      if (to >= 0 && w.seatArmy[to] !== w.team[id]) continue;
+      w.owner[id] = to < 0 ? NO_SEAT : to;
+    }
+    return true;
+  }
+  return false;
+}
+
 function applyCommand(w: World, cmd: Command): void {
+  if (applyTeamCommand(w, cmd)) return;
   // Any order to a truck that is not one more building for its list empties the list.
   if (
     'units' in cmd &&
@@ -506,7 +557,12 @@ function applyCommand(w: World, cmd: Command): void {
   // Who gave it: the units a player orders himself fight on his account (decision 103).
   // Orders from a staff or from the computer carry no name and change nothing.
   if (cmd.by !== undefined && cmd.by >= 0 && cmd.by < STAT_SEATS && 'units' in cmd) {
-    for (const id of cmd.units) if (id >= 0 && id < w.count) w.seat[id] = cmd.by;
+    for (const id of cmd.units) {
+      if (id < 0 || id >= w.count) continue;
+      w.seat[id] = cmd.by;
+      // A unit that was nobody's in particular is his who first orders it himself.
+      if (w.owner[id] === NO_SEAT && w.seatArmy[cmd.by] === w.team[id]) w.owner[id] = cmd.by;
+    }
   }
   // Leaving a camera behind interrupts nothing the squad was doing.
   if (cmd.type === CMD_CAMERA) {
@@ -1566,6 +1622,8 @@ function updateChaseFields(w: World): void {
 /** Fill slot `id` with a fresh unit standing where its position already says. */
 function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.born[id] = w.tick;
+  w.seat[id] = NO_SEAT;
+  w.owner[id] = ownerFor(w, kindId, teamId);
   w.velX[id] = 0;
   w.velY[id] = 0;
   w.targetX[id] = w.posX[id];
@@ -1621,7 +1679,6 @@ export function spawnUnit(w: World, kindId: number, teamId: number, x: number, y
   while (id < w.count && w.state[id] !== STATE_FREE) id++;
   if (id >= MAX_UNITS) return -1;
   if (id === w.count) w.count++;
-  w.seat[id] = NO_SEAT;
   const map = w.map;
   const to =
     map.snap[layerOf(teamId, KIND_CLASS[kindId])][
@@ -2793,9 +2850,10 @@ function score(w: World, i: number, by: number): void {
       st[STAT_STRIDE * team + STAT_LOST]++;
       st[STAT_STRIDE * team + STAT_LOST_POINTS] += points;
     }
-    if (w.seat[i] < STAT_SEATS) {
-      st[STAT_SEAT0 + STAT_STRIDE * w.seat[i] + STAT_LOST]++;
-      st[STAT_SEAT0 + STAT_STRIDE * w.seat[i] + STAT_LOST_POINTS] += points;
+    const whose = w.owner[i] < STAT_SEATS ? w.owner[i] : w.seat[i];
+    if (whose < STAT_SEATS) {
+      st[STAT_SEAT0 + STAT_STRIDE * whose + STAT_LOST]++;
+      st[STAT_SEAT0 + STAT_STRIDE * whose + STAT_LOST_POINTS] += points;
     }
   }
   if (by < 0 || by === i || w.team[by] === team) return;
@@ -2804,9 +2862,10 @@ function score(w: World, i: number, by: number): void {
     st[STAT_STRIDE * victor + STAT_KILLS]++;
     st[STAT_STRIDE * victor + STAT_KILL_POINTS] += points;
   }
-  if (w.seat[by] < STAT_SEATS) {
-    st[STAT_SEAT0 + STAT_STRIDE * w.seat[by] + STAT_KILLS]++;
-    st[STAT_SEAT0 + STAT_STRIDE * w.seat[by] + STAT_KILL_POINTS] += points;
+  const whose = w.owner[by] < STAT_SEATS ? w.owner[by] : w.seat[by];
+  if (whose < STAT_SEATS) {
+    st[STAT_SEAT0 + STAT_STRIDE * whose + STAT_KILLS]++;
+    st[STAT_SEAT0 + STAT_STRIDE * whose + STAT_KILL_POINTS] += points;
   }
 }
 

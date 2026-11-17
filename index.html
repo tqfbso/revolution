@@ -972,6 +972,132 @@
       #coop-status div + div {
         color: var(--amber);
       }
+      /* A shared army: who is in it, what each looks after, how much of it is whose. */
+      #team {
+        display: block;
+        padding: 8px 12px;
+        white-space: normal;
+        border-radius: 14px;
+      }
+      #team .mate {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 26px;
+      }
+      #team .mate.gone {
+        opacity: 0.5;
+      }
+      #team .mate i {
+        flex: none;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+      #team .mate b {
+        min-width: 86px;
+      }
+      #team .role,
+      #team select {
+        width: 112px;
+        font-size: 12px;
+      }
+      #team select {
+        height: 22px;
+        border-radius: 8px;
+        background: var(--chip);
+        color: var(--ink);
+        border: none;
+        padding: 0 4px;
+      }
+      #team select option {
+        color: #101214;
+      }
+      #team .have {
+        min-width: 118px;
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      #team button {
+        height: 22px;
+        padding: 0 9px;
+        border-radius: 11px;
+        background: var(--chip);
+        color: var(--amber);
+        font-size: 12px;
+      }
+      #team button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.22);
+      }
+      #team button:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      #team .foot {
+        display: flex;
+        gap: 14px;
+        justify-content: space-between;
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--faint);
+      }
+      #team .foot label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+      }
+      /* A mark a player put on the map for his team: its label over the battlefield. */
+      #mark-tags {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 4;
+      }
+      .mark-tag {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 12px;
+        border: 1.5px solid #fff;
+        background: var(--glass2);
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .mark-tag i {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      #mark-choice {
+        display: none;
+        left: 50%;
+        bottom: 190px;
+        transform: translateX(-50%);
+        align-items: center;
+        gap: 8px;
+        pointer-events: auto;
+        z-index: 30;
+      }
+      #mark-choice.open {
+        display: flex;
+      }
+      #mark-choice button {
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 13px;
+        background: var(--chip);
+        color: var(--ink);
+        font-size: 12px;
+      }
+      #mark-choice kbd {
+        margin: 0 4px 0 0;
+      }
       #coop-catchup {
         top: 38%;
         left: 50%;
@@ -1244,6 +1370,19 @@
         gap: 10px;
         align-items: center;
       }
+      .screen .opt input {
+        height: 40px;
+        padding: 0 16px;
+        box-sizing: border-box;
+        border: 0;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.08);
+        font: inherit;
+        color: var(--ink);
+      }
+      .screen .opt input::placeholder {
+        color: var(--faint);
+      }
       .screen .linkrow input {
         flex: 1;
         min-width: 0;
@@ -1457,8 +1596,15 @@ starting…</pre>
       2, a duel, or uneven sides), and each side sees only what its own troops see<br />
       Co-op (2 to 4 players): main menu, "Co-op with friends" gives one link to send to everyone;
       the host presses Start when all are in. Whoever opens it commands the same army with you
-      against the computer. Z rings the point under your pointer on every minimap and tells everyone
-      its grid square; the cyan box on the minimap is where your partner is looking. Pause and speed
+      against the computer. Everyone gives a name and picks a role. The team panel (top left) lists
+      who is playing: new units of your role are yours as they roll out, and a unit that is nobody's
+      becomes yours when you first order it. A box drawn over a crowd takes your own units and
+      leaves your teammates' alone (theirs carry a ring in their colour); nothing is locked, a box
+      or a click on their units alone still selects them. Give hands your selection to a teammate,
+      Take makes it yours, and the role menu on your row changes what you look after. Z marks the
+      point under your pointer for everyone, on the ground and on the minimap, and says its grid
+      square; press 1, 2 or 3 just after to make it Attack here, Defend here or Help me here. The
+      boxes on the minimap are where your teammates are looking; Go to jumps there. Pause and speed
       are shared.<br />
       Map grid: the minimap is ruled in squares, A to H across and 1 to 8 down ("armour to C4"). K
       (or the Grid button) draws the same squares and their names on the battlefield.<br />

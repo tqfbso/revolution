@@ -123,7 +123,7 @@ export class ProductionCentre {
     const u = this.units;
     for (let i = 0; i < u.count; i++) if (u.isMine(i)) fielded[u.kindOf(i)]++;
     const posts = this.postings();
-    const shape = `${factories.join()}|${this.tier}|${posts.map((p) => `${p.slot}${p.name}`).join()}`;
+    const shape = `${factories.join()}|${this.tier}|${posts.map((p) => `${p.slot}${p.name}`).join()}|${this.whose.join('')}`;
     if (shape !== this.shape) {
       this.shape = shape;
       this.build(factories, posts);
@@ -211,7 +211,7 @@ export class ProductionCentre {
         const keep = (count: number, label: string) =>
           `<button data-act="keep" data-k="${kind}" data-n="${count}">${label}</button>`;
         html +=
-          `<tr${dim}><td title="${Math.round(p.ticks / TICK_RATE)} s each, ${POINTS[kind]} army point${POINTS[kind] === 1 ? '' : 's'}">${myKinds()[kind].name}${this.whose[kind] === 1 ? ' <b style="color:#78e1ff" title="Your role">◆ yours</b>' : this.whose[kind] === 2 ? ' <span style="color:#8a938f" title="Your partner\'s role">◇ partner</span>' : ''}</td>` +
+          `<tr${dim}><td title="${Math.round(p.ticks / TICK_RATE)} s each, ${POINTS[kind]} army point${POINTS[kind] === 1 ? '' : 's'}">${myKinds()[kind].name}${this.whose[kind] === 1 ? ' <b style="color:#78e1ff" title="Your role: these are yours as they roll out">◆ yours</b>' : this.whose[kind] === 2 ? ' <span style="color:#8a938f" title="A teammate\'s role: these are his as they roll out">◇ teammate</span>' : ''}</td>` +
           `<td>${cost}</td>` +
           `<td data-cell="have${kind}"></td><td data-cell="make${kind}"></td><td data-cell="order${kind}"></td>` +
           `<td>${add(1, '+1')}${add(5, '+5')}${add(20, '+20')}${add(-5, '−5')}</td>` +

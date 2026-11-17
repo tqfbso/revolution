@@ -36,6 +36,8 @@ import {
   CMD_FOUND,
   CMD_GARRISON,
   CMD_GATHER,
+  CMD_GIVE,
+  CMD_DUTY,
   CMD_HOLD,
   CMD_KEEP,
   CMD_LOAD,
@@ -102,6 +104,8 @@ const LISTS: Record<number, readonly string[]> = {
   [CMD_FACTION]: [],
   [CMD_FELL]: ['units'],
   [CMD_WEATHER]: [],
+  [CMD_GIVE]: ['units'],
+  [CMD_DUTY]: [],
 };
 
 /** Fields that, when present, must be numbers; and those that must be true or false. */
@@ -127,6 +131,8 @@ const NUMBERS = [
   'dest',
   'faction',
   'weather',
+  'to',
+  'duty',
   'by',
   'army',
   'seen',

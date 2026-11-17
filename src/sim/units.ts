@@ -46,6 +46,19 @@ export const KIND_PLANE = 15;
 export const KIND_COUNT = 16;
 
 /**
+ * The kinds of unit each role of a shared army looks after, by role (the names are DUTIES in
+ * client/net.ts): everything (no kinds of its own), armour, infantry, air and drones,
+ * economy. A new unit goes to the player whose role covers it (`ownerFor` in sim.ts).
+ */
+export const DUTY_KINDS: readonly (readonly number[])[] = [
+  [],
+  [0, 3, 4, 8, 9],
+  [1, 2, 5, 11],
+  [6, 7, 12, 13, 14],
+  [10],
+];
+
+/**
  * What a unit is as a target (architecture review F3). The damage table has a column per
  * profile, not per kind: every kind with the same profile takes the same from every
  * weapon. A new kind of unit names its profile and needs no column of its own; a new

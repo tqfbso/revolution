@@ -43,8 +43,24 @@ export interface ArmySetup {
 export interface PlayerSetup {
   /** The army he commands (an index into `armies`). */
   army: number;
-  /** The role he said he would look after (advice to his team, not a lock). */
+  /** The role he begins with: new units of its kinds are his (advice, never a lock). */
   duty: number;
+  /** What the others call him (letters, digits and spaces; shown, never used). */
+  name?: string;
+}
+
+/** The longest name a player can have. */
+export const NAME_MAX = 12;
+
+/** A player's name as it may be shown: letters, digits, spaces, a few marks; or ''. */
+export function cleanName(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  return v
+    .replace(/[^\p{L}\p{N} ._'-]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, NAME_MAX)
+    .trim();
 }
 
 export interface Match {
@@ -110,6 +126,12 @@ export function validMatch(v: unknown): v is Match {
     if (!isInt(player.army, 0, armies.length - 1) || !isInt(player.duty, 0, DUTY_COUNT - 1)) {
       return false;
     }
+    if (
+      player.name !== undefined &&
+      (player.name === '' || cleanName(player.name) !== player.name)
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -172,6 +194,12 @@ function signFrom(out: Command[], from: number, army: number): void {
 
 export function createGame(match: Match): Game {
   const world = createWorld(match.seed, generateMap(match.seed, match.map));
+  // Who sits where, and the role each begins with: a new unit goes to the player whose
+  // role covers it (decision 146). Roles change in the game by an order (CMD_DUTY).
+  match.players.forEach((p, seat) => {
+    world.seatArmy[seat] = p.army;
+    world.duty[seat] = p.duty;
+  });
   let pending = openingCommands(match, world);
   const n = match.armies.length;
   const ais: (Ai | null)[] = new Array<Ai | null>(n).fill(null);

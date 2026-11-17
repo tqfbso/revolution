@@ -293,8 +293,11 @@ Decision 092. Host-clock lockstep over WebRTC, invite link, build check, hash ch
 two seconds, shared pause and speed, either side plays on alone after a drop. Roles, first
 layer: picked in the lobby, shown to both, marked on the production screen; ping (Z) and
 the partner's view on the minimap. Rejoining a game in progress is built (decision 100,
-by replaying the orders, not by sending the world). Next: orders that know who gave them
-(unit handover, "my units", soft budgets per role), role-first screens.
+by replaying the orders, not by sending the world). Built (decision 146): units that are
+a player's own (by role as they roll out, or by first order), hand-over (Give, Take), roles
+changed during the game, names, a team panel, teammates' units in their colour, and marks
+on the map with a meaning (Z, then 1 to 3). Next: who spent what (soft budgets per role),
+commanders that belong to a player, a role-first production screen.
 
 ## Strategic command (built; a deliberate change of order)
 

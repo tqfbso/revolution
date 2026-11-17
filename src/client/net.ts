@@ -14,9 +14,10 @@
 // The meeting point is the free public PeerJS broker, which also lends a relay for networks that block direct
 // connections. Nothing of ours runs on a server, so the game still deploys as static
 // files. `?net=local` swaps the network for a channel between two tabs of one browser.
-import type { Command } from '../sim/commands';
+import { CMD_DUTY, type Command } from '../sim/commands';
 import type { Frame, NetReport } from '../worker/protocol';
-import { isVersus, type Match } from '../sim/match';
+import { NAME_MAX, cleanName, isVersus, type Match } from '../sim/match';
+import { DUTY_KINDS } from '../sim/units';
 import { GameLog, expand } from './replay';
 import { fieldLabel, matchFromParams } from './setup';
 import { MAX_PLAYERS, esc, parseMsg, type Msg } from './wire';
@@ -29,8 +30,14 @@ export type Role = 'host' | 'guest';
 /** What each player has said he will look after. Advice, not a lock: anyone can do anything. */
 export const DUTIES = ['Everything', 'Armour', 'Infantry', 'Air and drones', 'Economy'] as const;
 
-/** The kinds of unit each role looks after (KIND_* numbers), by index into DUTIES. */
-const DUTY_KINDS: number[][] = [[], [0, 3, 4, 8, 9], [1, 2, 5, 11], [6, 7, 12, 13, 14], [10]];
+/** One colour per seat, to tell the players of a shared army apart (never red or blue). */
+export const SEAT_COLOURS = ['#3fd2ff', '#ffbe2e', '#d868ff', '#7fe03c'] as const;
+export const SEAT_RGB: readonly (readonly number[])[] = [
+  [63, 210, 255],
+  [255, 190, 46],
+  [216, 104, 255],
+  [127, 224, 60],
+];
 
 /** The two armies of a versus game, as the lobby names them. */
 export const SIDES = ['Red', 'Blue'] as const;
@@ -234,10 +241,35 @@ function readDuty(): number {
   }
 }
 
+function readName(): string {
+  try {
+    return cleanName(localStorage.getItem('revolution.name') ?? '');
+  } catch {
+    return '';
+  }
+}
+
+const namePicker = (name: string): string =>
+  `<label class="opt"><span>Your name</span>` +
+  `<input id="coop-name" maxlength="${NAME_MAX}" value="${esc(name)}" placeholder="What the others call you" autocomplete="off" /></label>`;
+
+function watchName(onPick: (name: string) => void): void {
+  const el = document.getElementById('coop-name') as HTMLInputElement | null;
+  el?.addEventListener('input', () => {
+    const name = cleanName(el.value);
+    try {
+      localStorage.setItem('revolution.name', name);
+    } catch {
+      // not remembered
+    }
+    onPick(name);
+  });
+}
+
 const dutyPicker = (duty: number): string =>
   `<label class="opt"><span>Your role</span>` +
   `<select id="coop-duty">${DUTIES.map((d, k) => `<option value="${k}"${k === duty ? ' selected' : ''}>${d}</option>`).join('')}</select>` +
-  `<p>Roles are advice for the team. Nothing is locked: anyone can order anything.</p></label>`;
+  `<p>New units of your role are yours as they roll out. Nothing is locked: anyone can order anything, and you can change role or hand units over during the game.</p></label>`;
 
 function watchDuty(onPick: (d: number) => void): void {
   const sel = document.getElementById('coop-duty') as HTMLSelectElement | null;
@@ -314,7 +346,9 @@ export class Coop {
   onCommand: (c: Command, seat: number) => void = () => {};
   onControl: (pause: boolean | undefined, speed: number | undefined) => void = () => {};
   onState: (paused: boolean, speed: number) => void = () => {};
-  onMark: (x: number, z: number, from: number) => void = () => {};
+  onMark: (x: number, z: number, from: number, kind: number) => void = () => {};
+  /** Someone has come, gone or changed his name: whoever lists the players draws again. */
+  onRoster: () => void = () => {};
   /** The host has gone: the guest's sim must run on its own clock from here. */
   onAlone: () => void = () => {};
   /** Host: a player has come back and must be told how the game stands (pause, speed). */
@@ -346,8 +380,10 @@ export class Coop {
   readonly team: number;
   /** Players against players, no computer. */
   readonly versus: boolean;
-  /** Every player's role, by seat: as the game began, then as players come back. */
+  /** Every player's role, by seat: as the game began, then as the game itself has it. */
   readonly duties: number[];
+  /** What each player is called, by seat. */
+  readonly names: string[];
 
   constructor(
     readonly role: Role,
@@ -362,6 +398,7 @@ export class Coop {
   ) {
     const duties = match.players.map((p) => p.duty);
     this.duties = duties;
+    this.names = match.players.map((p, k) => cleanName(p.name) || `Player ${k + 1}`);
     this.humans = duties.length;
     this.teams = match.players.map((p) => p.army);
     this.versus = isVersus(match);
@@ -383,7 +420,7 @@ export class Coop {
       // the seat he (or anyone) left, with the game so far to play through.
       listener.onLink = (l) => {
         l.onMessage = (m) => {
-          if (m.t === 'hello') this.readmit(l, m.build, m.duty | 0);
+          if (m.t === 'hello') this.readmit(l, m.build, m.duty | 0, cleanName(m.name));
         };
       };
     }
@@ -439,7 +476,7 @@ export class Coop {
   }
 
   /** Host: someone has opened the invite while the game is running. */
-  private readmit(link: Link, build: string, duty: number): void {
+  private readmit(link: Link, build: string, duty: number, name: string): void {
     if (build !== __BUILD__) {
       link.send({ t: 'bad', build: __BUILD__ });
       return;
@@ -453,13 +490,16 @@ export class Coop {
       return;
     }
     this.joining.add(seat);
-    // The same game, with the roles as they stand now and his as he has just picked it.
-    const players = this.match.players.map((p, k) => ({
-      army: p.army,
-      duty: k === seat ? duty : this.duties[k],
-    }));
+    // The same game as it began: his sim plays it through from the first tick, and the
+    // roles, which are part of the game now (decision 146), must begin as they did for
+    // everyone else. The role he has just picked goes in as an order once he is in.
+    const who = name || this.names[seat];
+    const players = this.match.players.map((p, k) => {
+      const called = k === seat ? name || undefined : cleanName(this.names[k]) || undefined;
+      return called ? { ...p, name: called } : { army: p.army, duty: p.duty };
+    });
     link.send({ t: 'cfg', match: { ...this.match, players }, you: seat, resume: true });
-    this.say(`Player ${seat + 1} is coming back into the game…`);
+    this.say(`${esc(who)} is coming back into the game…`);
     let open = true;
     link.onMessage = () => {};
     link.onClose = () => {
@@ -477,17 +517,19 @@ export class Coop {
         const next = this.log.piece(from, at);
         if (!next) {
           this.joining.delete(seat);
-          this.duties[seat] = duty;
           this.present.add(seat);
+          this.names[seat] = who;
           this.live = true;
-          this.send({ t: 'back', seat, duty });
+          this.send({ t: 'back', seat, duty, name: name || undefined });
           this.attach(seat, link);
+          if (duty !== this.duties[seat]) this.onCommand({ type: CMD_DUTY, duty }, seat);
           // His page is still loading the map and cannot answer yet: a minute's grace
           // before his silence counts against him.
           const p = this.peers.get(seat);
           if (p) p.grace = performance.now() + 90000;
-          this.say(`Player ${seat + 1} is back and catching up.`);
+          this.say(`${esc(who)} is back and catching up.`);
           this.onJoined();
+          this.onRoster();
           this.paint();
           return;
         }
@@ -529,10 +571,11 @@ export class Coop {
         );
       } else {
         this.say(
-          `Player ${seat + 1} has left. The rest of you play on; the invite link brings him back.`,
+          `${esc(this.names[seat])} has left. The rest of you play on; the invite link brings them back.`,
         );
       }
     }
+    this.onRoster();
     this.paint();
   }
 
@@ -564,8 +607,9 @@ export class Coop {
       else for (const f of frames) this.early.push(f);
     } else if (m.t === 'back') {
       this.present.add(m.seat);
-      this.duties[m.seat] = m.duty;
-      this.say(`Player ${m.seat + 1} is back in the game.`);
+      if (m.name) this.names[m.seat] = m.name;
+      this.say(`${esc(this.names[m.seat] ?? '')} is back in the game.`);
+      this.onRoster();
     } else if (m.t === 'c') {
       const now = performance.now();
       if (now - p.second > 1000) {
@@ -590,17 +634,26 @@ export class Coop {
     } else if (m.t === 'cam' || m.t === 'mark') {
       // The host passes these on, saying whose they are.
       const from = this.role === 'host' ? seat : (m.from ?? 0);
-      if (this.role === 'host') this.send({ t: m.t, x: m.x, z: m.z, from }, seat);
+      const k = m.t === 'mark' ? (m.k ?? 0) : 0;
+      if (this.role === 'host') {
+        this.send(
+          m.t === 'mark'
+            ? { t: 'mark', x: m.x, z: m.z, from, k }
+            : { t: 'cam', x: m.x, z: m.z, from },
+          seat,
+        );
+      }
       // Where the other side looks and what it points at is its own business.
       if (this.teams[from] !== this.team) return;
-      if (m.t === 'mark') this.onMark(m.x, m.z, from);
+      if (m.t === 'mark') this.onMark(m.x, m.z, from, k);
       else if (this.partners[from]) this.partners[from] = { x: m.x, z: m.z, at: performance.now() };
     } else if (m.t === 'gone') {
       this.present.delete(m.seat);
       if (this.partners[m.seat]) this.partners[m.seat].x = -1;
       this.say(
-        `Player ${m.seat + 1} has left. The rest of you play on; the invite link brings him back.`,
+        `${esc(this.names[m.seat] ?? '')} has left. The rest of you play on; the invite link brings them back.`,
       );
+      this.onRoster();
     }
   }
 
@@ -690,8 +743,32 @@ export class Coop {
     this.send({ t: 'cam', x: Math.round(x), z: Math.round(z), from: this.seat });
   }
 
-  mark(x: number, z: number): void {
-    this.send({ t: 'mark', x: Math.round(x), z: Math.round(z), from: this.seat });
+  mark(x: number, z: number, kind = 0): void {
+    this.send({ t: 'mark', x: Math.round(x), z: Math.round(z), from: this.seat, k: kind });
+  }
+
+  /** Whether the player in `seat` is in the game now. */
+  isPresent(seat: number): boolean {
+    return this.present.has(seat);
+  }
+
+  /** The seats that share our army, ours included, in order. */
+  mates(): number[] {
+    const out: number[] = [];
+    for (let k = 0; k < this.humans; k++) if (this.teams[k] === this.team) out.push(k);
+    return out;
+  }
+
+  /** The roles as the game has them now (the sim's word). True if any changed. */
+  setDuties(duties: readonly number[]): boolean {
+    let changed = false;
+    for (let k = 0; k < this.duties.length; k++) {
+      if (duties[k] === undefined || duties[k] === this.duties[k]) continue;
+      this.duties[k] = duties[k];
+      changed = true;
+    }
+    if (changed) this.paint();
+    return changed;
   }
 
   /** The roles of the players still in the game, ours left out. */
@@ -713,16 +790,12 @@ export class Coop {
       for (const [seat, p] of this.peers) {
         if (this.role !== 'host') continue;
         if (p.desync >= 0)
-          lag += ` · <span style="color:#ff8a70">P${seat + 1} is out of sync (a reload brings him back)</span>`;
-        else if (p.behind > 40) lag += ` · P${seat + 1} is ${(p.behind / 20).toFixed(0)} s behind`;
+          lag += ` · <span style="color:#ff8a70">${esc(this.names[seat])} is out of sync (a reload brings them back)</span>`;
+        else if (p.behind > 40)
+          lag += ` · ${esc(this.names[seat])} is ${(p.behind / 20).toFixed(0)} s behind`;
       }
-      let duties = '';
-      if (this.duties.some((d) => d > 0)) {
-        for (const seat of [...this.present].sort()) {
-          if (this.teams[seat] !== this.team) continue;
-          duties += ` · ${seat === this.seat ? 'you' : `P${seat + 1}`}: ${DUTIES[this.duties[seat]] ?? DUTIES[0]}`;
-        }
-      }
+      // Who plays what is on the team panel (client/team.ts); this line is the connection.
+      const duties = '';
       const count = this.present.size > 2 ? ` · ${this.present.size} players` : '';
       const what = this.versus ? `Versus (you are ${SIDES[this.team].toLowerCase()})` : 'Co-op';
       html = `${what} ${this.role}${count} · ${this.ping.toFixed(0)} ms${lag}${duties}`;
@@ -752,6 +825,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
   const local = params.get('net') === 'local';
   const ui = overlay();
   let duty = readDuty();
+  let name = readName();
   const home = `${location.origin}${location.pathname}`;
   const alone = `<p class="small"><a href="${esc(home)}">Back to the main menu</a></p>`;
 
@@ -802,6 +876,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         `<div class="cols2"><div class="col">` +
         `<label class="opt"><span>Game</span><select id="coop-mode"><option value="coop">Together against the computer</option><option value="versus">Versus: players against players</option></select></label>` +
         `<div id="coop-side-box"></div>` +
+        namePicker(name) +
         dutyPicker(duty) +
         `<p id="coop-blurb" class="small"></p>${alone}` +
         `</div><div class="col" style="gap:10px">` +
@@ -821,7 +896,12 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
     });
     const listening = listener;
     return new Promise<Coop>((resolve) => {
-      const guests: { link: Link; duty: number; side: number }[] = [];
+      const guests: { link: Link; duty: number; side: number; name: string }[] = [];
+      // What each is called: his own name, or his place at the table.
+      const called = () => [
+        name || 'Player 1',
+        ...guests.map((g, k) => g.name || `Player ${k + 2}`),
+      ];
       const startBtn = document.getElementById('coop-start') as HTMLButtonElement;
       const modeEl = document.getElementById('coop-mode') as HTMLSelectElement;
       let versus = false;
@@ -838,11 +918,12 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         const el = document.getElementById('coop-roster');
         if (el) {
           const tag = (k: number) => (versus ? ` · ${sideTag(all[k])}` : '');
-          const seat = (name: string, d: number, k: number) =>
-            `<div class="seat"><i></i><b>${name}</b><span>${DUTIES[d] ?? DUTIES[0]}${tag(k)}</span></div>`;
+          const seat = (who: string, d: number, k: number) =>
+            `<div class="seat"><i style="background:${SEAT_COLOURS[k]}"></i><b>${esc(who)}</b><span>${DUTIES[d] ?? DUTIES[0]}${tag(k)}</span></div>`;
+          const names = called();
           el.innerHTML =
-            seat('You (host)', duty, 0) +
-            guests.map((g, k) => seat(`Player ${k + 2}`, g.duty, k + 1)).join('') +
+            seat(`${names[0]} (you, host)`, duty, 0) +
+            guests.map((g, k) => seat(names[k + 1], g.duty, k + 1)).join('') +
             `<div class="seat open"><i></i><b>Open seat</b><span>Waiting for someone to open the link</span></div>`.repeat(
               MAX_PLAYERS - 1 - guests.length,
             );
@@ -871,8 +952,18 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
             : versus && !both
               ? 'Each side needs a player'
               : `Start the game with ${guests.length + 1} players`;
+        const names = called();
+        const duties = [duty, ...guests.map((g) => g.duty)];
         guests.forEach((g, k) =>
-          g.link.send({ t: 'wait', n: guests.length + 1, versus, sides: all, you: k + 1 }),
+          g.link.send({
+            t: 'wait',
+            n: guests.length + 1,
+            versus,
+            sides: all,
+            you: k + 1,
+            names,
+            duties,
+          }),
         );
       };
       modeEl.addEventListener('change', () => {
@@ -886,6 +977,10 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
       });
       watchDuty((d) => {
         duty = d;
+        roster();
+      });
+      watchName((n) => {
+        name = n;
         roster();
       });
       roster();
@@ -903,11 +998,18 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           // A newcomer goes to the side that is short of a player.
           const all = sides();
           const reds = all.filter((v) => v === 0).length;
-          const guest = { link, duty: m.duty | 0, side: reds > all.length - reds ? 1 : 0 };
+          const guest = {
+            link,
+            duty: m.duty | 0,
+            side: reds > all.length - reds ? 1 : 0,
+            name: cleanName(m.name),
+          };
           guests.push(guest);
           link.onMessage = (n) => {
-            if (n.t === 'duty') guest.duty = n.duty | 0;
-            else if (n.t === 'side') guest.side = n.side === 1 ? 1 : 0;
+            if (n.t === 'duty') {
+              guest.duty = n.duty | 0;
+              guest.name = cleanName(n.name);
+            } else if (n.t === 'side') guest.side = n.side === 1 ? 1 : 0;
             else return;
             roster();
           };
@@ -930,7 +1032,10 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           armies: versus
             ? base.armies.slice(0, 2).map((a) => ({ faction: a.faction, controller: 'human' }))
             : base.armies,
-          players: duties.map((d, k) => ({ army: armyOf[k], duty: d })),
+          players: duties.map((d, k) => {
+            const who = k === 0 ? name : guests[k - 1].name;
+            return who ? { army: armyOf[k], duty: d, name: who } : { army: armyOf[k], duty: d };
+          }),
         };
         guests.forEach((g, k) => g.link.send({ t: 'cfg', match, you: k + 1 }));
         ui.hide();
@@ -950,12 +1055,17 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
   // The guest.
   ui.set(
     `<div class="top"><h1>Joining a battle</h1></div><div class="cols2"><div class="col">` +
-      `<p id="coop-say" class="sub" style="margin:0">Looking for the host…</p><div id="coop-side-box"></div>${dutyPicker(duty)}${alone}</div></div>`,
+      `<p id="coop-say" class="sub" style="margin:0">Looking for the host…</p><div id="coop-side-box"></div>${namePicker(name)}${dutyPicker(duty)}${alone}</div>` +
+      `<div class="col" style="gap:10px"><span class="label">Players</span><div id="coop-roster" class="col" style="gap:10px"></div></div></div>`,
   );
   let lobby: Link | null = null;
   watchDuty((d) => {
     duty = d;
-    lobby?.send({ t: 'duty', duty });
+    lobby?.send({ t: 'duty', duty, name: name || undefined });
+  });
+  watchName((n) => {
+    name = n;
+    lobby?.send({ t: 'duty', duty, name: name || undefined });
   });
   const say = (text: string) => {
     const el = document.getElementById('coop-say');
@@ -984,6 +1094,15 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
           clearTimeout(timer);
           lobby = link;
           say(`You are in: ${m.n} players so far. The game starts when the host presses Start.`);
+          const list = document.getElementById('coop-roster');
+          if (list && m.names) {
+            list.innerHTML = m.names
+              .map(
+                (who, k) =>
+                  `<div class="seat"><i style="background:${SEAT_COLOURS[k]}"></i><b>${esc(who)}${k === m.you ? ' (you)' : k === 0 ? ' (host)' : ''}</b><span>${DUTIES[m.duties?.[k] ?? 0] ?? DUTIES[0]}</span></div>`,
+              )
+              .join('');
+          }
           const box = document.getElementById('coop-side-box');
           if (box) {
             const all = m.sides ?? [];
@@ -1001,7 +1120,7 @@ export async function openCoop(params: URLSearchParams): Promise<Coop | null> {
         }
       };
       link.onClose = () => done(null);
-      link.send({ t: 'hello', build: __BUILD__, duty });
+      link.send({ t: 'hello', build: __BUILD__, duty, name: name || undefined });
     });
     lobby = null;
     if (answer?.t === 'cfg') {

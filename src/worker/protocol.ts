@@ -150,6 +150,10 @@ export interface Snapshot {
   dest: Uint8Array;
   /** Per unit: the sub-commander it answers to, or -1. */
   cmdr: Int8Array;
+  /** Per unit: the player of a shared army whose it is, or NO_SEAT (sim/world.ts). */
+  owner: Uint8Array;
+  /** By seat: the role each player has now. */
+  duties: number[];
   /**
    * The player's sub-commanders, COMMANDER_STRIDE numbers each: mission (M_*), where
    * (x, z), status (ST_*), strength now and at its best, units, where its body is (x, z),

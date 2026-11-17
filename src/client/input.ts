@@ -173,7 +173,7 @@ export class Input {
       else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         units.setSelected(
-          range(units.count).filter((i) => this.mayCommand(i)),
+          this.ownFirst(range(units.count).filter((i) => this.mayCommand(i))),
           false,
         );
       } else if (e.code === 'KeyX' && units.selectedCount > 0) {
@@ -345,7 +345,12 @@ export class Input {
         // Everything of the same type and army that is on screen.
         const u = this.units;
         for (const i of onScreen) {
-          if (u.kindOf(i) === u.kindOf(best) && u.teamOf(i) === u.teamOf(best)) picked.push(i);
+          if (
+            u.kindOf(i) === u.kindOf(best) &&
+            u.teamOf(i) === u.teamOf(best) &&
+            u.mateOf(i) === u.mateOf(best)
+          )
+            picked.push(i);
         }
       } else picked.push(best);
     } else if (isClick) {
@@ -365,7 +370,19 @@ export class Input {
       }
     }
     this.card.select(-1);
-    this.units.setSelected(picked, additive);
+    this.units.setSelected(isClick ? picked : this.ownFirst(picked), additive);
+  }
+
+  /**
+   * A shared army: a box drawn over a mixed crowd takes our own units and the ones that are
+   * nobody's in particular, and leaves a teammate's alone. A box that holds only teammates'
+   * units takes those: nothing is locked, it only keeps hands off each other's work.
+   */
+  private ownFirst(ids: number[]): number[] {
+    const u = this.units;
+    if (u.mySeat < 0) return ids;
+    const ours = ids.filter((id) => u.mateOf(id) < 0);
+    return ours.length > 0 ? ours : ids;
   }
 
   /** Waiting for a click on the map (see `ask`). */

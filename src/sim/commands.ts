@@ -441,6 +441,27 @@ export interface ReinforceCommand {
   on: boolean;
 }
 
+export const CMD_GIVE = 41;
+export const CMD_DUTY = 42;
+
+/**
+ * A shared army (decision 146): `units` are from now on the player's in seat `to`, or, with
+ * `to` -1, nobody's in particular again. Any player of the army may hand over any of its
+ * units, his own or not (to himself: taking them). It changes whose they are and nothing
+ * they are doing.
+ */
+export interface GiveCommand {
+  type: typeof CMD_GIVE;
+  units: number[];
+  to: number;
+}
+
+/** The player who gives it looks after role `duty` from now on (DUTY_KINDS in units.ts). */
+export interface DutyCommand {
+  type: typeof CMD_DUTY;
+  duty: number;
+}
+
 /**
  * Who gave an order (decision 140). Nobody says it of himself: the game that takes the order
  * in (the player's own sim alone, the host's in a shared game) signs it, and the computers'
@@ -465,6 +486,8 @@ export interface Sender {
 }
 
 export type Command = (
+  | GiveCommand
+  | DutyCommand
   | FellCommand
   | EntrenchCommand
   | ParadropCommand

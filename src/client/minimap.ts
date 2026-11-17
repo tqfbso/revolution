@@ -114,7 +114,7 @@ export class Minimap {
   front: FrontLine | null = null;
 
   /** Co-op: the middle of each other player's view. */
-  partners: { x: number; z: number }[] = [];
+  partners: { x: number; z: number; colour?: string }[] = [];
 
   ping(x: number, z: number, rgb: readonly number[]): void {
     this.pings.push({
@@ -282,7 +282,13 @@ export class Minimap {
       const c = cy * N + cx;
       const team = u.teamOf(i);
       if (team !== u.playerTeam && !visible[c]) continue;
-      const rgb = u.selected[i] ? [255, 255, 255] : (TEAM_RGB[team] ?? TEAM_RGB[0]);
+      // A shared army: a teammate's units in his colour, ours and nobody's in the army's.
+      const mate = u.mateOf(i);
+      const rgb = u.selected[i]
+        ? [255, 255, 255]
+        : mate >= 0 && u.ownerMarks
+          ? (u.seatRgb[mate] ?? TEAM_RGB[team])
+          : (TEAM_RGB[team] ?? TEAM_RGB[0]);
       // Two by two pixels, so a single unit is still findable.
       for (const o of [c, c + 1, c + N, c + N + 1]) {
         px[4 * o] = rgb[0];
@@ -396,7 +402,7 @@ export class Minimap {
     for (const partner of this.partners) {
       const px = (partner.x / MAP_SIZE) * N;
       const py = (partner.z / MAP_SIZE) * N;
-      ctx.strokeStyle = 'rgba(120,225,255,0.95)';
+      ctx.strokeStyle = partner.colour ?? 'rgba(120,225,255,0.95)';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(px - 7, py - 5, 14, 10);
     }

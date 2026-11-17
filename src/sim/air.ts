@@ -29,6 +29,7 @@ import {
   STAT_SEATS,
   packPoint,
   type World,
+  NO_SEAT,
 } from './world';
 
 const POS_MAX = MAP_SIZE_FX - 1;
@@ -89,7 +90,11 @@ export function applyAirCommand(w: World, cmd: Command): boolean {
     w.posX[id] = ex;
     w.posY[id] = ey;
     w.carrier[id] = plane;
-    if (cmd.by !== undefined && cmd.by >= 0 && cmd.by < STAT_SEATS) w.seat[id] = cmd.by;
+    if (cmd.by !== undefined && cmd.by >= 0 && cmd.by < STAT_SEATS) {
+      w.seat[id] = cmd.by;
+      // Nobody's role covers them: they are his who sent the plane.
+      if (w.owner[id] === NO_SEAT && w.seatArmy[cmd.by] === team) w.owner[id] = cmd.by;
+    }
     aboard++;
   }
   if (aboard === 0) {
