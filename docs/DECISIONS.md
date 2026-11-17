@@ -3333,3 +3333,47 @@ Vehicles have no cover rule in the sim: "beside a wall" keeps them out of the lo
 lines of a crossing and looks right, it does not make them harder to hit. The computer
 player's own defence (`ai.ts`) is unchanged. Staff orders are ordinary commands, so no
 golden hash moves. Tests: `tests/posts.test.ts`.
+
+## 150. The ground floor and fire (I5) (2026-11-17)
+
+Fabio's ask from the inspiration review: floor by floor, with a collapse from the ground
+floor, and no floor orders. His condition, given the day destruction was called "perfect
+now": the time and effort to destroy a building stay where they are.
+
+A building keeps one health. What changes is where a hit lands (`src/sim/collapse.ts`):
+
+- From far off or from above (shells, rockets, helicopters, strike drones, a tank across the
+  square, stray fire) it comes off the top, exactly as before: the roof, then a storey at a
+  time, gutted, down.
+- At arm's length it also comes off the ground floor (`sGround`), which is a share of the
+  same health (`GROUND_PCT` 75): direct fire from a ground unit within `POINT_BLANK` (8) of
+  the wall, an engineer's charge, a vehicle blowing up against it. When the ground floor is
+  gone the building pancakes, whatever health it had left (`EV_COLLAPSE` with b = 1,
+  `sFell`). Losses inside are the ones a collapse always cost.
+- A ground floor under half (`FIRE_PCT`) is alight (`sFire`, `EV_FIRE`). The fire takes a
+  floor every six seconds. When it has the whole house the garrison comes out by itself,
+  unhurt, and nobody goes in until it has burnt out forty seconds later. Fire does no
+  damage to the structure: it clears a house, it does not level one. Mending shores the
+  ground floor up with the rest.
+
+Why these numbers. A charge takes three quarters of its damage off the ground floor, so a
+building falls to charges on the same charge as before; it now falls flat. A tank at range
+is untouched. The one thing that got faster is a tank with its muzzle on the wall: three
+quarters of the time (average house 69 s to 51 s, block 136 s to 102 s). That is the
+point of the rule and it has a price: 8 is also the distance at which a rifle squad's
+rockets do four times their damage.
+
+Measured (`tools/level.ts`, one attacker, four kinds of building): tank at range and
+engineers level to the second as before. `tools/toll.ts`, hard against hard on the city, 45
+minutes, seeds 1 to 8, before and after (on main at f26d652): buildings marked or worse 1164 and 1229 in all,
+ruins 290 and 309, of which 11 pancakes; three of the eight games played out identically,
+the rest drifted the way any change moves a game. The computers rarely fight at arm's
+length from a wall, so the rule is the player's to use.
+
+On screen (`src/client/structures.ts`): flames out of the windows of every floor the fire
+has, soot up the wall over a burnt ground floor for the rest of the game, a pancake as a
+stack of floors with the roof on top and a wall of dust and no blast when it goes.
+
+Not built: the computer driving tanks up to a wall on purpose, civilians running from a
+fire, fire spreading to the house next door, a spoken report when a garrison is burnt out.
+The golden hashes moved (the hash now takes in the ground floor and the fire).

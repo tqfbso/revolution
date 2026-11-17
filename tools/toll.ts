@@ -3,6 +3,7 @@
 // Run: npx esbuild tools/toll.ts --bundle --platform=node --outfile=/tmp/toll.cjs && node /tmp/toll.cjs [seed] [minutes] [levelA] [levelB]
 import { aiThink, createAi, type AiLevel } from '../src/sim/ai';
 import { CIV_DEAD, CIV_FLEEING, CIV_GONE, CIV_HOME } from '../src/sim/civilians';
+import { FELL_PANCAKE } from '../src/sim/collapse';
 import type { Command } from '../src/sim/commands';
 import { S_BUILDING, generateMap, type Layout } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
@@ -32,15 +33,20 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
   w.events.length = 0;
   if (tick % 6000 === 5999) {
     const stages = [0, 0, 0, 0, 0];
+    let flat = 0;
+    let burnt = 0;
     for (let s = 0; s < w.map.structCount; s++) {
-      if (w.map.sKind[s] === S_BUILDING) stages[stageOf(w, s)]++;
+      if (w.map.sKind[s] !== S_BUILDING) continue;
+      stages[stageOf(w, s)]++;
+      if (w.sFell[s] === FELL_PANCAKE) flat++;
+      if (w.sFire[s] !== 0) burnt++;
     }
     const civ = [0, 0, 0, 0, 0];
     for (let k = 0; k < w.civCount; k++) civ[w.civState[k]]++;
     let units = 0;
     for (let i = 0; i < w.count; i++) if (w.state[i] === STATE_ALIVE) units++;
     console.log(
-      `min ${(tick + 1) / 1200}: stages ${stages.join('/')}  civ home ${civ[CIV_HOME]} run ${civ[CIV_FLEEING]} out ${civ[CIV_GONE]} dead ${civ[CIV_DEAD]} (by ${w.civKilled[0]}, ${w.civKilled[1]})  units ${units}  step ${(stepTotal / (tick + 1)).toFixed(2)} ms worst ${stepWorst.toFixed(0)}`,
+      `min ${(tick + 1) / 1200}: stages ${stages.join('/')} (pancaked ${flat}, caught fire ${burnt})  civ home ${civ[CIV_HOME]} run ${civ[CIV_FLEEING]} out ${civ[CIV_GONE]} dead ${civ[CIV_DEAD]} (by ${w.civKilled[0]}, ${w.civKilled[1]})  units ${units}  step ${(stepTotal / (tick + 1)).toFixed(2)} ms worst ${stepWorst.toFixed(0)}`,
     );
   }
 }
