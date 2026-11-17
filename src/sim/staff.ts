@@ -57,7 +57,21 @@ import {
 } from './commands';
 import { B_HQ } from './economy';
 import { clampInt, fx } from './fixed';
-import { CLASS_AIR, CLASS_FOOT, S_BUILDING, cellOfPos, wallMax } from './map';
+import {
+  CELL_SHIFT,
+  CLASS_AIR,
+  CLASS_FOOT,
+  CLASS_VEHICLE,
+  MAP_CELLS,
+  ROAD_NONE,
+  ROAD_STREET,
+  S_BUILDING,
+  T_BUILDING,
+  T_RUBBLE,
+  cellOfPos,
+  layerOf,
+  wallMax,
+} from './map';
 import { structDist2 } from './sim';
 import { fortified } from './urban';
 import { KINDS, KIND_ARTILLERY } from './units';
@@ -190,6 +204,16 @@ export interface Post {
   houses: number[];
   /** New orders this think: those on their way to the body turn round at once. */
   turn: boolean;
+  /**
+   * Where its vehicles stand when it holds or defends a place (see `posts`): the place the
+   * list was made for, the cells, and which vehicle has which.
+   */
+  spotX: number;
+  spotY: number;
+  spots: number[];
+  spot: Map<number, number>;
+  /** Vehicles gone out to a small contact, and the cell each was sent to. */
+  goal: Map<number, number>;
 }
 
 export interface Staff {
@@ -227,6 +251,11 @@ export function createStaff(team: number, seed = 1): Staff {
       gather: -1,
       houses: [],
       turn: false,
+      spotX: -1,
+      spotY: -1,
+      spots: [],
+      spot: new Map(),
+      goal: new Map(),
     });
   }
   return {
@@ -1167,7 +1196,115 @@ function attack(
   muster(w, out, units, obj.x, obj.y);
 }
 
-/** Hold a place: infantry into its houses, the rest of the line around it, guns behind. */
+/** Vehicles that hold a place stand this far out from its middle, and no more than these. */
+const POST_RING = fx(40);
+const POST_MAX = 24;
+/** A vehicle is at its post within this. */
+const POSTED = fx(10);
+/** The eight ways out of a place, in 1024ths. */
+const WAYS = [
+  [1024, 0],
+  [724, 724],
+  [0, 1024],
+  [-724, 724],
+  [-1024, 0],
+  [-724, -724],
+  [0, -1024],
+  [724, -724],
+];
+
+/**
+ * Where the vehicles of a commander stand that holds or defends a place. They used to be
+ * sent to its middle, all of them: in a town that is the square, a crowd of armour in the
+ * open that sees down no street and goes anywhere only as one column (Fabio, 2026-11-17).
+ * Now each has a post of its own on a ring round the place: the first looks the way the
+ * enemy comes from (away from home), the next ones to either side of it, the last behind;
+ * a second vehicle at the same approach stands a little off the first. Near each point of
+ * the ring the cell is taken that is beside a wall (the corner of a house, not the middle
+ * of a crossing) and on or at a street (so that it sees down it).
+ *
+ * The list only ever grows, and a post depends on those before it alone: a vehicle keeps
+ * its post while the commander keeps its place.
+ */
+function posts(ai: Ai, w: World, p: Post, x: number, y: number, n: number): void {
+  if (p.spotX !== x || p.spotY !== y) {
+    p.spotX = x;
+    p.spotY = y;
+    p.spots.length = 0;
+    p.spot.clear();
+  }
+  const want = Math.min(n, POST_MAX);
+  if (p.spots.length >= want) return;
+  const map = w.map;
+  const cost = map.cost[layerOf(ai.team, CLASS_VEHICLE)];
+  const obj = objectiveAt(w, x, y);
+  const ring =
+    obj.kind === OBJ_TOWN ? clampInt((map.townR[obj.id] * 3) >> 2, fx(32), fx(46)) : POST_RING;
+  // The way the enemy comes from first, then to either side of it, the rear last.
+  const fx0 = x - ai.homeX;
+  const fy0 = y - ai.homeY;
+  const fd = dist(x, y, ai.homeX, ai.homeY) || 1;
+  const order8 = WAYS.map((_, k) => k).sort(
+    (a, b) =>
+      Math.trunc((WAYS[b][0] * fx0 + WAYS[b][1] * fy0) / fd) -
+        Math.trunc((WAYS[a][0] * fx0 + WAYS[a][1] * fy0) / fd) || a - b,
+  );
+  const wall = (c: number) =>
+    cost[c] === 0 &&
+    (map.type[c] === T_BUILDING ||
+      map.type[c] === T_RUBBLE ||
+      (map.structAt[c] >= 0 && map.sKind[map.structAt[c]] === S_BUILDING));
+  const street = (cx: number, cy: number) =>
+    cx >= 0 &&
+    cy >= 0 &&
+    cx < MAP_CELLS &&
+    cy < MAP_CELLS &&
+    map.road[cy * MAP_CELLS + cx] === ROAD_STREET;
+  while (p.spots.length < want) {
+    const k = p.spots.length;
+    const way = WAYS[order8[k % 8]];
+    // The second and third at an approach stand a little nearer the middle.
+    const r = ring - Math.trunc(k / 8) * fx(8);
+    const px = clampInt((x + Math.trunc((way[0] * r) / 1024)) >> CELL_SHIFT, 2, MAP_CELLS - 3);
+    const py = clampInt((y + Math.trunc((way[1] * r) / 1024)) >> CELL_SHIFT, 2, MAP_CELLS - 3);
+    let best = -1;
+    let bestScore = -1e9;
+    for (let j = py - 4; j <= py + 4; j++) {
+      for (let i = px - 4; i <= px + 4; i++) {
+        if (i < 1 || j < 1 || i >= MAP_CELLS - 1 || j >= MAP_CELLS - 1) continue;
+        const c = j * MAP_CELLS + i;
+        if (cost[c] === 0) continue;
+        let free = true;
+        for (const o of p.spots) {
+          const ox = o % MAP_CELLS;
+          const oy = (o - ox) / MAP_CELLS;
+          if (Math.abs(ox - i) < 3 && Math.abs(oy - j) < 3) free = false;
+        }
+        if (!free) continue;
+        let score = -Math.max(Math.abs(i - px), Math.abs(j - py));
+        if (wall(c - 1) || wall(c + 1) || wall(c - MAP_CELLS) || wall(c + MAP_CELLS)) score += 6;
+        if (map.road[c] !== ROAD_NONE) score += 3;
+        // A street both ways: the middle of a crossing, seen and shot at from four sides.
+        if ((street(i - 3, j) || street(i + 3, j)) && (street(i, j - 3) || street(i, j + 3)))
+          score -= 5;
+        if (score > bestScore) {
+          bestScore = score;
+          best = c;
+        }
+      }
+    }
+    // Nowhere to stand there (water, a cliff): the point itself, and the nearest ground to it.
+    p.spots.push(best >= 0 ? best : py * MAP_CELLS + px);
+  }
+}
+
+const spotX = (c: number) => ((c % MAP_CELLS) << CELL_SHIFT) + (1 << (CELL_SHIFT - 1));
+const spotY = (c: number) => (Math.trunc(c / MAP_CELLS) << CELL_SHIFT) + (1 << (CELL_SHIFT - 1));
+
+/**
+ * Hold a place: infantry into its houses, the vehicles of the line each at its post round
+ * it, guns behind. Those in `away` are out after a small contact and are left to it.
+ */
 function station(
   ai: Ai,
   w: World,
@@ -1177,22 +1314,50 @@ function station(
   y: number,
   cx: number,
   cy: number,
+  away?: ReadonlySet<number>,
 ): void {
   const units = p.units;
   const foot = units.filter((i) => FOOT(w.kind[i]));
   billetStart(w, [foot]);
   billet(ai, w, out, foot, p.houses, x, y, fx(28), -1);
   dig(w, out, p, foot);
-  const rest = units.filter(
-    (i) =>
-      LINE[w.kind[i]] &&
-      !FOOT(w.kind[i]) &&
-      w.job[i] === JOB_NONE &&
-      (w.flags[i] & FLAG_MOVING) === 0 &&
-      w.attack[i] === NO_TARGET &&
-      dist(w.posX[i], w.posY[i], x, y) > fx(30),
-  );
-  order(out, CMD_ATTACK_MOVE, rest, x, y);
+  const armour = units.filter((i) => LINE[w.kind[i]] && !FOOT(w.kind[i]));
+  posts(ai, w, p, x, y, armour.length);
+  // Who is gone gives up its post; a free post goes to the nearest vehicle without one,
+  // the posts toward the enemy first.
+  const live = new Set(armour);
+  for (const i of p.spot.keys()) if (!live.has(i)) p.spot.delete(i);
+  for (const i of p.goal.keys()) if (!live.has(i) || !away?.has(i)) p.goal.delete(i);
+  if (p.spot.size < armour.length && p.spots.length > 0) {
+    const taken = new Set(p.spot.values());
+    const loose = armour.filter((i) => !p.spot.has(i));
+    for (let k = 0; k < p.spots.length && loose.length > 0; k++) {
+      if (taken.has(k)) continue;
+      let best = 0;
+      for (let j = 1; j < loose.length; j++) {
+        if (
+          dist(w.posX[loose[j]], w.posY[loose[j]], spotX(p.spots[k]), spotY(p.spots[k])) <
+          dist(w.posX[loose[best]], w.posY[loose[best]], spotX(p.spots[k]), spotY(p.spots[k]))
+        )
+          best = j;
+      }
+      p.spot.set(loose[best], k);
+      loose.splice(best, 1);
+    }
+    // More vehicles than posts: the rest double up, in turn.
+    for (let j = 0; j < loose.length; j++) p.spot.set(loose[j], j % p.spots.length);
+  }
+  for (const i of armour) {
+    if (away?.has(i)) continue;
+    if (w.job[i] !== JOB_NONE || (w.flags[i] & FLAG_MOVING) !== 0 || w.attack[i] !== NO_TARGET)
+      continue;
+    const c = p.spots[p.spot.get(i)!];
+    const sx = spotX(c);
+    const sy = spotY(c);
+    if (dist(w.posX[i], w.posY[i], sx, sy) > POSTED) {
+      out.push({ type: CMD_ATTACK_MOVE, units: [i], x: sx, y: sy });
+    }
+  }
   follow(ai, w, out, units, cx, cy);
   muster(w, out, units, x, y);
 }
@@ -1274,9 +1439,22 @@ function muster(w: World, out: Command[], units: readonly number[], x: number, y
   order(out, CMD_MOVE, go, x, y);
 }
 
+/** Enemies this near one another are one contact. */
+const CONTACT = fx(40);
+/** A vehicle on its way to a contact is turned when the contact has moved this far. */
+const CONTACT_MOVED = fx(20);
+
 /**
  * Defend a place: hold it like `station`, but go out to meet an enemy seen anywhere
  * around it, and give ground to one that is far too strong.
+ *
+ * Who goes out depends on what has come. It used to be everyone, for anything, to the
+ * middle of all the enemy seen: one squad at the edge of town pulled the whole body off
+ * its ground in a column, and it got there late (Fabio, 2026-11-17). Now each contact
+ * (enemies that stand together) is met by the vehicles nearest to it, as many as make half
+ * again its strength: one or two for a patrol. They go at once, also those still on their
+ * way to a post, and go back to their posts when it is over. Only when that would take
+ * more than half the vehicles is it an attack on the place, and the body meets it whole.
  */
 function defend(
   ai: Ai,
@@ -1289,21 +1467,27 @@ function defend(
 ): void {
   const obj = p.f.obj!;
   const units = p.units;
-  let sx = 0;
-  let sy = 0;
-  let n = 0;
+  // Contacts: [seed x, seed y, sum x, sum y, heads, strength].
+  const contacts: number[][] = [];
   let threat = 0;
   for (const e of ai.seen) {
     const kind = w.kind[e];
     if (KINDS[kind].cls === CLASS_AIR) continue;
     if (dist(w.posX[e], w.posY[e], obj.x, obj.y) > fx(110)) continue;
-    sx += w.posX[e] >> 4;
-    sy += w.posY[e] >> 4;
-    n++;
-    threat += Math.trunc((POWER[kind] * w.hp[e]) / kindOf(w, e).hp) + 1;
+    const t = Math.trunc((POWER[kind] * w.hp[e]) / kindOf(w, e).hp) + 1;
+    threat += t;
+    let c = contacts.find((k) => dist(w.posX[e], w.posY[e], k[0], k[1]) < CONTACT);
+    if (c === undefined) {
+      c = [w.posX[e], w.posY[e], 0, 0, 0, 0];
+      contacts.push(c);
+    }
+    c[2] += w.posX[e] >> 4;
+    c[3] += w.posY[e] >> 4;
+    c[4]++;
+    c[5] += t;
   }
   p.status = ST_DEFEND;
-  if (n === 0) {
+  if (contacts.length === 0) {
     station(ai, w, out, p, obj.x, obj.y, cx, cy);
     return;
   }
@@ -1311,6 +1495,43 @@ function defend(
     breakOff(ai, w, out, p, cx, cy);
     return;
   }
+  // The strongest contact first; each takes the nearest vehicles that are still free.
+  contacts.sort((a, b) => b[5] - a[5]);
+  const armour = units.filter((i) => LINE[w.kind[i]] && !FOOT(w.kind[i]) && w.job[i] === JOB_NONE);
+  const away = new Map<number, number[]>();
+  let small = armour.length > 1;
+  for (const c of contacts) {
+    const tx = Math.trunc(c[2] / c[4]) << 4;
+    const ty = Math.trunc(c[3] / c[4]) << 4;
+    const free = armour
+      .filter((i) => !away.has(i))
+      .sort(
+        (a, b) => dist(w.posX[a], w.posY[a], tx, ty) - dist(w.posX[b], w.posY[b], tx, ty) || a - b,
+      );
+    let sent = 0;
+    for (const i of free) {
+      if (sent * 2 >= c[5] * 3) break;
+      away.set(i, [tx, ty]);
+      sent += Math.trunc((POWER[w.kind[i]] * w.hp[i]) / kindOf(w, i).hp) + 1;
+    }
+    if (sent * 2 < c[5] * 3) small = false;
+  }
+  if (away.size > Math.max(2, (armour.length + 1) >> 1)) small = false;
+  if (small) {
+    for (const [i, [tx, ty]] of away) {
+      if (w.attack[i] !== NO_TARGET) continue;
+      const moving = (w.flags[i] & FLAG_MOVING) !== 0;
+      const g = p.goal.get(i);
+      if (moving && g !== undefined && dist(spotX(g), spotY(g), tx, ty) < CONTACT_MOVED) continue;
+      if (!moving && dist(w.posX[i], w.posY[i], tx, ty) < POSTED) continue;
+      p.goal.set(i, cellOfPos(tx, ty));
+      out.push({ type: CMD_ATTACK_MOVE, units: [i], x: tx, y: ty });
+    }
+    station(ai, w, out, p, obj.x, obj.y, cx, cy, new Set(away.keys()));
+    return;
+  }
+  p.goal.clear();
+  const c = contacts[0];
   const mobile = units.filter(
     (i) =>
       LINE[w.kind[i]] &&
@@ -1318,7 +1539,7 @@ function defend(
       (w.flags[i] & FLAG_MOVING) === 0 &&
       w.attack[i] === NO_TARGET,
   );
-  order(out, CMD_ATTACK_MOVE, mobile, Math.trunc(sx / n) << 4, Math.trunc(sy / n) << 4);
+  order(out, CMD_ATTACK_MOVE, mobile, Math.trunc(c[2] / c[4]) << 4, Math.trunc(c[3] / c[4]) << 4);
   follow(ai, w, out, units, cx, cy);
   muster(w, out, units, obj.x, obj.y);
 }
