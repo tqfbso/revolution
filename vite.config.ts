@@ -1,4 +1,22 @@
+import { execSync } from 'node:child_process';
 import { defineConfig } from 'vitest/config';
+
+// Short commit id: GitHub Actions, then Cloudflare Workers Builds, then git itself. Only a
+// real hex id counts (Cloudflare once handed over the branch name, "main"), anything else is skipped.
+function buildId(): string {
+  const hex = /^[0-9a-f]{7,40}$/i;
+  const fromGit = () => {
+    try {
+      return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch {
+      return '';
+    }
+  };
+  const found = [process.env.GITHUB_SHA, process.env.WORKERS_CI_COMMIT_SHA, process.env.CF_PAGES_COMMIT_SHA, fromGit()].find(
+    (v) => v && hex.test(v),
+  );
+  return (found ?? 'dev').slice(0, 7);
+}
 
 // The page may run only its own scripts, and talk only to itself and the co-op meeting point
 // (security review). Set in the page, because GitHub Pages cannot send headers; the dev
@@ -35,9 +53,7 @@ export default defineConfig({
   base: './',
   // Short commit id shown in the overlay, so it is obvious which build is live.
   define: {
-    __BUILD__: JSON.stringify(
-      (process.env.GITHUB_SHA ?? process.env.WORKERS_CI_COMMIT_SHA ?? 'dev').slice(0, 7),
-    ),
+    __BUILD__: JSON.stringify(buildId()),
   },
   build: { target: 'es2022', chunkSizeWarningLimit: 2000 },
   worker: { format: 'es' },
