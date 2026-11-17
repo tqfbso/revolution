@@ -461,6 +461,19 @@ export interface World {
   /** Per unit: the player of a shared army who last gave it an order himself, or NO_SEAT. */
   seat: Uint8Array;
   /**
+   * Per unit: the player of a shared army whose it is, or NO_SEAT while it is nobody's in
+   * particular (decision 146). A unit is born to the player whose role covers its kind;
+   * one that is nobody's becomes his who first orders it himself; after that only a
+   * hand-over (CMD_GIVE) moves it. It decides nothing in the rules: any player of the army
+   * may order any of its units. It follows from the orders, so it is not in the hash.
+   */
+  owner: Uint8Array;
+  /** By seat: the army the player commands (-1: nobody sits there), and his role now. */
+  seatArmy: Int8Array;
+  duty: Uint8Array;
+  /** Counts the units shared out between players with the same role, to take turns. */
+  dutyTurn: number;
+  /**
    * Per unit: the tick it came into the world on. Ids are used again after a death; this is
    * how an order tells the unit a player meant from one that has taken its number since
    * (`admit` in guard.ts). Follows from the rest of the world, so it is not in the hash.
@@ -644,6 +657,10 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     civEscaped: 0,
     stats: new Int32Array(STATS),
     seat: new Uint8Array(MAX_UNITS).fill(NO_SEAT),
+    owner: new Uint8Array(MAX_UNITS).fill(NO_SEAT),
+    seatArmy: new Int8Array(STAT_SEATS).fill(-1),
+    duty: new Uint8Array(STAT_SEATS),
+    dutyTurn: 0,
     born: new Int32Array(MAX_UNITS),
     refused: 0,
     danger: new Int32Array(DANGER_DIM * DANGER_DIM),

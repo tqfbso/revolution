@@ -18,7 +18,7 @@ import { fx } from './sim/fixed';
 import { generateMap, MAX_TEAMS } from './sim/map';
 import { MAP_SIZE, M_FOCUS, M_NONE, TICK_RATE } from './sim/world';
 import { ALERT_NOTE, Alerts } from './client/alerts';
-import { SAY_URGENT } from './client/voice';
+import { SAY_NORMAL, SAY_URGENT } from './client/voice';
 import { Cameras } from './client/cameras';
 import { Civilians } from './client/civilians';
 import { Debrief } from './client/debrief';
@@ -32,7 +32,8 @@ import { Hud } from './client/hud';
 import { Input } from './client/input';
 import { Terrain } from './client/terrain';
 import { makeLook, readQuality, skyScene } from './client/look';
-import { DUTIES, dutyOf, openCoop } from './client/net';
+import { DUTIES, SEAT_COLOURS, dutyOf, openCoop } from './client/net';
+import { Team } from './client/team';
 import { bakeSurfaces } from './client/surfaces';
 import { Clutter } from './client/clutter';
 import { Decks } from './client/decks';
@@ -342,6 +343,11 @@ async function start(): Promise<void> {
     board.applySnapshot(e.data);
     supply.applySnapshot(e.data);
     alerts?.applySnapshot(e.data, performance.now() / 1000);
+    team?.applySnapshot(e.data);
+    // The roles are the game's to say (decision 146): they change by an order.
+    if (coop?.setDuties(e.data.duties)) {
+      production.whose = dutyOf(coop.duties[coop.seat], coop.otherDuties(), KINDS.length);
+    }
     if (clockEl && e.data.tick % TICK_RATE === 0) {
       const sec = (e.data.tick / TICK_RATE) | 0;
       clockEl.textContent = `${(sec / 60) | 0}:${String(sec % 60).padStart(2, '0')}`;
@@ -354,6 +360,7 @@ async function start(): Promise<void> {
   const clockEl = document.getElementById('clock');
   const lookAt = (x: number, z: number) => rts.moveTo(x, z);
   let alerts: Alerts | null = null;
+  let team: Team | null = null;
   const card = new CommandCard(
     document.getElementById('card') as HTMLElement,
     document.getElementById('resources') as HTMLElement,
@@ -374,7 +381,7 @@ async function start(): Promise<void> {
         () =>
           coop
             ? coop.duties.map((d, k) => ({
-                name: k === coop.seat ? 'You' : `Player ${k + 1}`,
+                name: k === coop.seat ? `${coop.names[k]} (you)` : coop.names[k],
                 role: DUTIES[d] ?? DUTIES[0],
               }))
             : [{ name: 'You', role: DUTIES[0] }],
@@ -929,26 +936,25 @@ async function start(): Promise<void> {
   let workMs = 0;
   let last = performance.now();
   let camSent = 0;
-  if (coop) {
-    // Z: point something out to your partner. It rings on their minimap and yours.
-    const CYAN = [120, 225, 255];
-    // With its grid square (and the town, if it is in one), so it can be said out loud.
-    const said = (x: number, z: number, who: string) => {
-      const place = board.place(x, z);
-      const text = `${who} ${gridRef(x, z)}${place.startsWith('grid ') ? '' : `, ${place}`}`;
-      alerts?.report(ALERT_NOTE, x, z, text, performance.now() / 1000);
-    };
-    coop.onMark = (x, z, from) => {
-      minimap.ping(x, z, CYAN);
-      said(x, z, `Player ${from + 1} pings`);
-    };
-    window.addEventListener('keydown', (e) => {
-      if (e.code !== 'KeyZ' || e.repeat || e.ctrlKey || e.metaKey) return;
-      const g = input.pointerGround();
-      if (!g) return;
-      minimap.ping(g.x, g.z, CYAN);
-      said(g.x, g.z, 'You ping');
-      coop.mark(g.x, g.z);
+  if (coop && coop.mates().length > 1) {
+    // The team panel, whose units are whose, and Z: a mark on the map for the others.
+    team = new Team({
+      coop,
+      units,
+      send,
+      lookAt,
+      scene,
+      camera: rts.camera,
+      heightAt: (x, z) => terrain.heightAt(x, z),
+      pointerGround: () => input.pointerGround(),
+      ring: (x, z, rgb) => minimap.ping(x, z, rgb),
+      say: (text, x, z, voiced) =>
+        alerts?.commander(text, x, z, SAY_NORMAL, false, voiced, performance.now() / 1000),
+      place: (x, z) => {
+        const place = board.place(x, z);
+        return `${gridRef(x, z)}${place.startsWith('grid ') ? '' : `, ${place}`}`;
+      },
+      beep: () => sound.alert(1),
     });
   }
   renderer.setAnimationLoop(() => {
@@ -989,7 +995,12 @@ async function start(): Promise<void> {
         camSent = now;
         coop.camera(rts.focus.x, rts.focus.z);
       }
-      minimap.partners = coop.live ? coop.partners.filter((p) => p.x >= 0) : [];
+      minimap.partners = coop.live
+        ? coop.partners
+            .map((p, k) => ({ x: p.x, z: p.z, colour: SEAT_COLOURS[k] }))
+            .filter((p) => p.x >= 0)
+        : [];
+      team?.update(now);
     }
     if (front && now - frontAt > 250) {
       frontAt = now;
@@ -1072,6 +1083,8 @@ async function start(): Promise<void> {
     production,
     board,
     alerts,
+    team,
+    input,
     map,
     // Driving the sim from the console is for the automated checks only (`?debug=1`):
     // it is not handed to anyone who opens the console of the live game.

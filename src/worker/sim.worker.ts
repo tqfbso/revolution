@@ -393,6 +393,8 @@ function postSnapshot(w: World, simMs: number): void {
     keep: w.keep.slice(),
     dest: w.dest.slice(),
     cmdr: w.cmdr.slice(0, n),
+    owner: w.owner.slice(0, n),
+    duties: Array.from(w.duty),
     commanders,
     task,
     routes: Float32Array.from(routes),

@@ -48,6 +48,7 @@ import {
   EV_UNLOAD,
   EV_WALL,
   MAX_UNITS,
+  NO_SEAT,
   STATE_ALIVE,
   STATE_FREE,
   TICK_MS,
@@ -313,6 +314,14 @@ export class UnitView {
   readonly task = new Uint8Array(MAX_UNITS);
   /** Per unit: the sub-commander it answers to, or -1. */
   readonly cmdr = new Int8Array(MAX_UNITS).fill(-1);
+  /** Per unit: the player of a shared army whose it is, or NO_SEAT (decision 146). */
+  readonly owner = new Uint8Array(MAX_UNITS).fill(NO_SEAT);
+  /** A shared army: our seat, and a colour per seat for the marks under teammates' units. */
+  mySeat = -1;
+  seatRgb: readonly (readonly number[])[] = [];
+  /** Whether teammates' units carry a mark in their colour on the ground. */
+  ownerMarks = true;
+  private readonly ownerRings: Batch;
   private readonly vehicles: (VehicleDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
@@ -470,6 +479,19 @@ export class UnitView {
     );
     this.jamRings.mesh.renderOrder = 3;
     this.group.add(this.jamRings.mesh);
+    // A shared army: a thin ring in a teammate's colour under each of his units.
+    const ownerMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true });
+    ownerMaterial.colorNode = jamTint.xyz;
+    ownerMaterial.opacityNode = jamTint.w;
+    ownerMaterial.depthWrite = false;
+    ownerMaterial.fog = false;
+    this.ownerRings = new Batch(
+      new THREE.RingGeometry(1.02, 1.3, 20).rotateX(-Math.PI / 2),
+      ownerMaterial,
+      MAX_UNITS,
+      256,
+    );
+    this.group.add(this.ownerRings.mesh);
 
     // A soft patch of shade under each squad that is too far off to cast a real shadow:
     // it ties the men to the ground and darkens the spot they stand on. One flat quad a
@@ -631,6 +653,7 @@ export class UnitView {
     this.load.set(s.load);
     this.task.set(s.task);
     this.cmdr.set(s.cmdr);
+    this.owner.set(s.owner);
     this.hp.set(s.hp);
     this.aim.set(s.aim);
     this.count = n;
@@ -1163,6 +1186,16 @@ export class UnitView {
     return id < this.count && (this.info[id] & (INFO_STATE_MASK | INFO_CARRIED)) === STATE_ALIVE;
   }
 
+  /**
+   * A shared army: the seat of the teammate whose unit `id` is, or -1 if it is ours, nobody's
+   * in particular, the enemy's, or the army is not shared.
+   */
+  mateOf(id: number): number {
+    if (this.mySeat < 0) return -1;
+    const o = this.owner[id];
+    return o === NO_SEAT || o === this.mySeat || this.teamOf(id) !== this.playerTeam ? -1 : o;
+  }
+
   setSelected(ids: Iterable<number>, additive: boolean): void {
     if (!additive) this.selected.fill(0);
     for (const id of ids) if (this.isAlive(id)) this.selected[id] = 1;
@@ -1204,6 +1237,7 @@ export class UnitView {
     const batches = this.batches;
     for (const b of batches) b.n = 0;
     this.jamRings.n = 0;
+    this.ownerRings.n = 0;
     this.shade.n = 0;
     // Dust is rationed: a few hundred puffs a second over the whole field at most.
     const dustRate = Math.min(2.4, 420 / Math.max(1, this.walkers));
@@ -1371,6 +1405,12 @@ export class UnitView {
       const sin = Math.sin(h);
       const cos = Math.cos(h);
 
+      if (this.mySeat >= 0 && this.ownerMarks && alive && !flying) {
+        const mate = this.mateOf(i);
+        const c = mate >= 0 ? this.seatRgb[mate] : undefined;
+        if (c)
+          this.ownerRings.put(x, y + 0.1, z, 0, 1, 1, c[0] / 255, c[1] / 255, c[2] / 255, 0.85);
+      }
       const jam = kindIn(teamId, this.kind[i]).jam / 1024;
       if (jam > 0 && alive) {
         const mine = teamId === this.playerTeam;
@@ -1582,6 +1622,7 @@ export class UnitView {
     this.bodies.update(seconds, dt, camera, nearNow, this.lodFar);
     for (const b of batches) b.flush();
     this.jamRings.flush();
+    this.ownerRings.flush();
     this.shade.flush();
     this.walkers = walkers;
     icons.batch.flush();
