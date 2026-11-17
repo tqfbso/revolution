@@ -3302,3 +3302,34 @@ Not done: the rest of the first sketch (a line that turns to face a known enemy,
 by the open flank, infantry first in woods, bounding overwatch, herringbone at a halt),
 the computer choosing shapes on purpose, a drawing of the shape before the order is
 given, and any measurement of what convoys do to the computer's attacks in a city.
+
+## 149. Armour that holds a place stands at posts round it (2026-11-17)
+
+Fabio, playing: "when defending a grid inside a city, armour usually gathers together in
+the middle of the grid taking too long to respond to small firefights and moving as a big
+group".
+
+What the code did: a commander on Hold or Defend sent every vehicle of the line to the
+middle of the place (in a town, the square), and on Defend sent everyone who stood idle to
+the middle of all the enemy seen within 110 m, whatever had come.
+
+What it does now (`src/sim/staff.ts`, `posts`, `station`, `defend`):
+
+- Each vehicle has a post of its own on a ring round the place (40 m out; three quarters of
+  a town's radius, 32 to 46 m). The first post looks away from home, the next to either
+  side, the last behind; from the ninth vehicle on they double up 8 m further in. Near each
+  point of the ring the cell is taken that is beside a wall and on a street, and not in the
+  middle of a crossing. A vehicle keeps its post while the commander keeps its place; a
+  post left by a loss goes to the next vehicle that joins.
+- On Defend, enemies within 40 m of one another are one contact. Each contact is met by the
+  nearest vehicles, as many as make half again its strength, also by those still driving to
+  their posts. When that takes more than half the vehicles (or more than two of a small
+  body), or there are not enough, it is an attack on the place and the body meets it whole,
+  as before, at the strongest contact (not the middle of all of them).
+- When the contact is gone the vehicles drive back to their posts. Squads stay in their
+  houses for a small contact.
+
+Vehicles have no cover rule in the sim: "beside a wall" keeps them out of the long sight
+lines of a crossing and looks right, it does not make them harder to hit. The computer
+player's own defence (`ai.ts`) is unchanged. Staff orders are ordinary commands, so no
+golden hash moves. Tests: `tests/posts.test.ts`.
