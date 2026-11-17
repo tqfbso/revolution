@@ -3067,3 +3067,58 @@ broken), each with a bent rotor blade beside it, built from the flying model's o
 Enemy wrecks show once the spot is explored. At most 512 are kept (oldest replaced); the
 list is rewritten only on a fall, a new wreck or every half second for the fog, and costs
 nothing with none. Drones and the transport plane are not covered.
+
+## 145. Open ground kills: bursts and the squad machine gun (2026-11-17)
+
+I3 of the inspiration review. Fabio's ask: men caught in the open by a tank round or a
+helicopter's rockets should die and be thrown, so that crossing open ground under those
+guns is something a player avoids. Before this only artillery had a blast: a tank round
+hurt the one squad it was aimed at, and five squads walked up to a tank and killed it.
+
+**Bursts.** `UnitKind.burst` (radius) and `burstDamage` (at the target, half at the rim):
+tank 3.5 and 30, attack helicopter 4 and 25, missile team 3 and 20, strike drone 4 and 35.
+A direct-fire shot at a target that is not behind walls hurts every enemy squad on foot
+within the radius besides the target (`burstMen` in `sim.ts`). Rubble and sandbags halve
+it, a trench quarters it, men in a building are not touched, and neither are the shooter's
+own army: tanks fire into a melee all game, and friendly fire there would punish the
+player for what the computer aims. Damage to buildings is untouched (decision 120 stands).
+
+**The gunner.** `UnitKind.gunner` on rifle squads and paratroopers. From a rest (inside a
+building, on rubble, sandbags or a trench) the squad does a third more to men on foot
+(`REST_PCT`). Its fire pins a squad on foot that is neither behind walls nor on such a
+cell for `PIN_TICKS` (3 s): half speed (`PIN_SPEED`), a quarter longer between shots
+(`PIN_RELOAD`). `World.pinned` holds it, hashed only while it runs.
+
+**The first setting was too strong.** Tank 60 at 4.5 let three tanks beat 24 squads at
+half their cost and broke `formations.test.ts` (25 points of squads and missile teams
+against 5 tanks): the defenders won 5 seeds of 16, 10 before. At 30 and 3.5 they win 9.
+The burst is what catches missile teams standing among the squads, so that test is the
+one that sets the number.
+
+Measured on open ground (`tools/pointduel.ts`, before to after, survivors):
+
+- 1 tank vs 5 squads: squads win with 2, now the tank wins.
+- 3 tanks vs 15 squads (equal army points): squads won with 8, now the tanks win with 1.
+- 3 tanks vs 24 squads (half the tanks' cost): squads 21 left, now 18.
+- 3 tanks vs 11 squads and 4 missile teams (equal points): 12 left, now 10.
+- 4 tanks and 12 squads vs 32 squads: the squads won with 16, now the tanks' side wins with 4.
+- 4 tanks and 12 squads vs 20 squads and 6 missile teams: 15 left, now 7.
+- Equal cost, one kind each (`tools/matchups.ts`): squads beat tanks with 91% of their
+  worth left, now 75%.
+- 2 helicopters vs 12 squads: 65 s to kill them, now 49 s; vs 24 squads 237 s, now 149 s.
+- 30 squads vs 30 squads: 75 s, now 87 s (both sides pinned).
+
+So tanks are worth having against infantry in the open and still lose to the same money
+in squads, and missile teams remain the answer. Three 30-minute hard-vs-hard games (city,
+seeds 1 to 3) still field 0 to 5 tanks among 500 to 800 points and no side stalls.
+
+Pinned tests moved on purpose: `assault.test.ts` allows 6 lost (5) against three tanks
+and 19 of 39 (14) against five tanks in the city, since streets under tank guns are open
+ground; `formations.test.ts` asks for more than 5 defenders left (10). New
+`tests/blast.test.ts`. Golden hash 2037256287, golden games re-pinned.
+
+The screen (client only): men killed by a burst are thrown from it through the I1 path,
+with a small flash, thrown earth and a scar; a pinned squad lies flat.
+
+Not done: the computer does not yet avoid open ground or spread out under armour; no
+suppression from vehicle machine guns; the unit card does not name the machine gun.

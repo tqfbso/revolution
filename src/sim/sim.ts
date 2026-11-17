@@ -130,6 +130,10 @@ import {
   CAMERA_SIGHT,
   CAMERA_SPACING,
   BLAST_STRAY,
+  PIN_RELOAD,
+  PIN_SPEED,
+  PIN_TICKS,
+  REST_PCT,
   KINDS,
   KIND_COUNT,
   IS_DRONE,
@@ -1604,6 +1608,7 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.jobTimer[id] = 0;
   w.stance[id] = 0;
   w.ration[id] = RATION_MAX;
+  w.pinned[id] = 0;
   w.cmdr[id] = -1;
 }
 
@@ -2560,7 +2565,47 @@ function baseInRange(w: World, i: number, range: number): number {
  */
 /** Ticks until `i` can fire again: twice as long for a unit that is out of rations. */
 function reloadOf(w: World, i: number, kind: UnitKind): number {
-  return w.ration[i] === 0 && NEEDS_SUPPLY[w.kind[i]] ? kind.reload * HUNGRY_RELOAD : kind.reload;
+  const r =
+    w.ration[i] === 0 && NEEDS_SUPPLY[w.kind[i]] ? kind.reload * HUNGRY_RELOAD : kind.reload;
+  // Pinned men get fewer shots off (I3).
+  return w.pinned[i] > w.tick ? Math.trunc((r * PIN_RELOAD) / 100) : r;
+}
+
+/**
+ * A high-explosive round from `i` bursts on `t`, who is not behind walls: every enemy squad
+ * on foot around it in the open is hurt too, less toward the rim and less in cover (I3).
+ */
+function burstMen(w: World, i: number, t: number, kind: UnitKind): void {
+  const map = w.map;
+  const x = w.posX[t];
+  const y = w.posY[t];
+  const team = w.team[i];
+  const R = kind.burst;
+  const r = (R >> CELL_SHIFT) + 1;
+  const cx = x >> CELL_SHIFT;
+  const cy = y >> CELL_SHIFT;
+  const y0 = cy > r ? cy - r : 0;
+  const y1 = cy + r < GRID_DIM ? cy + r : GRID_DIM - 1;
+  const x0 = cx > r ? cx - r : 0;
+  const x1 = cx + r < GRID_DIM ? cx + r : GRID_DIM - 1;
+  for (let gy = y0; gy <= y1; gy++) {
+    const to = cellStart[gy * GRID_DIM + x1 + 1];
+    for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
+      const j = sorted[s];
+      if (j === t || w.team[j] === team || w.inside[j] >= 0) continue;
+      if (KIND_CLASS[w.kind[j]] !== CLASS_FOOT) continue;
+      const dx = w.posX[j] - x;
+      const dy = w.posY[j] - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= R * R) continue;
+      let dmg = Math.trunc((kind.burstDamage * (2 * R - isqrt(d2))) / (2 * R));
+      const under = map.type[cellOfPos(w.posX[j], w.posY[j])];
+      if (under === T_RUBBLE || under === T_SANDBAG) dmg >>= 1;
+      else if (under === T_TRENCH) dmg >>= 2;
+      damage[j] += dmg || 1;
+      killer[j] = i;
+    }
+  }
 }
 
 function fire(w: World): void {
@@ -2659,6 +2704,14 @@ function fire(w: World): void {
       dmg *= CLOSE_ROCKET_MULT;
     }
     const cover = w.inside[t];
+    const footTarget = KIND_CLASS[w.kind[t]] === CLASS_FOOT;
+    if (kind.gunner && footTarget) {
+      // The squad's machine gun from a rest: a window, a ruin, sandbags, a trench.
+      const at = w.map.type[cellOfPos(w.posX[i], w.posY[i])];
+      if (w.inside[i] >= 0 || at === T_RUBBLE || isCover(at)) {
+        dmg = Math.trunc((dmg * REST_PCT) / 100);
+      }
+    }
     const armour = kindOf(w, t).armour;
     if (armour !== null && d2 > 0 && !kind.kamikaze) {
       // Which plate the shot meets: the angle between the target's nose and the shooter.
@@ -2677,9 +2730,11 @@ function fire(w: World): void {
       if (!kind.engineer && kind.siege > 0) {
         shootStructure(w, cover, w.posX[i], w.posY[i], kind.siege, w.team[i]);
       }
-    } else if (KIND_CLASS[w.kind[t]] === CLASS_FOOT) {
+    } else if (footTarget) {
       // Rubble halves what reaches the men in it; a trench or sandbags stop two thirds.
       const under = w.map.type[cellOfPos(w.posX[t], w.posY[t])];
+      // Caught in the open by a machine gun, they go to ground.
+      if (kind.gunner && under !== T_RUBBLE && !isCover(under)) w.pinned[t] = w.tick + PIN_TICKS;
       if (under === T_RUBBLE) {
         // A ruin halves what reaches the men in it; a ruin dug in is a strongpoint.
         const ruin = w.map.structAt[cellOfPos(w.posX[t], w.posY[t])];
@@ -2687,6 +2742,7 @@ function fire(w: World): void {
       } else if (isCover(under)) dmg = Math.trunc((dmg + 2) / 3);
     }
     if (cover < 0) strayFire(w, i, t, dx, dy, d2);
+    if (cover < 0 && kind.burst > 0 && !IS_AIR[w.kind[t]]) burstMen(w, i, t, kind);
     damage[t] += dmg;
     killer[t] = i;
     w.cooldown[i] = reloadOf(w, i, kind);
@@ -2981,7 +3037,9 @@ function steer(w: World): void {
     const s =
       w.ration[i] === 0 && kindOf(w, i).armour !== null && NEEDS_SUPPLY[w.kind[i]]
         ? (w.speed[i] * HUNGRY_SPEED) >> 8
-        : w.speed[i];
+        : w.pinned[i] > tick
+          ? (w.speed[i] * PIN_SPEED) >> 8
+          : w.speed[i];
     let vx = 0;
     let vy = 0;
     let busy = false;
