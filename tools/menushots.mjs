@@ -1,4 +1,4 @@
-// The pictures behind the main menu (decision 151) are taken in the game itself. This stages
+// The pictures behind the main menu (decision 152) are taken in the game itself. This stages
 // a night battle on a town square and photographs it from a camera lower than the game's own.
 //
 //   npm run build && npx vite preview --port 4173 --host 127.0.0.1

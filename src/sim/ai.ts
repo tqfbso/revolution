@@ -1270,12 +1270,17 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   let expandD = 0;
   let feeder = -1;
   let feederStock = 0;
+  // The nearest well on its side that no depot reaches, and how many wells it does work.
+  let well = -1;
+  let wellD = 0;
+  let wells = 0;
   for (let k = 0; k < map.siteCount; k++) {
     const fuel = map.siteKind[k] === SITE_FUEL;
     const sx = map.siteX[k];
     const sy = map.siteY[k];
     let served = false;
     let close = false;
+    let coming = false;
     for (const d of drops) {
       const d2 = structDist2(w, d, sx, sy);
       if (d2 <= DEPOT_REACH * DEPOT_REACH) served = true;
@@ -1283,7 +1288,9 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     }
     for (const d of rising) {
       if (w.sType[d] !== B_DEPOT) continue;
-      if (structDist2(w, d, sx, sy) <= DEPOT_CLOSE * DEPOT_CLOSE) close = true;
+      const d2 = structDist2(w, d, sx, sy);
+      if (d2 <= DEPOT_CLOSE * DEPOT_CLOSE) close = true;
+      if (d2 <= DEPOT_REACH * DEPOT_REACH) coming = true;
     }
     const alive = fuel || w.siteStock[k] > 0;
     const safe = ai.siteBad[k] <= tick;
@@ -1302,10 +1309,16 @@ function economy(ai: Ai, w: World, out: Command[]): void {
       feeder = k;
       feederStock = w.siteStock[k];
     }
-    if (served || fuel || !alive || !safe || bankOf(ai, sx, sy) !== ai.side) continue;
+    if (fuel && (served || coming)) wells++;
+    if (served || !alive || !safe || bankOf(ai, sx, sy) !== ai.side) continue;
     if (expect(ai, w, sx, sy, 2, 0) > 0) continue;
     const d = dist(sx, sy, ai.homeX, ai.homeY);
-    if (expand < 0 || d < expandD) {
+    if (fuel) {
+      if (!coming && (well < 0 || d < wellD)) {
+        well = k;
+        wellD = d;
+      }
+    } else if (expand < 0 || d < expandD) {
       expand = k;
       expandD = d;
     }
@@ -1413,9 +1426,12 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   let py = hy;
   let reach = 30;
   const atSite = (k: number) => {
-    // Between the stockpile and the well that goes with it, so one depot serves both.
-    let mx = map.siteX[k] + (ai.homeX > map.siteX[k] ? fx(16) : -fx(16));
-    let my = map.siteY[k];
+    // On the side of the stockpile that faces home (whichever way that lies: the same
+    // from either corner of a mirrored map), or between the stockpile and the well that
+    // goes with it, so one depot serves both.
+    const home = dist(ai.homeX, ai.homeY, map.siteX[k], map.siteY[k]) || 1;
+    let mx = map.siteX[k] + Math.trunc(((ai.homeX - map.siteX[k]) * 16) / (home >> FP_SHIFT || 1));
+    let my = map.siteY[k] + Math.trunc(((ai.homeY - map.siteY[k]) * 16) / (home >> FP_SHIFT || 1));
     for (let o = 0; o < map.siteCount; o++) {
       if (map.siteKind[o] !== SITE_FUEL) continue;
       if (dist(map.siteX[o], map.siteY[o], map.siteX[k], map.siteY[k]) > fx(80)) continue;
@@ -1428,7 +1444,15 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   // Short of fuel with supplies to spare: the next well is worth a depot.
   const dry = count[B_WORKS] > 0 && w.fuel[team] < 150 && w.supplies[team] > 400;
   if (count[B_BARRACKS] === 0) type = B_BARRACKS;
-  else if (feeder >= 0 && perSite[feeder] >= 2) {
+  else if (well >= 0 && (wells === 0 || dry)) {
+    // No fuel, or not enough: nothing with an engine gets built. Whether a depot put up
+    // for a stockpile also reaches a well is luck (it favoured the south-west corner of the
+    // city map four games in five), so the nearest well no depot reaches gets its own.
+    type = B_DEPOT;
+    px = (map.siteX[well] >> CELL_SHIFT) - 1;
+    py = (map.siteY[well] >> CELL_SHIFT) - 1;
+    reach = 6;
+  } else if (feeder >= 0 && perSite[feeder] >= 2) {
     type = B_DEPOT;
     px = (map.siteX[feeder] >> CELL_SHIFT) - 1;
     py = (map.siteY[feeder] >> CELL_SHIFT) - 1;

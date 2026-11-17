@@ -3378,7 +3378,59 @@ Not built: the computer driving tanks up to a wall on purpose, civilians running
 fire, fire spreading to the house next door, a spoken report when a garrison is burnt out.
 The golden hashes moved (the hash now takes in the ground floor and the fire).
 
-## 151. The main menu shows the game's own battles (2026-11-17)
+## 151. The corner that won: fuel, not ground (2026-11-17)
+
+The faction balance run (PR #129) found that the army starting in the
+first corner (south-west) won about 62% of games between computers, more than any faction
+gap. Measured again with the same faction on both sides, hard against hard, 25 minutes, 54
+games: city 15 of 18 to the first corner, euro 9 of 18, ridge 8 of 18. So it was the city
+map, and there it was four games in five.
+
+**What it was not.** Not the map: the city map is an exact mirror image of itself (terrain,
+buildings, sites; checked cell by cell). Not the army's number or the order in which things
+are worked out in the sim: with the two armies made to change corners (`SWAP=1` in
+`tools/factionduel.ts`) the advantage stayed with the corner, 13 of 18. Not the field works.
+
+**What it was.** Fuel. The computer never decided to put a depot by a well. A well was
+worked only if a depot put up for a stockpile happened to stand within 60 m of it, and on
+the city map none does by design: the well by the base is 62 m from the headquarters.
+Where a stockpile's depot goes was worked out east-west only ("16 m on the side home is
+on, along x"), which on a map mirrored across its diagonal is not the same thing from the
+two corners. From the south-west it slid depots toward the well up the road; from the
+north-east it did not. The north-east army had 23 fuel and no well for the first eight
+minutes while supplies piled up to tens of thousands, so it fielded rifles against
+carriers and tanks.
+
+**What it does now** (`src/sim/ai.ts`, `economy`):
+
+- A well on its side that no depot reaches (and none is going up for) gets a depot of its
+  own, the nearest first: at once when it works no well at all, and again whenever it is
+  short of fuel with supplies to spare.
+- A stockpile's depot goes on the side that faces home, whichever way home lies.
+
+**After.** Same faction on both sides, 90 games: city 15 of 36 to the first corner, euro 16
+of 36, ridge 11 of 18; 42 of 90 in all (47%). With 36 games a map the figure is good to
+about 8 points either way, so each map is within chance of even and none is pinned finer
+than that.
+
+**What else it changes.** The computer a person plays against starts in the north-east,
+the corner that went without. On the city map it now has fuel from the second minute on
+every level: on Normal, alone on the map, it has 167 army points at six minutes where it
+had 104, with its first tanks then and not at ten. Easy keeps its size but has strike drones and
+tanks earlier. The levels were tuned by play with the handicap in; if Normal on the city map is
+now too hard, the place to give is `AI_TUNING`, not the wells.
+
+Tests: `tests/ai.test.ts` (both corners of the city map have a well in reach of a depot
+and fuel coming in at three minutes; fails on the old code). The ridge test counts what was
+built, not who was alive at the end. Golden games re-pinned (the computers' economy moves
+from the first minute).
+
+Not done: the rest of the computer's east-west thinking (where it forms up, which side of
+a town its wire goes, where the barracks stands by the headquarters) is still along x
+only. Measured, it no longer decides games. The ridge map is not quite a mirror image (62
+cells differ, round Ridgetop); also within chance.
+
+## 152. The main menu shows the game's own battles (2026-11-17)
 
 Fabio asked for a more impressive picture on the menu. The old one was one shot from the
 game's own steep camera: mostly grass, the fight a small patch in the middle.

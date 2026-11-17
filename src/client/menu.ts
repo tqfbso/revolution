@@ -192,7 +192,7 @@ function seg(name: string, label: string, choices: Choice[], value: string): str
 }
 
 /**
- * The pictures behind the main menu (decision 151): stills taken in the game itself, shown
+ * The pictures behind the main menu (decision 152): stills taken in the game itself, shown
  * in turn. The first is the one every other screen uses and is all a slow line or a reader
  * who asked for less motion gets; the others are fetched only once it is on the screen.
  */

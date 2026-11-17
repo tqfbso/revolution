@@ -2,6 +2,7 @@
 // minutes, and what it cost. Run:
 //   npx esbuild tools/factionduel.ts --bundle --platform=node --outfile=/tmp/fd.cjs
 //   node /tmp/fd.cjs <factionA> <factionB> [seed] [minutes] [level]     (MAP=city|ridge|euro|river)
+// The same faction twice measures what a corner is worth; SWAP=1 has the armies change corners.
 import { aiThink, createAi, type AiLevel } from '../src/sim/ai';
 import { CMD_FACTION, type Command } from '../src/sim/commands';
 import { B_HQ } from '../src/sim/economy';
@@ -18,7 +19,13 @@ const seed = Number(process.argv[4] ?? 1);
 const minutes = Number(process.argv[5] ?? 25);
 const level = (process.argv[6] ?? 'hard') as AiLevel;
 const layout = (process.env.MAP ?? 'ridge') as Layout;
-const w = createWorld(seed, generateMap(seed, layout));
+const map = generateMap(seed, layout);
+// SWAP=1: the armies change corners (army 0 starts in the north-east), to tell what the
+// corner is worth from what the army's number is worth.
+if (process.env.SWAP) {
+  for (const a of [map.startX, map.startY]) [a[0], a[1]] = [a[1], a[0]];
+}
+const w = createWorld(seed, map);
 const ais = [createAi(0, level, seed), createAi(1, level, seed)];
 let cmds: Command[] = [
   { type: CMD_FACTION, team: 0, faction: fa },
