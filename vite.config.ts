@@ -7,14 +7,19 @@ function buildId(): string {
   const hex = /^[0-9a-f]{7,40}$/i;
   const fromGit = () => {
     try {
-      return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim();
     } catch {
       return '';
     }
   };
-  const found = [process.env.GITHUB_SHA, process.env.WORKERS_CI_COMMIT_SHA, process.env.CF_PAGES_COMMIT_SHA, fromGit()].find(
-    (v) => v && hex.test(v),
-  );
+  const found = [
+    process.env.GITHUB_SHA,
+    process.env.WORKERS_CI_COMMIT_SHA,
+    process.env.CF_PAGES_COMMIT_SHA,
+    fromGit(),
+  ].find((v) => v && hex.test(v));
   return (found ?? 'dev').slice(0, 7);
 }
 
