@@ -93,6 +93,7 @@ import {
   GARRISON_MAX,
   KINDS,
   KIND_AD,
+  AA_AVOID,
   KIND_ARTILLERY,
   KIND_ATGM,
   KIND_COUNT,
@@ -578,6 +579,8 @@ export interface Ai {
   restUntil: number;
   /** Per town (and, last, the enemy base): the strength that was not enough last time. */
   grudge: Int32Array;
+  /** Enemy air defence it has seen lately: x, y, tick of the sighting, three numbers each. */
+  aaSeen: number[];
   /** Enemy field works it has seen that still stand. */
   foeWorks: number;
   /** Per town, then per crossing: no new look at its field works before this tick. */
@@ -678,6 +681,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     occupied: new Int32Array(MAX_STRUCTS),
     foeMix: new Int32Array(KIND_COUNT),
     seen: [],
+    aaSeen: [],
     have: new Int32Array(KIND_COUNT),
     trucks: [],
     fresh: [],
@@ -2905,10 +2909,59 @@ export function follow(
   }
 }
 
+/** Engineers go in to lay charges on a house when the infantry is within this of it. */
+const DEMOLISH_COVER = fx(45);
+
 /** Gunships with a body go for an enemy the army knows of within this of the body's middle. */
 const ESCORT_REACH = fx(150);
 /** With nothing to go for they come back to the body when further from it than this. */
 const ESCORT_LEASH = fx(26);
+/** Air defence seen is remembered this long after it was last in sight. */
+const AA_MEMORY = 90 * TICK_RATE;
+
+/** Notes where enemy air defence is in sight, and forgets the old: gunships steer clear of it. */
+function noteAirDefence(ai: Ai, w: World): void {
+  const mem = ai.aaSeen;
+  for (let k = mem.length - 3; k >= 0; k -= 3) {
+    if (w.tick - mem[k + 2] > AA_MEMORY) mem.splice(k, 3);
+  }
+  for (const e of ai.seen) {
+    if (w.kind[e] !== KIND_AD || w.inside[e] >= 0) continue;
+    const x = w.posX[e];
+    const y = w.posY[e];
+    let at = -1;
+    for (let k = 0; k < mem.length; k += 3) {
+      if (dist(mem[k], mem[k + 1], x, y) < fx(20)) {
+        at = k;
+        break;
+      }
+    }
+    if (at < 0 && mem.length < 3 * 12) mem.push(x, y, w.tick);
+    else if (at >= 0) {
+      mem[at] = x;
+      mem[at + 1] = y;
+      mem[at + 2] = w.tick;
+    }
+  }
+}
+
+/** Does the straight way from (ax, ay) to (bx, by) run through the reach of remembered air defence? */
+function guarded(aa: readonly number[], ax: number, ay: number, bx: number, by: number): boolean {
+  for (let k = 0; k < aa.length; k += 3) {
+    if (passes(ax, ay, bx, by, aa[k], aa[k + 1], AA_AVOID)) return true;
+  }
+  return false;
+}
+
+/** Is the straight way from (ax, ay) to (bx, by) within `r` of the point (px, py)? */
+function passes(ax: number, ay: number, bx: number, by: number, px: number, py: number, r: number) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return dist(ax + Math.trunc(dx * t), ay + Math.trunc(dy * t), px, py) < r;
+}
 
 /**
  * Attack helicopters that belong to a body of troops. They used to be kept in the middle
@@ -2928,18 +2981,46 @@ function escort(
   led: boolean,
 ): void {
   if (gunships.length === 0) return;
+  noteAirDefence(ai, w);
+  const aa = ai.aaSeen;
   const dmg = KINDS[KIND_HELI].damage;
   const prey: number[] = [];
   for (const e of ai.seen) {
     if (dmg[w.kind[e]] === 0 || w.inside[e] >= 0 || w.carrier[e] >= 0) continue;
-    if (dist(w.posX[e], w.posY[e], cx, cy) <= ESCORT_REACH) prey.push(e);
+    if (dist(w.posX[e], w.posY[e], cx, cy) > ESCORT_REACH) continue;
+    // Not under the guns of air defence: the troops on the ground deal with those.
+    let covered = false;
+    for (let k = 0; k < aa.length && !covered; k += 3) {
+      covered = dist(w.posX[e], w.posY[e], aa[k], aa[k + 1]) < AA_AVOID;
+    }
+    if (!covered) prey.push(e);
   }
   const home: number[] = [];
   const hunts = new Map<number, number[]>();
   for (const i of gunships) {
+    // Inside the reach of air defence it knows of: out of it, straight away from the guns.
+    let flee = -1;
+    for (let k = 0; k < aa.length; k += 3) {
+      if (dist(w.posX[i], w.posY[i], aa[k], aa[k + 1]) < AA_AVOID) {
+        flee = k;
+        break;
+      }
+    }
+    if (flee >= 0) {
+      const d = dist(w.posX[i], w.posY[i], aa[flee], aa[flee + 1]) || 1;
+      const r = AA_AVOID + fx(14);
+      out.push({
+        type: CMD_MOVE,
+        units: [i],
+        x: aa[flee] + Math.trunc(((w.posX[i] - aa[flee]) * r) / d),
+        y: aa[flee + 1] + Math.trunc(((w.posY[i] - aa[flee + 1]) * r) / d),
+      });
+      continue;
+    }
     let best = -1;
     let bestKey = 0;
     for (const e of prey) {
+      if (guarded(aa, w.posX[i], w.posY[i], w.posX[e], w.posY[e])) continue;
       const key =
         dist(w.posX[e], w.posY[e], w.posX[i], w.posY[i]) +
         (KINDS[w.kind[e]].cls === CLASS_AIR ? 0 : 2 * ESCORT_REACH);
@@ -2955,7 +3036,14 @@ function escort(
       const list = hunts.get(best);
       if (list) list.push(i);
       else hunts.set(best, [i]);
-    } else if (led && !going && dist(w.posX[i], w.posY[i], cx, cy) > ESCORT_LEASH) home.push(i);
+    } else if (
+      led &&
+      !going &&
+      dist(w.posX[i], w.posY[i], cx, cy) > ESCORT_LEASH &&
+      !guarded(aa, w.posX[i], w.posY[i], cx, cy)
+    ) {
+      home.push(i);
+    }
   }
   for (const [e, list] of hunts) order(out, CMD_ATTACK_MOVE, list, w.posX[e], w.posY[e]);
   order(out, CMD_ATTACK_MOVE, home, cx, cy);
@@ -3139,6 +3227,18 @@ export function press(
   const sappers: number[] = [];
   const shell: number[] = [];
   const line: number[] = [];
+  // Engineers lay charges on the house under attack (the Demolish order) once the line is
+  // up with it: alone at the wall they would not last. Houses only; the guns do the rest.
+  let covered = false;
+  if (point >= 0 && map.sKind[point] === S_BUILDING) {
+    for (const i of units) {
+      if (!FOOT(w.kind[i]) || kindOf(w, i).engineer) continue;
+      if (dist(w.posX[i], w.posY[i], tx, ty) < DEMOLISH_COVER) {
+        covered = true;
+        break;
+      }
+    }
+  }
   for (const i of units) {
     const kind = w.kind[i];
     const flags = w.flags[i];
@@ -3152,6 +3252,11 @@ export function press(
       const at = cellAt(w.aimX[i], w.aimY[i]);
       const busy = (flags & (FLAG_BREACH | FLAG_BOMBARD)) !== 0 && w.wKind[at] !== 0;
       if (!busy && w.attack[i] === NO_TARGET) sappers.push(i);
+      continue;
+    }
+    if (covered && KINDS[kind].engineer && w.inside[i] < 0) {
+      const busy = (flags & FLAG_SIEGE) !== 0 && w.orderStruct[i] === point;
+      if (!busy && w.attack[i] === NO_TARGET) shell.push(i);
       continue;
     }
     if (

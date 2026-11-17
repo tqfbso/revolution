@@ -28,9 +28,19 @@ import {
   FLARE_RADIUS,
   FLASH_TICKS,
   NIGHT_SIGHT_PCT,
+  PIN_TICKS,
   WEATHER_SIGHT_PCT,
 } from '../sim/units';
-import { CLASS_AIR, T_BRIDGE, T_FORD, T_WATER } from '../sim/map';
+import {
+  CLASS_AIR,
+  CLASS_FOOT,
+  T_BRIDGE,
+  T_FORD,
+  T_RUBBLE,
+  T_SANDBAG,
+  T_TRENCH,
+  T_WATER,
+} from '../sim/map';
 import {
   EV_BREACH,
   EV_COLLAPSE,
@@ -69,6 +79,7 @@ import {
 import { Batch } from './batch';
 import { Soldiers, stillPose } from './soldiers';
 import { Bodies } from './bodies';
+import { Wrecks } from './wrecks';
 import type { Effects } from './effects';
 import type { Fog } from './fog';
 import { COMMANDER_RGB, ICON_FROM, ICON_FULL, ICON_PENNANT, Icons } from './icons';
@@ -85,6 +96,7 @@ import {
   buildReconDrone,
   buildStrikeDrone,
   buildHelicopter,
+  buildHelicopterWrecks,
   buildTransportPlane,
   box,
   buildInfantry,
@@ -136,6 +148,9 @@ const THROW = KINDS.map((_, k) =>
 );
 /** A shell that lands this close (world units) throws the men it kills. */
 const IMPACT_THROW = 6;
+/** How far the burst of each kind's direct-fire round throws men (I3), world units; 0 = none. */
+const BURST_THROW = KINDS.map((k) => (k.burst > 0 ? k.burst / 1024 + 1 : 0));
+const IS_FOOT = KINDS.map((k) => k.cls === CLASS_FOOT);
 /** Squads climbing out of a carrier: each man this long after the one before, and how long his run out takes. */
 const DISMOUNT_GAP = 0.2;
 const DISMOUNT_RUN = 0.75;
@@ -283,9 +298,13 @@ export class UnitView {
   private readonly diedAt = new Float32Array(MAX_UNITS).fill(-1e9);
   /** The dead, who stay where they fell all game (I1). */
   readonly bodies: Bodies;
+  /** Helicopters that came down stay where they fell (wrecks.ts). */
+  readonly wrecks: Wrecks;
   /** The last blast that hit each unit (client seconds), its strength and where it came from. */
   private readonly blastAt = new Float32Array(MAX_UNITS).fill(-1e9);
   private readonly blastPow = new Float32Array(MAX_UNITS);
+  /** Until when (seconds) each squad is pinned by a machine gun, as far as the screen knows. */
+  private readonly pinnedUntil = new Float32Array(MAX_UNITS).fill(-1e9);
   private readonly blastX = new Float32Array(MAX_UNITS);
   private readonly blastZ = new Float32Array(MAX_UNITS);
   /** Shells landed lately: x, z, seconds. */
@@ -437,6 +456,28 @@ export class UnitView {
       effects,
       TEAM_RGB,
     );
+    const crashed = (gunship: boolean) =>
+      buildHelicopterWrecks(gunship).map((g) => {
+        const b = new Batch(g, material, 256, 16);
+        b.mesh.castShadow = shadows;
+        b.mesh.receiveShadow = shadows;
+        this.group.add(b.mesh);
+        return b;
+      });
+    this.wrecks = new Wrecks(
+      [crashed(true), crashed(false)],
+      terrain,
+      fog,
+      effects,
+      TEAM_RGB,
+      (x, z, seen) => {
+        // It hits the ground: a second blast, a scorched patch, a thud.
+        this.scars.add(x, z, 1.6, true);
+        this.terrain.stamp(x, z, 2, 60);
+        this.sound?.at(SND_EXPLOSION, x, z, seen);
+        if (seen) effects.explosion(x, this.terrain.heightAt(x, z), z);
+      },
+    );
     this.squads[KIND_INFANTRY] = {
       figures: SQUAD_OFFSETS.map(([x, z]) => ({ x, z })),
       drill: DRILL_SQUAD,
@@ -547,8 +588,10 @@ export class UnitView {
       this.flares.length = 0;
       this.scars.clear();
       this.bodies.clear();
+      this.wrecks.clear();
       this.impacts.length = 0;
       this.blastAt.fill(-1e9);
+      this.pinnedUntil.fill(-1e9);
       this.dismountAt.fill(-1e9);
     }
     const curr = this.curr;
@@ -724,11 +767,12 @@ export class UnitView {
     const impacts = this.impacts;
     // Shells more than a second old have done their work.
     let keep = 0;
-    for (let k = 0; k < impacts.length; k += 3) {
+    for (let k = 0; k < impacts.length; k += 4) {
       if (seconds - impacts[k + 2] > 1.2) continue;
       impacts[keep++] = impacts[k];
       impacts[keep++] = impacts[k + 1];
       impacts[keep++] = impacts[k + 2];
+      impacts[keep++] = impacts[k + 3];
     }
     impacts.length = keep;
     const pos = this.renderPos;
@@ -750,11 +794,13 @@ export class UnitView {
         dz = z - bz;
         power = this.blastPow[i] * (0.7 + Math.random() * 0.3);
       }
-      for (let m = 0; m < impacts.length; m += 3) {
+      for (let m = 0; m < impacts.length; m += 4) {
         const ix = x - impacts[m];
         const iz = z - impacts[m + 1];
         const d = Math.hypot(ix, iz);
-        const p = d < IMPACT_THROW ? (1 - d / IMPACT_THROW) * 1.1 : 0;
+        const reach = impacts[m + 3];
+        // (A shell throws harder than the burst of a tank round or a rocket.)
+        const p = d < reach ? (1 - d / reach) * (reach >= IMPACT_THROW ? 1.1 : 0.9) : 0;
         if (p > power) {
           power = p;
           dx = ix;
@@ -965,7 +1011,7 @@ export class UnitView {
         // A shell lands. The crater stays whether or not anyone saw it fall.
         const x = unpackX(a);
         const z = unpackY(a);
-        this.impacts.push(x, z, seconds);
+        this.impacts.push(x, z, seconds, IMPACT_THROW);
         this.scars.add(x, z, 1.2 + Math.random() * 0.9, false);
         this.terrain.stamp(x, z, 3.2, 110);
         const seen = this.fog.sees(x, z);
@@ -1044,6 +1090,28 @@ export class UnitView {
           this.blastZ[b] = az;
         }
         this.report(a);
+        const open = b < MAX_UNITS && (this.info[b] & INFO_INSIDE) === 0;
+        const foot = open && IS_FOOT[this.kind[b]];
+        const reach = BURST_THROW[this.kind[a]];
+        if (reach > 0 && open && !IS_AIR[this.kind[b]]) {
+          // High explosive among men in the open (I3): whoever it kills round the target
+          // is thrown from where it burst, and it leaves its mark on the ground.
+          this.impacts.push(pos[3 * b], pos[3 * b + 2], seconds, reach);
+          if (foot) {
+            this.scars.add(pos[3 * b], pos[3 * b + 2], 0.6 + Math.random() * 0.5, false);
+            if (near !== LOD_HIDDEN) fx.burst(pos[3 * b], pos[3 * b + 1], pos[3 * b + 2]);
+          }
+        }
+        if (foot && KINDS[this.kind[a]].gunner) {
+          // The squad's machine gun: men caught in the open go to ground.
+          const map = this.terrain.map;
+          const cx = Math.min(255, Math.max(0, this.curr[2 * b] >> 2));
+          const cy = Math.min(255, Math.max(0, this.curr[2 * b + 1] >> 2));
+          const t = map.type[cy * 256 + cx];
+          if (t !== T_RUBBLE && t !== T_TRENCH && t !== T_SANDBAG) {
+            this.pinnedUntil[b] = seconds + PIN_TICKS / 20;
+          }
+        }
         if (near === LOD_HIDDEN) continue;
         const by = pos[3 * b + 1] + (IS_VEHICLE[this.kind[b]] ? 0.7 : 0.35);
         this.shoot(a, ax, ay, az, pos[3 * b], by, pos[3 * b + 2]);
@@ -1055,6 +1123,21 @@ export class UnitView {
           this.scars.add(ax, az, 2.3, true);
           this.terrain.stamp(ax, az, 2.6, 70);
           this.sound?.at(SND_EXPLOSION, ax, az, this.fog.sees(ax, az));
+        }
+        const kindDead = this.kind[a];
+        if (kindDead === KIND_HELI || kindDead === KIND_LIFT) {
+          const team = this.teamOf(a);
+          const coat = factionOf(team) * SEEDS;
+          this.wrecks.add(
+            ax,
+            az,
+            ay - this.terrain.heightAt(ax, az),
+            this.heading[a],
+            kindDead === KIND_HELI ? 0 : 1,
+            team,
+            (a % SEEDS) + coat + BURN_BASE + BURN_SCALE,
+            team === this.playerTeam || this.fog.sees(ax, az),
+          );
         }
         if (near === LOD_HIDDEN) continue;
         if (veh && !air) fx.explosion(ax, ay, az);
@@ -1552,6 +1635,8 @@ export class UnitView {
               if (role === 1 || role === 4) prone = halted * fight;
               else if (role === 3) kneel = halted * (1 - fight);
               else if (role === 0) kneel = halted * fight;
+              // Pinned by a machine gun, the whole squad is flat.
+              if (seconds < this.pinnedUntil[i]) prone = halted;
             }
             const burst = since * 7 + k * 0.37;
             const climbing = out < 1;
@@ -1620,6 +1705,7 @@ export class UnitView {
     this.stats.culled = culled;
     this.stats.still = stillCount;
     this.bodies.update(seconds, dt, camera, nearNow, this.lodFar);
+    this.wrecks.update(seconds, dt, camera);
     for (const b of batches) b.flush();
     this.jamRings.flush();
     this.ownerRings.flush();

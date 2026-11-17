@@ -127,6 +127,20 @@ export interface UnitKind {
   indirect: boolean;
   minRange: number;
   blast: number;
+  /**
+   * Direct fire with a high-explosive round (I3, decision 145): besides what the shot does
+   * to its target, every enemy squad on foot within `burst` of it takes `burstDamage` (at
+   * the target, half at the rim). Rubble and sandbags halve that, a trench quarters it,
+   * and men behind walls are not touched. 0 = no burst.
+   */
+  burst: number;
+  burstDamage: number;
+  /**
+   * One man in the squad carries a light machine gun (I3): its fire pins enemy infantry
+   * caught in the open (see PIN_TICKS), and from a rest (a ruin, sandbags, a trench, a
+   * window) it does a third more to men on foot.
+   */
+  gunner: boolean;
   /** How far it notices enemies by itself. Further out it depends on what others spot. */
   sight: number;
   /** A sensor: reports every enemy within sight to the whole army, not just its target. */
@@ -144,11 +158,36 @@ export interface UnitKind {
   engineer: boolean;
 }
 
-const PLAIN = { spotter: false, stealth: false, jam: 0, kamikaze: false, engineer: false };
+const PLAIN = {
+  spotter: false,
+  stealth: false,
+  jam: 0,
+  kamikaze: false,
+  engineer: false,
+  burst: 0,
+  burstDamage: 0,
+  gunner: false,
+};
 
 /** From this much `stray` a round is high explosive (see UnitKind.stray). */
 export const BLAST_STRAY = 16;
 const DIRECT = { indirect: false, minRange: 0, blast: 0 };
+
+/** What the burst of each high-explosive direct-fire round does to men at its centre. */
+const BURST_TANK = 30;
+const BURST_MISSILE = 20;
+const BURST_STRIKE = 35;
+const BURST_HELI = 25;
+/**
+ * Infantry in the open hit by a squad's machine gun is pinned for this long (I3): it moves
+ * at PIN_SPEED 256ths of its speed and takes PIN_RELOAD percent of its time between shots.
+ * Men in a building, a ruin, a trench or behind sandbags are never pinned.
+ */
+export const PIN_TICKS = 60;
+export const PIN_SPEED = 128;
+export const PIN_RELOAD = 125;
+/** Percent a squad's machine gun does to men on foot when it fires from a rest. */
+export const REST_PCT = 133;
 
 /** A row of the table as it is written: damage by the target's profile. */
 type UnitSpec = Omit<UnitKind, 'damage'> & {
@@ -176,6 +215,8 @@ const SPECS: readonly UnitSpec[] = [
     ...DIRECT,
     ...PLAIN,
     sight: fx(30),
+    burst: fx(3.5),
+    burstDamage: BURST_TANK,
   },
   {
     // Rifles against soft targets and a few shoulder-fired rockets: enough to finish a
@@ -200,6 +241,7 @@ const SPECS: readonly UnitSpec[] = [
     ...DIRECT,
     ...PLAIN,
     sight: fx(36),
+    gunner: true,
   },
   {
     // Three men and a launcher. One missile every seven seconds, from further than a tank
@@ -222,6 +264,8 @@ const SPECS: readonly UnitSpec[] = [
     ...DIRECT,
     ...PLAIN,
     sight: fx(38),
+    burst: fx(3),
+    burstDamage: BURST_MISSILE,
   },
   {
     name: 'Infantry fighting vehicle',
@@ -335,6 +379,8 @@ const SPECS: readonly UnitSpec[] = [
     ...DIRECT,
     ...PLAIN,
     sight: fx(32),
+    burst: fx(4),
+    burstDamage: BURST_STRIKE,
     kamikaze: true,
   },
   {
@@ -450,6 +496,8 @@ const SPECS: readonly UnitSpec[] = [
     ...DIRECT,
     ...PLAIN,
     sight: fx(46),
+    burst: fx(4),
+    burstDamage: BURST_HELI,
   },
   {
     name: 'Transport helicopter',
@@ -492,6 +540,7 @@ const SPECS: readonly UnitSpec[] = [
     ...DIRECT,
     ...PLAIN,
     sight: fx(36),
+    gunner: true,
   },
   {
     name: 'Transport plane',
@@ -605,6 +654,12 @@ export const HUNT_GROUND = fx(110);
 export const HUNT_AIR = fx(220);
 /** How often a hunting helicopter looks again, in ticks. */
 export const HUNT_PERIOD = 20;
+/**
+ * A gunship keeps this far from air defence its army knows of: the guns reach 40, its own
+ * rockets 28. Hunting helicopters and the computer's gunships both leave alone what stands
+ * under such guns.
+ */
+export const AA_AVOID = fx(52);
 /** Helicopters an army can keep per finished helipad: landing space is what limits them. */
 export const HELIS_PER_PAD = 3;
 /** Paratroop squads that can wait in reserve, and the most one plane takes. */

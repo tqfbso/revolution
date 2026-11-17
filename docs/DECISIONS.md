@@ -3028,3 +3028,97 @@ The inner loop also skips bounds checks away from the map's edge.
 Measured (`tools/simbench.ts`, hard vs hard, 25 minutes, seed 1): city mean tick 0.87 to
 0.73 ms, ticks over 5 ms 2.7% to 1.7%; four armies 1.33 to 1.08 ms, 5.3% to 3.1%. Since
 the review: city 1.22 to 0.73 ms, four armies 2.09 to 1.08 ms.
+
+## 143. Gameplay loose ends: engineers that demolish, gunships that dodge air defence (2026-11-16)
+
+Four small gaps left over from earlier decisions, none touching damage rules:
+
+- **The computer's engineers lay charges** (decision 118 said they did not). In `press`, once
+  its infantry is within 45 m of the house under attack, the engineers of the force go in
+  with the charge order on that house, next to the guns and tanks. Houses only; the house is
+  the strong point it already chose (one the enemy is known to hold), so empty houses are not
+  razed for nothing. Sub-commanders use the same code. Woods are still not felled by the
+  computer.
+- **Gunships avoid known air defence.** `AA_AVOID` 52 m (the guns reach 40, a gunship's
+  rockets 28). Hunting helicopters (`huntHelis`, so also the player's idle ones) will not take
+  a target within that of air defence their army has in sight. The computer's escorting
+  gunships (`escort`) also remember air defence seen for 90 s, skip prey under it or on the
+  way past it, and fly out of the reach of any they find themselves in. Helicopters under a
+  direct player order do what they are told.
+- **Way points on the minimap.** The routes of the selected troops are drawn there in the
+  same green with a diamond on each way point (`RouteView.polylines`, `Minimap.drawRoutes`).
+- **The fourth army's score.** `STAT_TEAMS` is 4, so the victory screen counts all four
+  armies instead of dashes. The score is not in the hash.
+
+Golden hashes unchanged. Tests: `tests/commanders.test.ts` (air defence, charges),
+`tests/score.test.ts` (fourth army).
+
+## 144. Helicopters that come down stay down (2026-11-16)
+
+Fabio liked the bodies that stay all game (decision 139) and asked for the same for downed
+helicopters. Client only, the sim and the golden hashes are untouched. A shot-down aircraft
+used to vanish (the sim frees a wreck's slot after a while and `units.ts` never drew a dead
+aircraft). Now `src/client/wrecks.ts` keeps its own record: on the death event a gunship or
+lift helicopter falls the last metres with a smoke trail, hits the ground (a second blast, a
+scorched patch, a thud) and lies there for the rest of the game, smouldering for 50 s and
+then cold. Three ways to lie (on its side, nose in with the tail snapped off, upright and
+broken), each with a bent rotor blade beside it, built from the flying model's own parts
+(`buildHelicopterWrecks`) and scorched by the same burn paint as tank wrecks. No glow.
+Enemy wrecks show once the spot is explored. At most 512 are kept (oldest replaced); the
+list is rewritten only on a fall, a new wreck or every half second for the fog, and costs
+nothing with none. Drones and the transport plane are not covered.
+
+## 145. Open ground kills: bursts and the squad machine gun (2026-11-17)
+
+I3 of the inspiration review. Fabio's ask: men caught in the open by a tank round or a
+helicopter's rockets should die and be thrown, so that crossing open ground under those
+guns is something a player avoids. Before this only artillery had a blast: a tank round
+hurt the one squad it was aimed at, and five squads walked up to a tank and killed it.
+
+**Bursts.** `UnitKind.burst` (radius) and `burstDamage` (at the target, half at the rim):
+tank 3.5 and 30, attack helicopter 4 and 25, missile team 3 and 20, strike drone 4 and 35.
+A direct-fire shot at a target that is not behind walls hurts every enemy squad on foot
+within the radius besides the target (`burstMen` in `sim.ts`). Rubble and sandbags halve
+it, a trench quarters it, men in a building are not touched, and neither are the shooter's
+own army: tanks fire into a melee all game, and friendly fire there would punish the
+player for what the computer aims. Damage to buildings is untouched (decision 120 stands).
+
+**The gunner.** `UnitKind.gunner` on rifle squads and paratroopers. From a rest (inside a
+building, on rubble, sandbags or a trench) the squad does a third more to men on foot
+(`REST_PCT`). Its fire pins a squad on foot that is neither behind walls nor on such a
+cell for `PIN_TICKS` (3 s): half speed (`PIN_SPEED`), a quarter longer between shots
+(`PIN_RELOAD`). `World.pinned` holds it, hashed only while it runs.
+
+**The first setting was too strong.** Tank 60 at 4.5 let three tanks beat 24 squads at
+half their cost and broke `formations.test.ts` (25 points of squads and missile teams
+against 5 tanks): the defenders won 5 seeds of 16, 10 before. At 30 and 3.5 they win 9.
+The burst is what catches missile teams standing among the squads, so that test is the
+one that sets the number.
+
+Measured on open ground (`tools/pointduel.ts`, before to after, survivors):
+
+- 1 tank vs 5 squads: squads win with 2, now the tank wins.
+- 3 tanks vs 15 squads (equal army points): squads won with 8, now the tanks win with 1.
+- 3 tanks vs 24 squads (half the tanks' cost): squads 21 left, now 18.
+- 3 tanks vs 11 squads and 4 missile teams (equal points): 12 left, now 10.
+- 4 tanks and 12 squads vs 32 squads: the squads won with 16, now the tanks' side wins with 4.
+- 4 tanks and 12 squads vs 20 squads and 6 missile teams: 15 left, now 7.
+- Equal cost, one kind each (`tools/matchups.ts`): squads beat tanks with 91% of their
+  worth left, now 75%.
+- 2 helicopters vs 12 squads: 65 s to kill them, now 49 s; vs 24 squads 237 s, now 149 s.
+- 30 squads vs 30 squads: 75 s, now 87 s (both sides pinned).
+
+So tanks are worth having against infantry in the open and still lose to the same money
+in squads, and missile teams remain the answer. Three 30-minute hard-vs-hard games (city,
+seeds 1 to 3) still field 0 to 5 tanks among 500 to 800 points and no side stalls.
+
+Pinned tests moved on purpose: `assault.test.ts` allows 6 lost (5) against three tanks
+and 19 of 39 (14) against five tanks in the city, since streets under tank guns are open
+ground; `formations.test.ts` asks for more than 5 defenders left (10). New
+`tests/blast.test.ts`. Golden hash 2037256287, golden games re-pinned.
+
+The screen (client only): men killed by a burst are thrown from it through the I1 path,
+with a small flash, thrown earth and a scar; a pinned squad lies flat.
+
+Not done: the computer does not yet avoid open ground or spread out under armour; no
+suppression from vehicle machine guns; the unit card does not name the machine gun.

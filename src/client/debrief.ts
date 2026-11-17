@@ -85,7 +85,7 @@ export class Debrief {
     const flags = teams.map((t) => s.townOwner.reduce((n, o) => n + (o === t ? 1 : 0), 0));
     const civ = teams.map((t) => s.civStats[3 + t] ?? 0);
     const civAll = civ.reduce((a, b) => a + b, 0);
-    // The score is kept for the first three armies.
+    // The score is kept for all four armies.
     const stat = (t: number, k: number): string =>
       t < STAT_TEAMS ? (st[STAT_STRIDE * t + k] ?? 0).toLocaleString('en-US') : '–';
     const row = (label: string, cells: (number | string)[]): string =>
@@ -118,7 +118,7 @@ export class Debrief {
       `</div>` +
       `<p class="sub" style="font-size:13px;margin-top:16px">${st[STAT_RAZED]} city buildings were brought down. Of ${s.civStats[0]} civilians, ` +
       `${s.civStats[2]} got out of the town and ${civAll} were killed.` +
-      `${teams.some((t) => t >= STAT_TEAMS) ? ' The score does not count the fourth army yet.' : ''}</p></div>`;
+      `</p></div>`;
     const players = this.players();
     if (players.length > 1) {
       // The most valuable player: whose units destroyed the most, by army points; a tie

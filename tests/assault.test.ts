@@ -144,7 +144,8 @@ describe("a commander's attack on armour in a town", () => {
     );
     expect(r.seconds).toBeGreaterThan(0);
     expect(r.left).toBe(0);
-    expect(r.lost).toBeLessThanOrEqual(5);
+    // (One more than before I3: a tank round now catches the team beside the one it hits.)
+    expect(r.lost).toBeLessThanOrEqual(6);
   }, 60000);
 
   it('takes a quarter of the city from tanks and fighting vehicles', () => {
@@ -170,6 +171,7 @@ describe("a commander's attack on armour in a town", () => {
     );
     expect(r.seconds).toBeGreaterThan(0);
     expect(r.left).toBe(0);
-    expect(r.lost).toBeLessThanOrEqual(14);
+    // (14 before I3. Streets under five tank guns are open ground: 19 of 39 points now.)
+    expect(r.lost).toBeLessThanOrEqual(19);
   }, 60000);
 });

@@ -622,6 +622,7 @@ async function start(): Promise<void> {
     : null;
   if (frontOverlay) scene.add(frontOverlay.mesh);
   minimap.front = front;
+  minimap.routes = () => routes.polylines();
   let frontAt = -1e9;
   minimap.commanders = () =>
     board.info

@@ -462,7 +462,7 @@ const GLASS = 0x1c2428;
  * otherwise the fat-bodied transport with a sliding door. The rotor is the "turret", which
  * the unit renderer spins.
  */
-export function buildHelicopter(gunship: boolean): VehicleModel {
+function helicopterParts(gunship: boolean): THREE.BufferGeometry[] {
   const wid = gunship ? 0.62 : 1.05;
   const tall = gunship ? 0.8 : 1.0;
   const parts = [
@@ -497,6 +497,13 @@ export function buildHelicopter(gunship: boolean): VehicleModel {
       box(wid + 0.04, 0.1, 0.5, { at: [0, 0.05, -0.75], team: 1 }),
     );
   }
+  return parts;
+}
+
+export function buildHelicopter(gunship: boolean): VehicleModel {
+  const wid = gunship ? 0.62 : 1.05;
+  const tall = gunship ? 0.8 : 1.0;
+  const parts = helicopterParts(gunship);
   const g = merge(parts);
   const span = gunship ? 4.6 : 5.2;
   const rotor = merge([
@@ -518,6 +525,47 @@ export function buildHelicopter(gunship: boolean): VehicleModel {
     muzzleY: -tall / 2 - 0.9,
     muzzleZ: 1.2,
   };
+}
+
+/**
+ * A helicopter that came down (visual only; it stays for the rest of the game). Three ways
+ * to lie, each the airframe itself turned over or nose-first into the ground, with the tail
+ * boom snapped, the rotor gone and a bent blade lying alongside. Built from the flying
+ * model's own parts, so the paint and the wear match; the burn material scorches it.
+ */
+export function buildHelicopterWrecks(gunship: boolean): THREE.BufferGeometry[] {
+  const wid = gunship ? 0.62 : 1.05;
+  const pose = (roll: number, pitch: number, yaw: number, snapTail: boolean) => {
+    const parts = helicopterParts(gunship);
+    // The tail (boom is part 3, fin 4, stabiliser 5, tail rotor disc 6) is thrown clear of the
+    // fuselage when the boom snaps.
+    const air = merge(snapTail ? [...parts.slice(0, 3), ...parts.slice(7)] : parts.slice());
+    let tail: THREE.BufferGeometry | null = null;
+    if (snapTail) {
+      tail = merge(parts.slice(3, 7));
+      tail.rotateY(0.55);
+      tail.rotateZ(0.3);
+      tail.translate(wid * 0.9, 0.05, -0.2);
+    }
+    const blades = merge([
+      box(2.1, 0.03, 0.18, { at: [0, 0, 0], rot: [0.0, 0.3, 0.12], color: RUBBER }),
+      box(1.4, 0.03, 0.18, { at: [0.9, 0, -1.1], rot: [0.1, -0.9, 0], color: RUBBER }),
+    ]);
+    blades.translate(-wid * 1.7, 0.07, 0.4);
+    const all = mergeGeometries([air, ...(tail ? [tail] : []), blades]);
+    all.applyMatrix4(
+      new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ')),
+    );
+    all.computeBoundingBox();
+    // Sits on the ground with a little of it sunk in.
+    all.translate(0, 0.03 - all.boundingBox!.min.y, 0);
+    return all;
+  };
+  return [
+    pose(1.42, 0.12, 0.4, false), // on its side
+    pose(0.1, 0.62, -0.5, true), // nose into the ground, tail snapped off
+    pose(-0.18, -0.12, 1.1, true), // upright and broken, tilted on a skid
+  ];
 }
 
 /** A four-engined transport plane with a high wing and a tall tail. */

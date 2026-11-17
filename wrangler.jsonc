@@ -1,0 +1,10 @@
+{
+  // Serves the built game (dist/) as plain static files on Cloudflare Workers.
+  // Cloudflare's GitHub integration runs `npm run build` then `npx wrangler deploy`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "revolution",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+  },
+}
