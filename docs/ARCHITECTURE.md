@@ -191,8 +191,16 @@ again and runs `military`. A think costs about 0.02 ms per tick on average.
   every seven cells so it never shuts the AI's own army in. In `assault`, engineers and
   guns are sent against the nearest standing enemy work on the way to the objective
 
+- `takeCover` (decision 147, Normal and Hard): on the march, in the assault, in the reserve
+  and on a retreat, men on foot within reach of a known enemy tank, fighting vehicle or
+  gunship go into the nearest house or ruin and on from house to house; `spreadOut` steps
+  halted squads apart where there is no cover. The callers leave whoever it returns out
+  of their orders for that think
+
 `tools/aimatch.ts` plays AI against AI without a browser and prints a line a minute; it is
 the way to test a change to the AI or to prices (a 40-minute game takes a few seconds).
+`tools/assaults.ts` runs one commander's attack on a held place over many fights and seeds
+and prints the army points it cost: the yardstick for a change to how the line goes in.
 
 ## Commands
 

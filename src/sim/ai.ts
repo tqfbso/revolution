@@ -55,6 +55,7 @@ import {
   CELL_FX,
   CELL_SHIFT,
   CLASS_AIR,
+  CLASS_FOOT,
   CLASS_VEHICLE,
   MAP_CELLS,
   MAX_SITES,
@@ -68,6 +69,7 @@ import {
   T_FORD,
   T_FOREST,
   T_OPEN,
+  T_RUBBLE,
   T_SANDBAG,
   T_WATER,
   canPlace,
@@ -122,6 +124,7 @@ import {
   FLAG_AMOVE,
   FLAG_MOVING,
   FLAG_SIEGE,
+  FLAG_STORM,
   JOB_BUILD,
   JOB_NONE,
   MAP_SIZE,
@@ -222,6 +225,11 @@ interface Tuning {
   paras: number;
   dropFrom: number;
   dropEvery: number;
+  /**
+   * Its men keep out of the open under enemy armour and gunships (decision 147): into
+   * houses and ruins, from house to house, spread out where there is neither.
+   */
+  cover: boolean;
 }
 
 export const MINUTE = 60 * TICK_RATE;
@@ -268,6 +276,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     paras: 0,
     dropFrom: 0,
     dropEvery: 0,
+    cover: false,
   },
   // Decision 070: Fabio found this level too hard. It now keeps a small army, holds only
   // its gate town and one more until it has attacked once, attacks late with what its
@@ -314,6 +323,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     paras: 0,
     dropFrom: 0,
     dropEvery: 0,
+    cover: false,
   },
   // Decision 096: Fabio's group found this level far too hard. It had been the computer at
   // full stretch (an army at the 800 point cap by minute 20, seven times easy's), which left
@@ -359,6 +369,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     paras: 4,
     dropFrom: 15 * MINUTE,
     dropEvery: 6 * MINUTE,
+    cover: true,
   },
   hard: {
     period: 20,
@@ -399,6 +410,7 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     paras: 8,
     dropFrom: 9 * MINUTE,
     dropEvery: 4 * MINUTE,
+    cover: true,
   },
 };
 
@@ -601,6 +613,10 @@ export interface Ai {
   attacks: number;
   /** One line on what it is up to, for tests and the debug overlay. */
   plan: string;
+  /** Per unit: the tick until which it keeps to the cover it took from armour or gunships. */
+  hide: Int32Array;
+  /** Per unit: the tick until which it goes on in the open, having found no cover ahead. */
+  dash: Int32Array;
 }
 
 const scratch = new Int32Array(CC);
@@ -725,6 +741,8 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     aboard: new Array<number>(2 + MAX_PROBES).fill(0),
     attacks: 0,
     plan: '',
+    hide: new Int32Array(MAX_UNITS),
+    dash: new Int32Array(MAX_UNITS),
   };
   seedRng(ai.rng, (seed ^ Math.imul(team + 1, 0x51ed27)) | 0);
   return ai;
@@ -1520,6 +1538,9 @@ function wantedMix(ai: Ai, w: World): void {
     3 * foe[KIND_PLANE];
   let dug = 0;
   for (let s = 0; s < w.map.structCount; s++) if (ai.occupied[s] > w.tick && w.sHp[s] > 0) dug++;
+  // Tanks kill men in the open (I3) and missile teams are what stops them: every tank it
+  // has seen is answered, whatever else the enemy fields.
+  want[KIND_ATGM] += Math.min(12, 3 * foe[KIND_TANK]);
   if (armour > foot && armour >= 4) {
     // Armour: missiles from cover, and drones on its roof.
     want[KIND_ATGM] += 10;
@@ -2260,7 +2281,10 @@ function runReserve(ai: Ai, w: World, out: Command[]): void {
   // A slow commander: the intrusion has to last a while before anyone is sent.
   if (a !== null && w.tick - ai.alarmSince < (a.base ? ai.tune.react >> 1 : ai.tune.react))
     a = null;
-  const units = ai.reserve.filter((i) => w.kind[i] !== KIND_STRIKE || a !== null);
+  const hidden = takeCover(ai, w, out, ai.reserve, a?.x ?? ai.stageX, a?.y ?? ai.stageY);
+  const units = ai.reserve.filter(
+    (i) => (w.kind[i] !== KIND_STRIKE || a !== null) && !hidden.has(i),
+  );
   if (a !== null && (a.base || strength(w, ai.reserve) * 100 >= a.threat * 70)) {
     const go = units.filter(
       (i) =>
@@ -2271,7 +2295,7 @@ function runReserve(ai: Ai, w: World, out: Command[]): void {
     order(out, CMD_ATTACK_MOVE, go, a.x, a.y);
     return;
   }
-  const back = ai.reserve.filter(
+  const back = units.filter(
     (i) =>
       (w.flags[i] & FLAG_MOVING) === 0 &&
       w.attack[i] === NO_TARGET &&
@@ -2687,7 +2711,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
         (w.flags[i] & FLAG_MOVING) === 0 &&
         dist(w.posX[i], w.posY[i], ai.stageX, ai.stageY) > fx(40),
     );
-    order(out, CMD_MOVE, lost, ai.stageX, ai.stageY);
+    fallBack(ai, w, out, lost, ai.stageX, ai.stageY);
     return;
   }
   // Break off: too little left, the enemy in front too strong, or the base calling.
@@ -2701,7 +2725,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
     (a !== null && a.base && a.threat * 2 > 3 * strength(w, ai.reserve) + 20)
   ) {
     retreat(ai, f, w, true);
-    order(out, CMD_MOVE, units, ai.stageX, ai.stageY);
+    fallBack(ai, w, out, units, ai.stageX, ai.stageY);
     if (!probe) ai.plan = raid ? 'raid breaks off' : 'army falls back';
     return;
   }
@@ -2757,7 +2781,7 @@ function runForce(ai: Ai, w: World, out: Command[], which: number): void {
             ai.plan = 'army takes another crossing';
           } else {
             retreat(ai, f, w, true);
-            order(out, CMD_MOVE, units, ai.stageX, ai.stageY);
+            fallBack(ai, w, out, units, ai.stageX, ai.stageY);
             ai.plan = 'army will not cross';
             return;
           }
@@ -2828,8 +2852,9 @@ export function marchOrders(
   if (boarding) {
     for (const i of units) if ((w.flags[i] & FLAG_BOARD) !== 0) awaited.add(w.orderUnit[i]);
   }
+  const hidden = takeCover(ai, w, out, units, tx, ty);
   const line = units.filter((i) => {
-    if (!LINE[w.kind[i]] || busy?.has(i)) return false;
+    if (!LINE[w.kind[i]] || busy?.has(i) || hidden.has(i)) return false;
     if ((w.flags[i] & FLAG_BOARD) !== 0) return !boarding;
     if (awaited.has(i)) return false;
     return (
@@ -2907,6 +2932,270 @@ export function follow(
     const far = strikes.filter((i) => dist(w.posX[i], w.posY[i], bx, by) > fx(22));
     order(out, CMD_MOVE, far, bx, by);
   }
+}
+
+// ---------------------------------------------------------------- cover (decision 147)
+
+/**
+ * The guns that kill men in the open (I3): from how far off each kind is feared. A tank
+ * round or a gunship's rockets burst among squads, an autocannon mows them down. A little
+ * more than the weapon reaches, more again for what flies, since it closes fast.
+ */
+const DREAD = KINDS.map((k, id) =>
+  id === KIND_TANK || id === KIND_IFV ? k.range + fx(8) : id === KIND_HELI ? k.range + fx(14) : 0,
+);
+/** How far men go for a house or a ruin: this many cells either way. */
+const COVER_CELLS = 3;
+/** They keep to a house this long, then make for the next one nearer the objective. */
+const HIDE_TICKS = 20 * TICK_RATE;
+/** With no house ahead they go on in the open for this long before they look again. */
+const DASH_TICKS = 30 * TICK_RATE;
+const coverIn = new Map<number, number>();
+
+/** A standing house within reach of unit `i` with room for it, or -1. With `ahead`, only one nearer (tx, ty). */
+function houseNear(ai: Ai, w: World, i: number, tx: number, ty: number, ahead: boolean): number {
+  const map = w.map;
+  const x = w.posX[i];
+  const y = w.posY[i];
+  const cx = x >> CELL_SHIFT;
+  const cy = y >> CELL_SHIFT;
+  const own = w.inside[i];
+  const from = dist(x, y, tx, ty);
+  let best = -1;
+  let bestD = 0;
+  for (let gy = cy - COVER_CELLS; gy <= cy + COVER_CELLS; gy++) {
+    if (gy < 0 || gy >= MAP_CELLS) continue;
+    for (let gx = cx - COVER_CELLS; gx <= cx + COVER_CELLS; gx++) {
+      if (gx < 0 || gx >= MAP_CELLS) continue;
+      const s = map.structAt[gy * MAP_CELLS + gx];
+      if (s < 0 || s === own || s === best || map.sKind[s] !== S_BUILDING) continue;
+      if (w.sHp[s] * 3 < map.sMaxHp[s] || ai.occupied[s] > w.tick) continue;
+      if (w.sOcc[s] > 0 && w.sOccTeam[s] !== ai.team) continue;
+      const room = Math.min(map.sW[s] * map.sH[s], GARRISON_MAX);
+      if (w.sOcc[s] + (coverIn.get(s) ?? 0) >= room) continue;
+      const sx = structX(map, s);
+      const sy = structY(map, s);
+      const to = dist(sx, sy, tx, ty);
+      if (ahead && to + fx(4) > from) continue;
+      // Out of the open: the nearest. From house to house: the longest bound forward.
+      const d = ahead ? to : dist(sx, sy, x, y);
+      if (best < 0 || d < bestD) {
+        best = s;
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}
+
+/** The nearest cell of rubble, trench or sandbags within reach of unit `i`, or -1. */
+function ruinNear(w: World, i: number): number {
+  const map = w.map;
+  const cx = w.posX[i] >> CELL_SHIFT;
+  const cy = w.posY[i] >> CELL_SHIFT;
+  let best = -1;
+  let bestD = 0;
+  for (let gy = cy - COVER_CELLS; gy <= cy + COVER_CELLS; gy++) {
+    if (gy < 0 || gy >= MAP_CELLS) continue;
+    for (let gx = cx - COVER_CELLS; gx <= cx + COVER_CELLS; gx++) {
+      if (gx < 0 || gx >= MAP_CELLS) continue;
+      const c = gy * MAP_CELLS + gx;
+      if (map.type[c] !== T_RUBBLE && !isCoverCell(map, c)) continue;
+      const d = (gx - cx) * (gx - cx) + (gy - cy) * (gy - cy);
+      if (best < 0 || d < bestD) {
+        best = c;
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Open ground kills (I3), so men on foot keep out of it while an enemy tank, fighting
+ * vehicle or gunship the army knows of is within reach of them: into the nearest standing
+ * house, failing that onto rubble or into a field work. From there they fight on. A
+ * house is held for HIDE_TICKS, then they bound to the next one nearer (tx, ty); with none
+ * ahead they go on in the open for DASH_TICKS, which is what keeps an attack from sitting
+ * down for good in front of a tank nobody can reach. Returns the units that are in cover
+ * or on their way to it: whoever called leaves them out of his orders for this think.
+ */
+export function takeCover(
+  ai: Ai,
+  w: World,
+  out: Command[],
+  units: readonly number[],
+  tx: number,
+  ty: number,
+): Set<number> {
+  const held = new Set<number>();
+  if (!ai.tune.cover) return held;
+  const guns: number[] = [];
+  for (const e of ai.seen) if (DREAD[w.kind[e]] > 0) guns.push(e);
+  if (guns.length === 0) return held;
+  const map = w.map;
+  const tick = w.tick;
+  coverIn.clear();
+  for (const i of units) {
+    if (w.inside[i] < 0 && (w.flags[i] & FLAG_GARRISON) !== 0) {
+      coverIn.set(w.orderStruct[i], (coverIn.get(w.orderStruct[i]) ?? 0) + 1);
+    }
+  }
+  const batches = new Map<number, number[]>();
+  // In danger and in the open, with nowhere to go.
+  const open: number[] = [];
+  const enter = (i: number, s: number) => {
+    coverIn.set(s, (coverIn.get(s) ?? 0) + 1);
+    const list = batches.get(s);
+    if (list) list.push(i);
+    else batches.set(s, [i]);
+    ai.hide[i] = tick + HIDE_TICKS;
+    held.add(i);
+  };
+  for (const i of units) {
+    const kind = kindOf(w, i);
+    if (kind.cls !== CLASS_FOOT || !kind.garrison) continue;
+    const flags = w.flags[i];
+    if ((flags & (FLAG_BOARD | FLAG_STORM | FLAG_BREACH | FLAG_SIEGE)) !== 0) continue;
+    const at = w.inside[i];
+    if (at < 0 && (flags & FLAG_GARRISON) !== 0) {
+      // On its way into a house already.
+      held.add(i);
+      continue;
+    }
+    const x = w.posX[i];
+    const y = w.posY[i];
+    // A missile team is the answer to armour, not its prey: it hides only from gunships.
+    const hunter = w.kind[i] === KIND_ATGM;
+    let danger = false;
+    let above = false;
+    for (const e of guns) {
+      if (dist(x, y, w.posX[e], w.posY[e]) < DREAD[w.kind[e]]) {
+        danger = true;
+        if (w.kind[e] === KIND_HELI) above = true;
+      }
+    }
+    if (!danger) continue;
+    if (tick < ai.dash[i] || (hunter && !above)) {
+      if (at < 0) open.push(i);
+      continue;
+    }
+    if (at >= 0) {
+      // (Nobody outruns a gunship: under one they stay where they are while the walls hold.)
+      if ((above || tick < ai.hide[i]) && w.sHp[at] * 3 >= map.sMaxHp[at]) {
+        held.add(i);
+        continue;
+      }
+      const s = houseNear(ai, w, i, tx, ty, true);
+      if (s >= 0) enter(i, s);
+      else ai.dash[i] = tick + DASH_TICKS;
+      continue;
+    }
+    const s = houseNear(ai, w, i, tx, ty, false);
+    if (s >= 0) {
+      enter(i, s);
+      continue;
+    }
+    const here = cellAt(x, y);
+    if (map.type[here] === T_RUBBLE || isCoverCell(map, here)) {
+      if (ai.hide[i] <= tick - HIDE_TICKS) ai.hide[i] = tick + HIDE_TICKS;
+      if (tick < ai.hide[i]) held.add(i);
+      else ai.dash[i] = tick + DASH_TICKS;
+      continue;
+    }
+    const c = ruinNear(w, i);
+    if (c < 0) {
+      open.push(i);
+      continue;
+    }
+    held.add(i);
+    if ((flags & FLAG_MOVING) === 0 || cellAt(w.targetX[i], w.targetY[i]) !== c) {
+      out.push({ type: CMD_MOVE, units: [i], x: cellX(c), y: cellY(c) });
+    }
+  }
+  for (const [structure, list] of batches) out.push({ type: CMD_GARRISON, units: list, structure });
+  spreadOut(w, out, units, open);
+  return held;
+}
+
+/** Men in the open under those guns stand at least this far from the next squad. */
+const SPREAD = fx(4.5);
+/** How far a squad steps aside to get there. */
+const SPREAD_STEP = fx(4);
+
+/**
+ * With no cover to go to, the next best thing is not to stand in a bunch: one burst then
+ * catches one squad, not four (a tank round reaches 3.5, a march formation stands 2.6
+ * apart). Of `open`, the squads that have stopped with another of `units` on foot too
+ * close step away from it. They shoot as they go.
+ */
+function spreadOut(
+  w: World,
+  out: Command[],
+  units: readonly number[],
+  open: readonly number[],
+): void {
+  if (open.length === 0) return;
+  const map = w.map;
+  const foot = units.filter((j) => kindOf(w, j).cls === CLASS_FOOT && w.inside[j] < 0);
+  for (const i of open) {
+    // Halted: with no order, or stopped on its way to shoot.
+    if (w.velX[i] !== 0 || w.velY[i] !== 0) continue;
+    // A missile team with a vehicle in its sights has better things to do.
+    if (w.kind[i] === KIND_ATGM && w.attack[i] !== NO_TARGET && w.los[i] === 1) continue;
+    const x = w.posX[i];
+    const y = w.posY[i];
+    let px = 0;
+    let py = 0;
+    let crowd = 0;
+    for (const j of foot) {
+      if (j === i) continue;
+      const dx = x - w.posX[j];
+      const dy = y - w.posY[j];
+      if (dx >= SPREAD || dx <= -SPREAD || dy >= SPREAD || dy <= -SPREAD) continue;
+      const d = isqrt(dx * dx + dy * dy);
+      if (d >= SPREAD) continue;
+      crowd++;
+      if (d === 0) px += i < j ? -SPREAD : SPREAD;
+      else {
+        px += Math.trunc((dx * (SPREAD - d)) / d);
+        py += Math.trunc((dy * (SPREAD - d)) / d);
+      }
+    }
+    if (crowd === 0) continue;
+    const len = isqrt(px * px + py * py);
+    // Pushed equally from both sides: it is in the middle and the others make the room.
+    if (len < fx(0.5)) continue;
+    const gx = x + Math.trunc((px * SPREAD_STEP) / len);
+    const gy = y + Math.trunc((py * SPREAD_STEP) / len);
+    if (gx < 0 || gy < 0 || gx >= MAP_SIZE_FX || gy >= MAP_SIZE_FX) continue;
+    const c = cellAt(gx, gy);
+    // Only onto ground like the ground it stands on: no detours round a house or a river.
+    if (map.structAt[c] >= 0 || map.type[c] !== map.type[cellAt(x, y)]) continue;
+    out.push({ type: CMD_MOVE, units: [i], x: gx, y: gy });
+  }
+}
+
+/**
+ * Send `units` back to (x, y). Men on foot under an enemy tank's or a gunship's guns do
+ * not run across the open with their backs to it: they go back from house to house.
+ */
+export function fallBack(
+  ai: Ai,
+  w: World,
+  out: Command[],
+  units: readonly number[],
+  x: number,
+  y: number,
+): void {
+  const held = takeCover(ai, w, out, units, x, y);
+  order(
+    out,
+    CMD_MOVE,
+    units.filter((i) => !held.has(i)),
+    x,
+    y,
+  );
 }
 
 /** Engineers go in to lay charges on a house when the infantry is within this of it. */
@@ -3152,7 +3441,7 @@ function assault(
     }
     if (next === null) {
       retreat(ai, f, w, !done);
-      order(out, CMD_MOVE, units, ai.stageX, ai.stageY);
+      fallBack(ai, w, out, units, ai.stageX, ai.stageY);
       return;
     }
     f.launch = power;
@@ -3224,6 +3513,7 @@ export function press(
     gapD = d;
     gapCell = c;
   }
+  const hidden = takeCover(ai, w, out, units, tx, ty);
   const sappers: number[] = [];
   const shell: number[] = [];
   const line: number[] = [];
@@ -3268,7 +3558,7 @@ export function press(
       if (!busy) shell.push(i);
       continue;
     }
-    if (!LINE[kind]) continue;
+    if (!LINE[kind] || hidden.has(i)) continue;
     if ((flags & (FLAG_MOVING | FLAG_SIEGE)) !== 0 || w.attack[i] !== NO_TARGET) continue;
     if (dist(w.posX[i], w.posY[i], tx, ty) > fx(18)) line.push(i);
   }
@@ -3282,7 +3572,7 @@ export function press(
     const near: number[] = [];
     let going = 0;
     for (const i of units) {
-      if (!FOOT(w.kind[i]) || !kindOf(w, i).garrison || w.inside[i] >= 0) continue;
+      if (!FOOT(w.kind[i]) || !kindOf(w, i).garrison || w.inside[i] === point) continue;
       if ((w.flags[i] & FLAG_GARRISON) !== 0 && w.orderStruct[i] === point) going++;
       else if (dist(w.posX[i], w.posY[i], tx, ty) < fx(90)) near.push(i);
     }

@@ -27,6 +27,7 @@ import {
   createAi,
   dist,
   expect,
+  fallBack,
   follow,
   ceaseFire,
   ground,
@@ -361,7 +362,7 @@ function run(st: Staff, w: World, out: Command[], c: number): void {
     if (began) p.status = ST_FOCUS;
     else focus(w, out, p, tx, ty, false);
   } else if (f.state === F_RETREAT) {
-    fallingBack(w, out, p);
+    fallingBack(st.ai, w, out, p);
   } else if (p.regroup) {
     regrouping(st, w, out, c, power, cx, cy);
   } else if (f.state === F_MARCH) {
@@ -773,7 +774,7 @@ function breakOff(ai: Ai, w: World, out: Command[], p: Post, cx: number, cy: num
   f.state = F_RETREAT;
   f.since = w.tick;
   p.status = ST_FALLBACK;
-  order(out, CMD_MOVE, units.slice(), p.backX, p.backY);
+  fallBack(ai, w, out, units, p.backX, p.backY);
   let foe = -1;
   let foeD = fx(120);
   for (const e of ai.seen) {
@@ -795,7 +796,7 @@ function breakOff(ai: Ai, w: World, out: Command[], p: Post, cx: number, cy: num
   });
 }
 
-function fallingBack(w: World, out: Command[], p: Post): void {
+function fallingBack(ai: Ai, w: World, out: Command[], p: Post): void {
   const f = p.f;
   const units = p.units;
   p.status = ST_FALLBACK;
@@ -815,7 +816,7 @@ function fallingBack(w: World, out: Command[], p: Post): void {
       !(smoking && (w.flags[i] & FLAG_BOMBARD) !== 0) &&
       dist(w.posX[i], w.posY[i], p.backX, p.backY) > fx(40),
   );
-  order(out, CMD_MOVE, lost, p.backX, p.backY);
+  fallBack(ai, w, out, lost, p.backX, p.backY);
 }
 
 /**
