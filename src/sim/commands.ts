@@ -406,7 +406,7 @@ export interface StyleCommand {
 }
 
 /**
- * How `units` move from now on (SHAPE_* in formations.ts; decision 147): 0, Auto, lets the
+ * How `units` move from now on (SHAPE_* in formations.ts; decision 148): 0, Auto, lets the
  * ground and the army's doctrine decide; any other shape is kept on every move until it is
  * changed. It takes effect with their next move order.
  */

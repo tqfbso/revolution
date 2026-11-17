@@ -18,9 +18,9 @@ describe('golden games', () => {
       'bee2d379',
       '9f65d1ef',
       '5d80608d',
-      'a2a07329',
-      '546913aa',
-      '72c0296a',
+      'aa84ceec',
+      '85ab7729',
+      'ae05bd9c',
     ]);
     // A pinned game that never reaches the fighting would pin very little.
     expect(alive).toBeGreaterThan(200);
@@ -29,7 +29,7 @@ describe('golden games', () => {
 
   it('four armies on the four corners map play out exactly as pinned', () => {
     const { marks, alive, deaths } = play('four', 4, 6);
-    expect(marks).toEqual(['f5ebb134', '2df90f69', '568a81b0', 'e8f77ae1', 'ccd185bd', '28173da5']);
+    expect(marks).toEqual(['82376386', 'a7ede2eb', '4f933630', '4fe783aa', '3d1a771e', 'cadfea58']);
     expect(alive).toBeGreaterThan(400);
     expect(deaths).toBeGreaterThan(100);
   });

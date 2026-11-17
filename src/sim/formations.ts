@@ -1,4 +1,4 @@
-// How a body of troops moves (I4, decision 147): the shape it marches in and keeps on the way.
+// How a body of troops moves (I4, decision 148): the shape it marches in and keeps on the way.
 //
 // A move order used to end in a block and promise nothing about the road there. Now every
 // order has a shape. On a street or into a town it is a convoy: the vehicles in file at a

@@ -3156,7 +3156,93 @@ spender is not known there yet), commanders that belong to a player in the sim (
 board remembers its own orders), and a role-first production screen beyond the marks on
 its rows.
 
-## 147. Formations and convoys: a shape for every move, kept on the way (2026-11-17)
+## 147. The computer keeps out of the open (2026-11-17)
+
+The follow-up decision 145 left open. Since I3 a tank round or a gunship's rockets burst
+among squads in the open, and the computer still walked its infantry up a street at five
+tanks in a block. Three things, all in what the computer orders (`takeCover` in `ai.ts`),
+none in the rules: no damage value and nothing about buildings changes.
+
+**Into the houses.** A squad on foot within reach of an enemy tank, fighting vehicle or
+attack helicopter its army knows of (the weapon's range and 8 m more, 14 m for a
+helicopter) goes into the nearest standing house with room, within three cells of it;
+failing that onto rubble, into a trench or behind sandbags. It fights from there. After 20
+seconds it bounds to the next house nearer the objective. With none ahead it goes on in
+the open for 30 seconds before it looks again, so an attack never sits down for good in
+front of a tank nobody can reach. Under a gunship it stays in while the walls hold:
+nobody outruns a helicopter. This runs on the march, in the assault, for the reserve and
+on a retreat, which now goes back from house to house (`fallBack`) instead of across the
+open with its back to the guns.
+
+**Missile teams hunt.** They do not hide from armour: they are the answer to it, and they
+outrange it. They do go indoors from a gunship, which they cannot hurt. And the computer
+trains three more missile teams in a hundred units for every tank it has seen (at most
+twelve), whatever else the enemy fields; before, only an enemy that was mostly armour got
+that answer.
+
+**Apart where there is no house.** A squad halted in the open under those guns with
+another closer than 4.5 m steps 4 m away from it (`spreadOut`): a tank round reaches 3.5
+and a march formation stands 2.6 apart. A missile team with a vehicle in its sights
+stays put.
+
+Normal and Hard only (`Tuning.cover`); Easy and Recruit fight as before, so the easy
+levels get no harder. The player's commanders use the computer's assault and march, so
+their squads do the same.
+
+Measured with `tools/assaults.ts` (new): one commander against a held place, 14 fights by
+4 seeds, army points lost, before to after:
+
+| Fight (seed 3)                                              | Before          | After         |
+| ----------------------------------------------------------- | --------------- | ------------- |
+| Hill town, 2 tanks + 3 squads                               | 3 of 18         | 1             |
+| Hill town from far off, 3 tanks                             | 6 of 17         | 2             |
+| Hill town, 2 gunships + 4 squads                            | 19 of 19, lost  | 5, taken      |
+| Open country, 3 tanks + 5 squads                            | 4 of 21         | 4             |
+| Open country, 2 gunships + 3 squads                         | 18 of 19, lost  | 5, taken      |
+| City quarter, 3 tanks + 6 squads                            | 4 of 33         | 1             |
+| City quarter, 2 tanks + 2 fighting vehicles + 6 squads      | 3 of 33         | 0             |
+| City, 5 tanks + 6 squads + 2 missile teams (the pinned one) | 19 of 39, 256 s | 3, 101 s      |
+| The same with no tanks of its own                           | 14 of 35        | 11            |
+| City, 2 gunships + 2 tanks + 6 squads                       | 28 of 29, lost  | 17, not taken |
+
+All 56 fights: 516 points lost before, 208 after; 12 places not taken before, 3 after (all
+three the last row: infantry with nothing that can shoot a helicopter down holds out in
+the houses and does not take the place, which is right).
+
+What was tried and left out, in the manner of decision 109:
+
+- **Missile teams hiding from tanks like the squads.** In a house without a line of
+  sight they shot at nothing and the commander broke off beaten (the pinned city fight
+  went from 3 lost to 8, and one seed of it was lost outright).
+- **Idle missile teams sent straight at the nearest known vehicle** rather than at the
+  objective with the line. No difference worth the code: 208 lost against 212. They
+  already stop and fire from furthest back.
+- **Stepping apart for missile teams that have a target.** In a street the step loses
+  the shot; the pinned city fight went from 3 lost to 11.
+- **Wider or narrower settings.** Two or four cells of reach, 12 or 35 seconds in a
+  house, more or less dread of a tank's range: all within a few points of each other.
+
+Full games, Hard against Hard on the city map, seeds 1 to 4, one side with the drill and
+one without (`NOCOVER=0` or `1` in `tools/aimatch.ts`): the side with it lost 7,600 army
+points in eight games, the side without 8,043, and each won two. Whole games swing on
+much else, and Hard fields few tanks; the drill does not stall them (with both sides using it two of
+four games were over in 19 minutes, with neither none was inside 30).
+
+`tests/cover.test.ts` is new. `tests/assault.test.ts`: the limits come down to 3, 4, 4
+and 9 points (6, 6, 7 and 19), and a gunship fight is pinned. One commander test lifted
+"the enemy army" away by the ids it had just added, three of which were the slots of dead
+raiders: three tanks stayed and hunted the commander, and the test passed by luck. It
+now lifts every enemy, and waits longer for squads that survive the retreat and walk home.
+The golden world hash does not move (no rule changed); the two golden games are re-pinned
+because the computers in them play differently.
+
+Not done: the drill cannot widen a formation on the move (spacing is a rule of the
+simulation and belongs to I4 Formations), so squads still march 2.6 m apart and step
+apart only once halted. Routes are not planned through cover: the men take the cover
+that is beside the route. The computer still attacks a place held by gunships without air
+defence of its own.
+
+## 148. Formations and convoys: a shape for every move, kept on the way (2026-11-17)
 
 I4 of the inspiration build order (136). Fabio's answers: convoy by default on roads and in
 towns, the army's doctrine in open ground, Auto by default with a Movement button on

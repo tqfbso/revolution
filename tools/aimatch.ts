@@ -6,7 +6,14 @@ import { B_HQ } from '../src/sim/economy';
 import { generateMap } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
-import { EV_FLARE, createWorld, hashWorld, NO_TEAM } from '../src/sim/world';
+import {
+  EV_FLARE,
+  NO_TEAM,
+  STAT_LOST_POINTS,
+  STAT_STRIDE,
+  createWorld,
+  hashWorld,
+} from '../src/sim/world';
 
 const seed = Number(process.argv[2] ?? 1);
 const minutes = Number(process.argv[3] ?? 20);
@@ -25,6 +32,11 @@ const humans = Number(process.env.HUMANS ?? 1);
 const ais = levels.map((l, t) =>
   l === 'off' ? null : createAi(t, l as AiLevel, seed, t === 1 ? humans : 1),
 );
+// NOCOVER=0, 1 or 01: those teams fights without the cover drill (decision 147), for comparisons.
+for (const t of process.env.NOCOVER ?? '') {
+  const ai = ais[Number(t)];
+  if (ai) ai.tune = { ...ai.tune, cover: false };
+}
 let cmds: Command[] = skirmishCommands(w.map);
 // NIGHT=1: a night battle.
 if (process.env.NIGHT) cmds.unshift({ type: CMD_NIGHT, on: true });
@@ -77,6 +89,9 @@ const air = [0, 1].map((t) => {
   return `t${t} helis ${n[0]}+${n[1]} of ${w.heliCap[t]}, paras ${n[2]} down ${w.paraReserve[t]} waiting`;
 });
 console.log(`air: ${air.join('; ')}`);
+console.log(
+  `army points lost: t0 ${w.stats[STAT_LOST_POINTS]}, t1 ${w.stats[STAT_STRIDE + STAT_LOST_POINTS]}`,
+);
 console.log(
   `civilians ${w.civCount}: killed ${Array.from(w.civKilled).join('/')} escaped ${w.civEscaped} home ${w.civState.filter((s) => s === 1).length}`,
 );

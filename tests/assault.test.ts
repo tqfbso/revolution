@@ -3,6 +3,10 @@
 // teams set an overwatch, the squads wait for it, tanks trail the squads in a town) and the
 // staged attack lost more in every one of 17 fights, so it was not built. These are five of
 // those fights, pinned with room to spare: a change to the attack has to do at least as well.
+//
+// Decision 147 is such a change: under enemy armour or gunships the squads go from house to
+// house and the missile teams hunt (see tests/cover.test.ts). The limits below are the
+// ones it earned; `tools/assaults.ts` runs these and more over several seeds.
 import { describe, expect, it } from 'vitest';
 import { CMD_ASSIGN, CMD_FOUND, CMD_MISSION, CMD_SPAWN, type Command } from '../src/sim/commands';
 import { fx } from '../src/sim/fixed';
@@ -13,6 +17,7 @@ import { ST_SECURED, createStaff, staffThink } from '../src/sim/staff';
 import {
   KIND_ATGM,
   KIND_DRONE,
+  KIND_HELI,
   KIND_IFV,
   KIND_INFANTRY,
   KIND_TANK,
@@ -26,6 +31,7 @@ const KIND = {
   tank: KIND_TANK,
   ifv: KIND_IFV,
   drone: KIND_DRONE,
+  heli: KIND_HELI,
 };
 type Mix = Partial<Record<keyof typeof KIND, number>>;
 
@@ -118,7 +124,7 @@ describe("a commander's attack on armour in a town", () => {
     );
     expect(r.seconds).toBeGreaterThan(0);
     expect(r.left).toBe(0);
-    expect(r.lost).toBeLessThanOrEqual(6);
+    expect(r.lost).toBeLessThanOrEqual(3);
   }, 60000);
 
   it('does not wait when there is no armour: eight squads cost it next to nothing', () => {
@@ -144,8 +150,8 @@ describe("a commander's attack on armour in a town", () => {
     );
     expect(r.seconds).toBeGreaterThan(0);
     expect(r.left).toBe(0);
-    // (One more than before I3: a tank round now catches the team beside the one it hits.)
-    expect(r.lost).toBeLessThanOrEqual(6);
+    // (6 after I3, when a tank round began to catch the team beside the one it hits.)
+    expect(r.lost).toBeLessThanOrEqual(4);
   }, 60000);
 
   it('takes a quarter of the city from tanks and fighting vehicles', () => {
@@ -158,7 +164,7 @@ describe("a commander's attack on armour in a town", () => {
     );
     expect(r.seconds).toBeGreaterThan(0);
     expect(r.left).toBe(0);
-    expect(r.lost).toBeLessThanOrEqual(7);
+    expect(r.lost).toBeLessThanOrEqual(4);
   }, 60000);
 
   it('breaks a heavy defence of five tanks in the city without losing half its strength', () => {
@@ -171,7 +177,21 @@ describe("a commander's attack on armour in a town", () => {
     );
     expect(r.seconds).toBeGreaterThan(0);
     expect(r.left).toBe(0);
-    // (14 before I3. Streets under five tank guns are open ground: 19 of 39 points now.)
-    expect(r.lost).toBeLessThanOrEqual(19);
+    // (14 before I3, 19 of 39 after it: streets under five tank guns are open ground. The
+    // squads now keep to the houses along them and it costs 3.)
+    expect(r.lost).toBeLessThanOrEqual(9);
+  }, 60000);
+
+  it('is not wiped out by two gunships over a hill town it has nothing to shoot down with', () => {
+    const r = assault(
+      'ridge',
+      'Westgate',
+      { inf: 14, atgm: 4, drone: 1 },
+      { heli: 2, inf: 4 },
+      near,
+    );
+    // (All 19 points before decision 147: it broke off and ran, across the open.)
+    expect(r.seconds).toBeGreaterThan(0);
+    expect(r.lost).toBeLessThanOrEqual(9);
   }, 60000);
 });

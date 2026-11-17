@@ -489,7 +489,10 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
       trench), and its fire pins infantry caught in the open (half speed, a quarter slower
       fire, three seconds). Measured against `tests/assault.test.ts`, `tools/pointduel.ts`
       and computer army mixes: equal cost in the open still goes to the squads.
-- [x] I4 Formations (decision 147). A Movement button on any selection (comma key) and on
+      Follow-up (decision 147): the computer on Normal and Hard, and the player's
+      commanders, keep their men out of the open under enemy armour and gunships: house to
+      house, apart where there is no house, missile teams hunting. `tools/assaults.ts`.
+- [x] I4 Formations (decision 148). A Movement button on any selection (comma key) and on
       every commander: Auto, Convoy, Wedge, Line, Vee, Echelon, Block. Auto is a convoy on
       roads and into towns (vehicles in file at a fixed gap, squads on both pavements, the
       first pair ahead of the lead vehicle, a tank closing the file when there are trucks)
