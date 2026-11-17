@@ -331,6 +331,8 @@ export class UnitView {
   private readonly shots = new Uint8Array(MAX_UNITS);
   /** Per unit: job | stance, see TASK_* in the protocol. */
   readonly task = new Uint8Array(MAX_UNITS);
+  /** Per unit: how it is told to move (SHAPE_*). */
+  readonly shape = new Uint8Array(MAX_UNITS);
   /** Per unit: the sub-commander it answers to, or -1. */
   readonly cmdr = new Int8Array(MAX_UNITS).fill(-1);
   /** Per unit: the player of a shared army whose it is, or NO_SEAT (decision 146). */
@@ -695,6 +697,7 @@ export class UnitView {
     this.kind.set(s.kind);
     this.load.set(s.load);
     this.task.set(s.task);
+    this.shape.set(s.shape);
     this.cmdr.set(s.cmdr);
     this.owner.set(s.owner);
     this.hp.set(s.hp);

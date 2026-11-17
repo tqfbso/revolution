@@ -2,11 +2,22 @@
 // commander, what each has been told to do, and what it is to be kept at. How a mission is
 // carried out is not decided here: that is the staff (src/sim/staff.ts), which reads this
 // table and hands in ordinary commands, exactly like a computer player does.
-import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, CMD_STYLE, type Command } from './commands';
+import {
+  CMD_ASSIGN,
+  CMD_MARCH,
+  CMD_MISSION,
+  CMD_REINFORCE,
+  CMD_SHAPE,
+  CMD_STYLE,
+  type Command,
+} from './commands';
+import { SHAPE_COUNT } from './formations';
 import { clampInt } from './fixed';
 import { KIND_COUNT } from './units';
 import {
   CF_AUTO,
+  CF_SHAPE_MASK,
+  CF_SHAPE_SHIFT,
   CF_STYLE_MASK,
   CF_STYLE_SHIFT,
   STYLE_ARMOUR,
@@ -122,6 +133,23 @@ export function applyCommanderCommand(w: World, cmd: Command): boolean {
       if (style < STYLE_TOGETHER || style > STYLE_ARMOUR) return true;
       const c = cmd.team * MAX_COMMANDERS + cmd.slot;
       w.cFlags[c] = (w.cFlags[c] & ~(CF_STYLE_MASK << CF_STYLE_SHIFT)) | (style << CF_STYLE_SHIFT);
+      return true;
+    }
+    case CMD_SHAPE: {
+      const shape = cmd.shape | 0;
+      if (shape < 0 || shape >= SHAPE_COUNT || !Array.isArray(cmd.units)) return true;
+      for (const raw of cmd.units) {
+        const id = raw | 0;
+        if (id >= 0 && id < w.count && w.state[id] === STATE_ALIVE) w.shape[id] = shape;
+      }
+      return true;
+    }
+    case CMD_MARCH: {
+      if (!validSlot(cmd.team, cmd.slot)) return true;
+      const shape = cmd.shape | 0;
+      if (shape < 0 || shape >= SHAPE_COUNT) return true;
+      const c = cmd.team * MAX_COMMANDERS + cmd.slot;
+      w.cFlags[c] = (w.cFlags[c] & ~(CF_SHAPE_MASK << CF_SHAPE_SHIFT)) | (shape << CF_SHAPE_SHIFT);
       return true;
     }
     default:

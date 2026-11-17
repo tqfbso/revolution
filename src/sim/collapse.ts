@@ -1,4 +1,4 @@
-// The ground floor and fire (I5, decision 147).
+// The ground floor and fire (I5, decision 150).
 //
 // A building's health is one number, and what hits it from far off or from above (shells,
 // rockets, a tank across the square) takes it off the top: the roof goes, then a storey at

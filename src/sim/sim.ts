@@ -32,6 +32,16 @@ import {
 } from './commands';
 import { applyEconomyCommand, dropBuilds, updateEconomy } from './economy';
 import { applyCommanderCommand } from './commanders';
+import {
+  SHAPE_BLOCK,
+  SHAPE_CONVOY,
+  arrangeConvoy,
+  arrangeShape,
+  commitMarch,
+  keepStation,
+  shapeFor,
+  station,
+} from './formations';
 import { applyAirCommand, updateAir } from './air';
 import { applyDemolishCommand, updateFelling } from './demolish';
 import {
@@ -1450,6 +1460,14 @@ function orderFormationMove(w: World, units: readonly number[], cx: number, cy: 
     projForward[id] = Math.trunc((dx * ux + dy * uy) / 1024);
     projSide[id] = Math.trunc((dy * ux - dx * uy) / 1024);
   }
+  const shape = shapeFor(w, units, cx, cy);
+  if (shape !== SHAPE_CONVOY && shape !== SHAPE_BLOCK) {
+    const guide = arrangeShape(w, units, shape, cx, cy, ux, uy, projForward, projSide);
+    for (let k = 0; k < n; k++) w.orderSpeed[units[k]] = slowest;
+    routeUnits(w, units, cx, cy);
+    commitMarch(w, units, guide, slowest);
+    return;
+  }
   order.sort((a, b) => w.kind[a] - w.kind[b] || projForward[b] - projForward[a] || a - b);
   let cols = isqrt(2 * n);
   if (cols * cols < 2 * n) cols++;
@@ -1469,6 +1487,10 @@ function orderFormationMove(w: World, units: readonly number[], cx: number, cy: 
     }
   }
   routeUnits(w, units, cx, cy);
+  // A convoy stops as a block does, and gets there in file.
+  if (shape === SHAPE_CONVOY) {
+    commitMarch(w, units, arrangeConvoy(w, units, projForward, projSide), slowest);
+  }
 }
 
 /**
@@ -1495,6 +1517,9 @@ function routeUnits(w: World, units: readonly number[], gx: number, gy: number):
     // The field itself is only built when a unit first needs it (see steer).
     w.goal[id] = map.snap[cls][goal];
     w.path[id] = -1;
+    // Whatever station it kept belonged to the order before this one.
+    w.march[id] = 0;
+    w.lead[id] = -1;
     const direct = clearLine(map, cls, w.posX[id], w.posY[id], tx, ty);
     w.flags[id] = (w.flags[id] & ~FLAG_DIRECT) | FLAG_MOVING | (direct ? FLAG_DIRECT : 0);
   }
@@ -1685,6 +1710,9 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.cargoKind[id] = 0;
   w.jobTimer[id] = 0;
   w.stance[id] = 0;
+  w.shape[id] = 0;
+  w.march[id] = 0;
+  w.lead[id] = -1;
   w.ration[id] = RATION_MAX;
   w.pinned[id] = 0;
   w.cmdr[id] = -1;
@@ -3248,89 +3276,96 @@ function steer(w: World): void {
     }
     if (!busy && (flags & FLAG_MOVING) !== 0) {
       const pace = w.orderSpeed[i] < s ? w.orderSpeed[i] : s;
-      const tx = w.targetX[i];
-      const ty = w.targetY[i];
-      if (((tick + i) & DIRECT_RECHECK_MASK) === 0) {
-        flags = clearLine(map, cls, x, y, tx, ty) ? flags | FLAG_DIRECT : flags & ~FLAG_DIRECT;
-        w.flags[i] = flags;
-      }
-      let field = -1;
-      let dir = -1;
-      if ((flags & FLAG_DIRECT) === 0) {
-        field = w.path[i];
-        if (field < 0) field = w.path[i] = acquireField(w, routeGoal(map, cls, w.goal[i]), cls);
-      }
-      if (field >= 0) {
-        dir = fieldDirection(w, cls, field, cell);
-        if (
-          w.fieldStale[field] !== 0 &&
-          (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0) &&
-          rebuildField(w, field)
-        ) {
-          dir = fieldDirection(w, cls, field, cell);
-        }
-        if (w.fieldStale[field] !== 0 && (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0)) {
-          // An old route has run into new ground: wait a tick for it to be redrawn.
-          field = FIELD_WAIT;
-        } else if (dir < 0) {
-          const own = map.snap[cls][w.goal[i]];
-          if (w.fieldGoal[field] !== own) {
-            // The end of the route the whole order shares: from here, its own way to its spot.
-            if (clearLine(map, cls, x, y, tx, ty)) {
-              flags |= FLAG_DIRECT;
-              w.flags[i] = flags;
-              field = -1;
-            } else {
-              field = w.path[i] = acquireField(w, own, cls);
-              if (field >= 0) dir = fieldDirection(w, cls, field, cell);
-            }
-          }
-        }
-      }
-      if (field === FIELD_WAIT) {
-        // vx and vy stay 0.
-      } else if (field < 0) {
-        const dx = tx - x;
-        const dy = ty - y;
-        const dist = isqrt(dx * dx + dy * dy);
-        if (dist <= pace) {
-          vx = dx;
-          vy = dy;
-          w.flags[i] = flags & ~(FLAG_MOVING | FLAG_AMOVE | FLAG_DIRECT);
-        } else {
-          vx = Math.trunc((dx * pace) / dist);
-          vy = Math.trunc((dy * pace) / dist);
-        }
+      // On a march that keeps a shape, its place in it comes before the route.
+      const kept = w.lead[i] >= 0 ? keepStation(w, i, cls, s, pace) : 0;
+      if (kept !== 0) {
+        vx = station.vx;
+        vy = station.vy;
       } else {
-        if (dir >= 0) {
-          vx = Math.trunc((DIR_X[dir] * pace) / 1024);
-          vy = Math.trunc((DIR_Y[dir] * pace) / 1024);
-          const next = cell + DIR_CELL[dir];
-          if (map.cost[cls][next] === 0) {
-            // The only way on is through a field work. An enemy's is breached by whoever
-            // can (the order goes on when it is down); the others wait at it. At one of
-            // its own army's the unit gives up: there is no gate.
-            if (map.workTeam[next] === w.team[i]) {
-              w.flags[i] = flags & ~(FLAG_MOVING | FLAG_AMOVE | FLAG_DIRECT);
-              vx = 0;
-              vy = 0;
-            } else if (
-              canBreach(kindOf(w, i), w.wKind[next]) &&
-              !kindOf(w, i).indirect &&
-              w.stance[i] !== STANCE_HOLD_FIRE
-            ) {
-              w.aimX[i] = ((next & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
-              w.aimY[i] = ((next >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
-              w.flags[i] = flags | FLAG_BREACH;
-            } else {
-              vx = 0;
-              vy = 0;
+        const tx = w.targetX[i];
+        const ty = w.targetY[i];
+        if (((tick + i) & DIRECT_RECHECK_MASK) === 0) {
+          flags = clearLine(map, cls, x, y, tx, ty) ? flags | FLAG_DIRECT : flags & ~FLAG_DIRECT;
+          w.flags[i] = flags;
+        }
+        let field = -1;
+        let dir = -1;
+        if ((flags & FLAG_DIRECT) === 0) {
+          field = w.path[i];
+          if (field < 0) field = w.path[i] = acquireField(w, routeGoal(map, cls, w.goal[i]), cls);
+        }
+        if (field >= 0) {
+          dir = fieldDirection(w, cls, field, cell);
+          if (
+            w.fieldStale[field] !== 0 &&
+            (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0) &&
+            rebuildField(w, field)
+          ) {
+            dir = fieldDirection(w, cls, field, cell);
+          }
+          if (w.fieldStale[field] !== 0 && (dir < 0 || map.cost[cls][cell + DIR_CELL[dir]] === 0)) {
+            // An old route has run into new ground: wait a tick for it to be redrawn.
+            field = FIELD_WAIT;
+          } else if (dir < 0) {
+            const own = map.snap[cls][w.goal[i]];
+            if (w.fieldGoal[field] !== own) {
+              // The end of the route the whole order shares: from here, its own way to its spot.
+              if (clearLine(map, cls, x, y, tx, ty)) {
+                flags |= FLAG_DIRECT;
+                w.flags[i] = flags;
+                field = -1;
+              } else {
+                field = w.path[i] = acquireField(w, own, cls);
+                if (field >= 0) dir = fieldDirection(w, cls, field, cell);
+              }
             }
           }
+        }
+        if (field === FIELD_WAIT) {
+          // vx and vy stay 0.
+        } else if (field < 0) {
+          const dx = tx - x;
+          const dy = ty - y;
+          const dist = isqrt(dx * dx + dy * dy);
+          if (dist <= pace) {
+            vx = dx;
+            vy = dy;
+            w.flags[i] = flags & ~(FLAG_MOVING | FLAG_AMOVE | FLAG_DIRECT);
+          } else {
+            vx = Math.trunc((dx * pace) / dist);
+            vy = Math.trunc((dy * pace) / dist);
+          }
         } else {
-          // At the field's goal with no clear line to the unit's own spot (or cut off from
-          // the goal altogether): this is as close as it gets.
-          w.flags[i] = flags & ~(FLAG_MOVING | FLAG_AMOVE | FLAG_DIRECT);
+          if (dir >= 0) {
+            vx = Math.trunc((DIR_X[dir] * pace) / 1024);
+            vy = Math.trunc((DIR_Y[dir] * pace) / 1024);
+            const next = cell + DIR_CELL[dir];
+            if (map.cost[cls][next] === 0) {
+              // The only way on is through a field work. An enemy's is breached by whoever
+              // can (the order goes on when it is down); the others wait at it. At one of
+              // its own army's the unit gives up: there is no gate.
+              if (map.workTeam[next] === w.team[i]) {
+                w.flags[i] = flags & ~(FLAG_MOVING | FLAG_AMOVE | FLAG_DIRECT);
+                vx = 0;
+                vy = 0;
+              } else if (
+                canBreach(kindOf(w, i), w.wKind[next]) &&
+                !kindOf(w, i).indirect &&
+                w.stance[i] !== STANCE_HOLD_FIRE
+              ) {
+                w.aimX[i] = ((next & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+                w.aimY[i] = ((next >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+                w.flags[i] = flags | FLAG_BREACH;
+              } else {
+                vx = 0;
+                vy = 0;
+              }
+            }
+          } else {
+            // At the field's goal with no clear line to the unit's own spot (or cut off from
+            // the goal altogether): this is as close as it gets.
+            w.flags[i] = flags & ~(FLAG_MOVING | FLAG_AMOVE | FLAG_DIRECT);
+          }
         }
       }
     }

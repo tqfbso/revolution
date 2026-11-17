@@ -14,12 +14,14 @@ const armies = Number(process.argv[2] ?? 4);
 const seed = Number(process.argv[3] ?? 1);
 const minutes = Number(process.argv[4] ?? 30);
 const level = (process.argv[5] ?? 'hard') as AiLevel;
+// ROT=n shifts which faction starts in which corner, to tell a faction from its corner.
+const rot = Number(process.env.ROT ?? 0);
 const w = createWorld(seed, generateMap(seed, 'four'));
 const ais = Array.from({ length: armies }, (_, t) => createAi(t, level, seed));
 let cmds: Command[] = [
   ...Array.from(
     { length: armies },
-    (_, t) => ({ type: CMD_FACTION, team: t, faction: 1 + (t % 3) }) as Command,
+    (_, t) => ({ type: CMD_FACTION, team: t, faction: 1 + ((t + rot) % 3) }) as Command,
   ),
   ...skirmishCommands(w.map, armies),
 ];
@@ -57,5 +59,5 @@ for (let i = 0; i < w.count; i++) {
   if (w.state[i] === STATE_ALIVE && w.team[i] < armies) army[w.team[i]] += POINTS[w.kind[i]];
 }
 console.log(
-  `four seed ${seed} x${armies}: towns ${towns.join(':')} army ${army.join(':')} lost ${lost.join(':')} fell ${fell.map((f) => f || '-').join(' ')} tick ${w.tick} hash ${hashWorld(w)} ${((Date.now() - start) / 1000).toFixed(0)}s`,
+  `four seed ${seed} rot ${rot} x${armies}: towns ${towns.join(':')} army ${army.join(':')} lost ${lost.join(':')} fell ${fell.map((f) => f || '-').join(' ')} tick ${w.tick} hash ${hashWorld(w)} ${((Date.now() - start) / 1000).toFixed(0)}s`,
 );

@@ -489,14 +489,20 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
       trench), and its fire pins infantry caught in the open (half speed, a quarter slower
       fire, three seconds). Measured against `tests/assault.test.ts`, `tools/pointduel.ts`
       and computer army mixes: equal cost in the open still goes to the squads.
-- [ ] I4 Formations. One button on any selection and on every commander. Default on roads
-      and streets: convoy (vehicles in file at fixed gaps, infantry on both pavements,
-      corners cleared before vehicles cross). Default in the open: the doctrine shape for
-      the ground (road march column, wedge in fields, line facing a known enemy, echelon
-      to an open flank, infantry first in woods, bounding overwatch near contact,
-      herringbone or coil at a halt). Any shape can be forced, convoy in a field included,
-      and commanders keep the shape they are given.
-- [x] I5 Ground-floor collapse and fire (decision 147). No floor orders. What hits a building
+      Follow-up (decision 147): the computer on Normal and Hard, and the player's
+      commanders, keep their men out of the open under enemy armour and gunships: house to
+      house, apart where there is no house, missile teams hunting. `tools/assaults.ts`.
+- [x] I4 Formations (decision 148). A Movement button on any selection (comma key) and on
+      every commander: Auto, Convoy, Wedge, Line, Vee, Echelon, Block. Auto is a convoy on
+      roads and into towns (vehicles in file at a fixed gap, squads on both pavements, the
+      first pair ahead of the lead vehicle, a tank closing the file when there are trucks)
+      and the army's doctrine in the open (alliance wedge, Russia line, China vee). Any
+      shape can be forced, convoy in a field included, and commanders keep the shape they
+      are given. The shape is kept on the way, not only at the end.
+      Not built yet from the first sketch: a line that turns to face a known enemy, echelon
+      chosen by the open flank, infantry first in woods, bounding overwatch near contact,
+      herringbone or coil at a halt (a convoy halts in the old block).
+- [x] I5 Ground-floor collapse and fire (decision 150). No floor orders. What hits a building
       from far off or from above (shells, rockets, a tank across the square) takes it from
       the top, as before. What hits it at arm's length (a tank within 8 of the wall,
       charges, a vehicle blowing up against it) takes the same health and the ground floor
