@@ -47,6 +47,9 @@ describe('building geometry', () => {
         same(farParts(parts));
       }
       same(rubbleParts(id, 10, 20, 11, 9, 1.5, 1 + (id % 5)));
+      // I5: a pancake, and a building with its ground floor burnt.
+      same(rubbleParts(id, 10, 20, 11, 9, 1.5, 1 + (id % 5), true));
+      same(buildingParts(id, 10, 20, 11, 9, 1.5, 1 + (id % 5), 0, 0, cls, false, 0, true));
     }
   });
 

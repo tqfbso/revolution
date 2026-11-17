@@ -496,12 +496,16 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
       to an open flank, infantry first in woods, bounding overwatch near contact,
       herringbone or coil at a halt). Any shape can be forced, convoy in a field included,
       and commanders keep the shape they are given.
-- [ ] I5 Ground-floor collapse and fire (rules). No floor orders: a garrison places itself.
-      Shells, mortars, rockets and air strikes hit the top floors; point-blank tank fire,
-      charges and vehicles blowing up against the wall hit the ground floor, a share of the
-      same health. When that share is gone the block pancakes. Fire climbs a floor at a
-      time and moves men down and out by itself. Average times to level stay where they
-      are (checked with `tools/toll.ts`).
+- [x] I5 Ground-floor collapse and fire (decision 147). No floor orders. What hits a building
+      from far off or from above (shells, rockets, a tank across the square) takes it from
+      the top, as before. What hits it at arm's length (a tank within 8 of the wall,
+      charges, a vehicle blowing up against it) takes the same health and the ground floor
+      too, which is three quarters of it: when the ground floor is gone the building
+      pancakes. A ground floor half gone is alight; the fire takes a floor every six
+      seconds, turns the garrison out unhurt when it has the whole house, and burns out
+      forty seconds later. Fire does no damage. Times to level from range and with charges
+      are to the second what they were (`tools/level.ts`); battles cost the city what they
+      did (`tools/toll.ts`, eight games before and after).
 - [ ] I6 Mortars, rooftops, ambush. A mortar team for every army (the one new kind of
       unit); a Roof order with reach and top attack on tanks, at the price of exposure; an
       ambush stance that holds fire until a vehicle enters a drawn zone.

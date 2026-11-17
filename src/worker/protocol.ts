@@ -88,6 +88,13 @@ export type ToWorker =
 
 /** In `structStage`: the building is fortified (sandbagged and loopholed). */
 export const STRUCT_FORTIFIED = 64;
+/**
+ * In `structFire` (I5): the floors alight in the low four bits, then the fire has burnt
+ * out, then the building came down as a pancake (its ground floor gave way).
+ */
+export const STRUCT_ALIGHT = 15;
+export const STRUCT_BURNT = 16;
+export const STRUCT_PANCAKE = 32;
 
 /** Simulation worker -> main thread, once per simulated tick batch. */
 export interface Snapshot {
@@ -119,6 +126,10 @@ export interface Snapshot {
    * face (FACE_*) whose wall has been breached, then STRUCT_FORTIFIED.
    */
   structStage: Uint8Array;
+  /** Per structure: fire and how it fell, see STRUCT_ALIGHT. */
+  structFire: Uint8Array;
+  /** Per building: what is left of its ground floor as 0..255 of that floor's own health. */
+  structGround: Uint8Array;
   /**
    * Surveillance cameras standing: four numbers each. Slot, x and z in world units, then
    * the owner's team in the low four bits with CAMERA_KNOWN and CAMERA_BLIND above.

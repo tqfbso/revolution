@@ -1,10 +1,11 @@
 // Runs the deterministic simulation at a fixed tick rate, off the main thread, so rendering
 // never waits on game logic and game logic never waits on rendering.
+import { FELL_PANCAKE, FIRE_OUT, floorsAlight } from '../sim/collapse';
 import type { Command } from '../sim/commands';
 import { createGame, type Game } from '../sim/match';
 import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
 import { fromFx } from '../sim/fixed';
-import { CELL_SHIFT, S_BUILDING } from '../sim/map';
+import { CELL_SHIFT, S_BUILDING, groundMax } from '../sim/map';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, unitPrice } from '../sim/economy';
 import { kindOf } from '../sim/factions';
 import { KINDS } from '../sim/units';
@@ -53,7 +54,10 @@ import {
   type NetMode,
   type Snapshot,
   type ToWorker,
+  STRUCT_ALIGHT,
+  STRUCT_BURNT,
   STRUCT_FORTIFIED,
+  STRUCT_PANCAKE,
 } from './protocol';
 
 const MAX_CATCH_UP_TICKS = 4;
@@ -282,6 +286,8 @@ function postSnapshot(w: World, simMs: number): void {
   }
   const structHp = new Uint8Array(map.structCount);
   const structStage = new Uint8Array(map.structCount);
+  const structFire = new Uint8Array(map.structCount);
+  const structGround = new Uint8Array(map.structCount).fill(255);
   for (let s = 0; s < map.structCount; s++) {
     structHp[s] = w.sHp[s] <= 0 ? 0 : Math.ceil((w.sHp[s] * 255) / map.sMaxHp[s]);
     let bits = stageOf(w, s);
@@ -290,6 +296,13 @@ function postSnapshot(w: World, simMs: number): void {
     }
     if (fortified(w, s)) bits |= STRUCT_FORTIFIED;
     structStage[s] = bits;
+    if (map.sKind[s] === S_BUILDING) {
+      structGround[s] = Math.ceil((Math.max(0, w.sGround[s]) * 255) / groundMax(map, s));
+    }
+    structFire[s] =
+      Math.min(STRUCT_ALIGHT, floorsAlight(w, s)) |
+      (w.sFire[s] === FIRE_OUT ? STRUCT_BURNT : 0) |
+      (w.sFell[s] === FELL_PANCAKE ? STRUCT_PANCAKE : 0);
   }
   const cams: number[] = [];
   for (let c = 0; c < MAX_CAMERAS; c++) {
@@ -375,6 +388,8 @@ function postSnapshot(w: World, simMs: number): void {
     alive,
     structHp,
     structStage,
+    structFire,
+    structGround,
     cameras: Float32Array.from(cams),
     townOwner: w.townOwner.slice(0, map.townCount),
     townCapturer: w.townCapturer.slice(0, map.townCount),

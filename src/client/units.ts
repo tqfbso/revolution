@@ -947,7 +947,7 @@ export class UnitView {
         const c = this.structures.centreOf(a);
         const seen = this.fog.sees(c.x, c.z);
         this.sound?.at(SND_COLLAPSE, c.x, c.z, seen);
-        if (seen) this.structures.collapse(a);
+        if (seen) this.structures.collapse(a, b === 1);
         continue;
       }
       if (ev[e] === EV_STORM || ev[e] === EV_STORMED) {
