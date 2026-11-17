@@ -3,12 +3,19 @@ import { AI_TUNING, aiThink, createAi, findCrossings, type Ai, type AiLevel } fr
 import { CMD_FIELDWORK, CMD_FOUND, CMD_LOAD, CMD_SPAWN, type Command } from '../src/sim/commands';
 import { B_BARRACKS, B_DEPOT, B_HQ } from '../src/sim/economy';
 import { fx } from '../src/sim/fixed';
-import { MAP_CELLS, T_WIRE, flatMap, generateMap } from '../src/sim/map';
+import { MAP_CELLS, SITE_FUEL, T_WIRE, flatMap, generateMap } from '../src/sim/map';
 import { WORK_WALL } from '../src/sim/works';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import { KIND_DRONE, KIND_INFANTRY, KIND_RECON, KIND_TANK, KIND_TRUCK } from '../src/sim/units';
-import { NO_TEAM, STATE_ALIVE, createWorld, hashWorld, type World } from '../src/sim/world';
+import {
+  NO_TEAM,
+  STATE_ALIVE,
+  STAT_LOST,
+  createWorld,
+  hashWorld,
+  type World,
+} from '../src/sim/world';
 
 const MINUTE = 1200;
 
@@ -216,8 +223,32 @@ describe('the AI opponent', () => {
       }
     }
     expect(beside).toBeGreaterThanOrEqual(2);
-    expect(count(w, 0)).toBeGreaterThan(150);
+    // What the purse bought: the living and the fallen (how a battle went is not the point).
+    expect(count(w, 0) + w.stats[STAT_LOST]).toBeGreaterThan(200);
     expect(log.some((c) => c.type === CMD_LOAD)).toBe(true);
+  }, 120000);
+
+  it('on the city map gives a well a depot from either corner, so both armies have fuel', () => {
+    // The map is its own mirror image, and so must the two economies be: before decision
+    // 150 the north-east army had no well in reach of a depot for eight minutes.
+    const w = createWorld(2, generateMap(2, 'city'));
+    const ais = [createAi(0, 'hard', 2), createAi(1, 'hard', 2)];
+    step(w, skirmishCommands(w.map));
+    play(w, ais, 3 * MINUTE);
+    for (let team = 0; team < 2; team++) {
+      let reached = 0;
+      for (let k = 0; k < w.map.siteCount; k++) {
+        if (w.map.siteKind[k] !== SITE_FUEL) continue;
+        for (let s = 0; s < w.map.structCount; s++) {
+          if (w.sTeam[s] !== team || w.sType[s] !== B_DEPOT || w.sHp[s] <= 0) continue;
+          const dx = (w.map.siteX[k] >> 10) - (w.map.sX[s] + 1) * 4;
+          const dy = (w.map.siteY[k] >> 10) - (w.map.sY[s] + 1) * 4;
+          if (dx * dx + dy * dy < 56 * 56) reached++;
+        }
+      }
+      expect(reached).toBeGreaterThanOrEqual(1);
+      expect(w.fuel[team]).toBeGreaterThan(150);
+    }
   }, 120000);
 
   it('on easy stays on its side of the map until late and holds only two towns', () => {
