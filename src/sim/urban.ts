@@ -1,8 +1,9 @@
 // The city as it is destroyed and held (U4, decision 091): rubble that a falling block
 // throws into the streets beside it, and engineers who mend a building or fortify it.
+import { FIRE_OUT } from './collapse';
 import { CMD_ENTRENCH, type Command } from './commands';
 import { fx } from './fixed';
-import { CELL_FX, MAP_CELLS, S_BUILDING, STAGE_INTACT, wallMax } from './map';
+import { CELL_FX, MAP_CELLS, S_BUILDING, STAGE_INTACT, groundMax, wallMax } from './map';
 import { nextInt } from './rng';
 import { leaveHouse, sendTo, stageOf, structDist2, validUnits } from './sim';
 import { KINDS, KIND_TRUCK } from './units';
@@ -153,6 +154,11 @@ export function updateEntrench(w: World): void {
       } else if (w.supplies[team] < 1) continue;
       const before = stageOf(w, s);
       w.sHp[s] = Math.min(max, w.sHp[s] + Math.ceil(max / MEND_DIV));
+      // The ground floor is shored up at the same pace, and is whole when the house is.
+      const ground = groundMax(map, s);
+      w.sGround[s] =
+        w.sHp[s] === max ? ground : Math.min(ground, w.sGround[s] + Math.ceil(ground / MEND_DIV));
+      if (w.sGround[s] === ground && w.sFire[s] === FIRE_OUT) w.sFire[s] = 0;
       for (let f = 0; f < 4; f++) {
         const full = wallMax(map, s, f);
         if (w.sWall[4 * s + f] < full) {

@@ -44,6 +44,15 @@ import {
 } from './formations';
 import { applyAirCommand, updateAir } from './air';
 import { applyDemolishCommand, updateFelling } from './demolish';
+import {
+  FELL_PANCAKE,
+  FELL_TOP,
+  POINT_BLANK,
+  ablaze,
+  chargeGround,
+  kindle,
+  updateFires,
+} from './collapse';
 import { applyUrbanCommand, fortified, spillRubble, updateEntrench } from './urban';
 import {
   HIT_CHARGE,
@@ -372,6 +381,11 @@ const structBy = new Int8Array(MAX_STRUCTS).fill(-1);
 /** Damage of the tick to the walls of buildings, four faces each. */
 const wallDamage = new Int32Array(MAX_STRUCTS * 4);
 /**
+ * Damage of the tick to the ground floors of buildings (I5): what came in at arm's length.
+ * Always on top of at least as much in structDamage.
+ */
+const groundDamage = new Int32Array(MAX_STRUCTS);
+/**
  * Damage of the tick from stray bullets and light cannon. It shoots a building up (windows,
  * plaster, a wall, in the end the floors) but cannot level it: it stops at LIGHT_FLOOR_PCT.
  */
@@ -468,6 +482,7 @@ export function step(w: World, commands: readonly Command[]): void {
   resolveStorms(w);
   resolveDamage(w);
   resolveStructures(w);
+  if (w.tick % 10 === 0) updateFires(w);
   if (w.tick % TOWN_PERIOD === 0) {
     updateTowns(w);
     clearSmoke(w);
@@ -1074,17 +1089,14 @@ const THROUGH = [25, 35, 45, 50];
 /**
  * Direct fire from (x, y) on structure `s`. Against a building it breaks the wall it hits
  * and does half of its damage to the structure (a quarter until decision 095, which left
- * a lone tank six minutes on a house). Bridges and base buildings take it whole.
+ * a lone tank six minutes on a house). Bridges and base buildings take it whole. From the
+ * ground at point-blank it goes in at the ground floor (I5): the same damage, and as much
+ * again off what holds the building up.
  */
-function shootStructure(
-  w: World,
-  s: number,
-  x: number,
-  y: number,
-  siege: number,
-  team: number,
-): void {
-  structBy[s] = team;
+function shootStructure(w: World, s: number, i: number, siege: number): void {
+  const x = w.posX[i];
+  const y = w.posY[i];
+  structBy[s] = w.team[i];
   if (w.map.sKind[s] !== S_BUILDING) {
     structDamage[s] += siege;
     return;
@@ -1092,6 +1104,9 @@ function shootStructure(
   wallDamage[4 * s + faceToward(w.map, s, x, y)] += siege;
   wallTouched[s] = 1;
   structDamage[s] += (siege + 1) >> 1;
+  if (!IS_AIR[w.kind[i]] && structDist2(w, s, x, y) <= POINT_BLANK * POINT_BLANK) {
+    groundDamage[s] += (siege + 1) >> 1;
+  }
 }
 
 /** The standing building on the cell under (x, y), or -1. */
@@ -1164,7 +1179,8 @@ const blastDist = new Int32Array(16);
 /**
  * A shell bursts at (x, y). The building it lands on takes it whole; every other building
  * the burst reaches takes its share, half at the rim, like the men in the open. A bridge
- * is only hurt by a shell that lands on it.
+ * is only hurt by a shell that lands on it. A shell comes down on the roof; a burst at
+ * street level (`low`: a vehicle blowing up) goes in at the ground floor as well (I5).
  */
 function blastStructures(
   w: World,
@@ -1173,6 +1189,7 @@ function blastStructures(
   siege: number,
   R: number,
   team: number,
+  low = false,
 ): void {
   const map = w.map;
   const cell = cellOfPos(x, y);
@@ -1206,7 +1223,9 @@ function blastStructures(
     }
   }
   for (let k = 0; k < n; k++) {
-    structDamage[blastStruct[k]] += Math.trunc((siege * (2 * R - blastDist[k])) / (2 * R));
+    const share = Math.trunc((siege * (2 * R - blastDist[k])) / (2 * R));
+    structDamage[blastStruct[k]] += share;
+    if (low && map.sKind[blastStruct[k]] === S_BUILDING) groundDamage[blastStruct[k]] += share;
     structBy[blastStruct[k]] = team;
   }
 }
@@ -1221,7 +1240,8 @@ function hasRoom(w: World, s: number, team: number): boolean {
   return (
     w.sHp[s] > 0 &&
     (w.sOcc[s] === 0 || w.sOccTeam[s] === team) &&
-    w.sOcc[s] < garrisonCapacity(w, s)
+    w.sOcc[s] < garrisonCapacity(w, s) &&
+    !ablaze(w, s)
   );
 }
 
@@ -1280,7 +1300,7 @@ function updateStructureOrders(w: World): void {
           // The enemy holds it: storm it (decision 085).
           w.flags[i] = (flags & ~(FLAG_MOVING | FLAG_DIRECT | FLAG_AMOVE)) | FLAG_STORM;
           w.path[i] = -1;
-        } else w.flags[i] = 0; // full of our own: wait outside
+        } else w.flags[i] = 0; // full of our own, or on fire: wait outside
       } else if ((flags & FLAG_MOVING) === 0) w.flags[i] = 0;
     }
   }
@@ -2736,8 +2756,9 @@ function fire(w: World): void {
         // A demolition charge is laid against what holds the house up; a gun hits a wall.
         if (kind.engineer) {
           structDamage[s] += kind.siege;
+          if (w.map.sKind[s] === S_BUILDING) groundDamage[s] += chargeGround(kind.siege);
           structBy[s] = w.team[i];
-        } else shootStructure(w, s, w.posX[i], w.posY[i], kind.siege, w.team[i]);
+        } else shootStructure(w, s, i, kind.siege);
         w.cooldown[i] = reloadOf(w, i, kind);
         w.events.push(EV_SIEGE, i, s);
         continue;
@@ -2813,7 +2834,7 @@ function fire(w: World): void {
       // Sandbagged windows and loopholes take another quarter off.
       dmg = Math.trunc((dmg * THROUGH[step] * (fortified(w, cover) ? 3 : 4)) / 400) || 1;
       if (!kind.engineer && kind.siege > 0) {
-        shootStructure(w, cover, w.posX[i], w.posY[i], kind.siege, w.team[i]);
+        shootStructure(w, cover, i, kind.siege);
       }
     } else if (footTarget) {
       // Rubble halves what reaches the men in it; a trench or sandbags stop two thirds.
@@ -2858,7 +2879,7 @@ function resolveDamage(w: World): void {
       }
       // Fuel and ammunition go up: a vehicle killed in a street takes the house fronts with it.
       if (KIND_CLASS[w.kind[i]] === CLASS_VEHICLE) {
-        blastStructures(w, w.posX[i], w.posY[i], WRECK_SIEGE, WRECK_BLAST, w.team[killer[i]]);
+        blastStructures(w, w.posX[i], w.posY[i], WRECK_SIEGE, WRECK_BLAST, w.team[killer[i]], true);
       }
       kill(w, i, killer[i]);
     } else if (state === STATE_WRECK && --w.cooldown[i] <= 0) {
@@ -2940,6 +2961,8 @@ function resolveStructures(w: World): void {
     let d = structDamage[s];
     if (d === 0 && wallTouched[s] === 0) continue;
     structDamage[s] = 0;
+    const low = groundDamage[s];
+    groundDamage[s] = 0;
     if (lightDamage[s] !== 0) {
       const room = w.sHp[s] - Math.ceil((map.sMaxHp[s] * LIGHT_FLOOR_PCT) / 100);
       if (room > 0) d += lightDamage[s] < room ? lightDamage[s] : room;
@@ -2962,8 +2985,18 @@ function resolveStructures(w: World): void {
     if (w.sHp[s] <= 0 || d === 0) continue;
     const before = stageOf(w, s);
     // A fortified building is braced and shored: a quarter of the damage is lost on it.
-    w.sHp[s] -= map.sKind[s] === S_BUILDING && fortified(w, s) ? d - (d >> 2) : d;
+    const braced = map.sKind[s] === S_BUILDING && fortified(w, s);
+    w.sHp[s] -= braced ? d - (d >> 2) : d;
     if (w.sHp[s] < 0) w.sHp[s] = 0;
+    if (low > 0) {
+      // What came in at arm's length is off the ground floor too: when that is gone the
+      // floors above have nothing under them, and half gone it is alight.
+      w.sGround[s] -= braced ? low - (low >> 2) : low;
+      if (w.sGround[s] <= 0) {
+        w.sGround[s] = 0;
+        w.sHp[s] = 0;
+      } else kindle(w, s);
+    }
     const after = stageOf(w, s);
     if (before < STAGE_GUTTED && after >= STAGE_GUTTED && map.sKind[s] === S_BUILDING) {
       // The roof and the floors come down: a quarter of each squad inside is lost, and
@@ -3004,10 +3037,12 @@ function resolveStructures(w: World): void {
     // What was built into the house goes down with it; the ruin can be dug in afresh.
     w.sFort[s] = 0;
     if (map.sKind[s] === S_BUILDING) w.stats[STAT_RAZED]++;
+    const pancake = map.sKind[s] === S_BUILDING && w.sGround[s] <= 0;
+    w.sFell[s] = pancake ? FELL_PANCAKE : FELL_TOP;
     razeStructure(map, s);
     spillRubble(w, s);
     w.groundChanged = true;
-    w.events.push(EV_COLLAPSE, s, 0);
+    w.events.push(EV_COLLAPSE, s, pancake ? 1 : 0);
   }
 }
 

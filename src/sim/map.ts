@@ -87,6 +87,12 @@ export function buildClass(w: number, h: number, floors: number): number {
 export function wallMax(map: GameMap, s: number, f: number): number {
   return ((f & 1) === 0 ? map.sW[s] : map.sH[s]) * WALL_HP[map.sClass[s]];
 }
+/** The ground floor's share of a building's health, in percent (I5, see collapse.ts). */
+export const GROUND_PCT = 75;
+/** What the ground floor of building `s` takes before it gives way and the rest pancakes. */
+export function groundMax(map: GameMap, s: number): number {
+  return Math.ceil((map.sMaxHp[s] * GROUND_PCT) / 100);
+}
 /** Resource sites: stockpiles of supplies (finite) and oil wells (slow but endless). */
 export const SITE_SUPPLIES = 0;
 export const SITE_FUEL = 1;

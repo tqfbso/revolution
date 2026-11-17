@@ -230,7 +230,7 @@ describe('the AI opponent', () => {
 
   it('on the city map gives a well a depot from either corner, so both armies have fuel', () => {
     // The map is its own mirror image, and so must the two economies be: before decision
-    // 150 the north-east army had no well in reach of a depot for eight minutes.
+    // 151 the north-east army had no well in reach of a depot for eight minutes.
     const w = createWorld(2, generateMap(2, 'city'));
     const ais = [createAi(0, 'hard', 2), createAi(1, 'hard', 2)];
     step(w, skirmishCommands(w.map));

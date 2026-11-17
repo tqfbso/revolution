@@ -3,6 +3,7 @@ import {
   CELL_COUNT,
   CLASS_COUNT,
   S_BUILDING,
+  groundMax,
   wallMax,
   MAX_STRUCTS,
   MAX_TEAMS,
@@ -144,7 +145,7 @@ export const NO_TARGET = -1;
 export const EV_SHOT = 1; // a = shooter, b = target
 export const EV_DEATH = 2; // a = unit, b = killer
 export const EV_SIEGE = 3; // a = shooter, b = structure
-export const EV_COLLAPSE = 4; // a = structure
+export const EV_COLLAPSE = 4; // a = structure, b = 1 when its ground floor gave way (a pancake)
 export const EV_CAPTURE = 5; // a = town, b = team
 export const EV_REPAIR = 6; // a = structure
 export const EV_UNLOAD = 7; // a = carrier
@@ -196,6 +197,8 @@ export const EV_PARADROP = 29;
 export const EV_FLARE = 30;
 /** a = cell, b = team: engineers felled the trees on a cell (decision 118). */
 export const EV_FELL = 31;
+/** a = building, b = 0 its ground floor has caught fire, 1 the fire has burnt out. */
+export const EV_FIRE = 32;
 /** Flares burning at once. */
 export const MAX_FLARES = 16;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
@@ -309,6 +312,14 @@ export interface World {
    * Direct fire breaks the face it hits; a breached face protects nobody behind it.
    */
   sWall: Int32Array;
+  /**
+   * Buildings (see collapse.ts): what is left of the ground floor, a share of the same
+   * health; the fire (0 none, the tick it caught plus one, FIRE_OUT burnt out); and how a
+   * building that is down came down (FELL_*).
+   */
+  sGround: Int32Array;
+  sFire: Int32Array;
+  sFell: Uint8Array;
   sRepair: Int32Array;
   /** Per building: work-ticks of fortification done (FORT_TICKS in urban.ts = fortified). */
   sFort: Uint16Array;
@@ -593,6 +604,9 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     camBlind: new Uint8Array(MAX_CAMERAS),
     sHp: map.sMaxHp.slice(),
     sWall: new Int32Array(MAX_STRUCTS * 4),
+    sGround: new Int32Array(MAX_STRUCTS),
+    sFire: new Int32Array(MAX_STRUCTS),
+    sFell: new Uint8Array(MAX_STRUCTS),
     sRepair: new Int32Array(MAX_STRUCTS),
     sFort: new Uint16Array(MAX_STRUCTS),
     sOcc: new Uint8Array(MAX_STRUCTS),
@@ -713,6 +727,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
   for (let s = 0; s < map.structCount; s++) {
     if (map.sKind[s] !== S_BUILDING) continue;
     for (let f = 0; f < 4; f++) world.sWall[4 * s + f] = wallMax(map, s, f);
+    world.sGround[s] = groundMax(map, s);
   }
   seedRng(world.rng, seed);
   placeCivilians(world, seed);
@@ -773,7 +788,11 @@ export function hashWorld(w: World): number {
     mix(w.sHp[s]);
     mix(w.sRepair[s] ^ (w.sOcc[s] << 20) ^ (w.sOccTeam[s] << 28));
     mix(w.sFort[s]);
-    if (w.map.sKind[s] === S_BUILDING) for (let f = 0; f < 4; f++) mix(w.sWall[4 * s + f]);
+    if (w.map.sKind[s] === S_BUILDING) {
+      for (let f = 0; f < 4; f++) mix(w.sWall[4 * s + f]);
+      mix(w.sGround[s]);
+      mix(w.sFire[s] ^ (w.sFell[s] << 30));
+    }
     if (w.sTeam[s] === NO_TEAM) continue;
     mix(w.map.sX[s] | (w.map.sY[s] << 8) | (w.sType[s] << 16) | (w.sTeam[s] << 24));
     mix(w.sBuild[s]);
