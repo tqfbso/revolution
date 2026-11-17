@@ -582,12 +582,17 @@ describe('sub-commanders: the staff', () => {
     expect(seen.has(ST_FALLBACK)).toBe(true);
     expect(alive(w, ids)).toBeGreaterThan(0);
     // The army goes somewhere else (here: is lifted to the far corner of the map).
-    for (const i of army) {
+    // (Every enemy alive, not only the ids just added: three of the sixteen tanks take
+    // the slots the dead raiders left, and stayed behind to hunt the commander down.)
+    expect(army.length).toBeLessThan(16);
+    for (let i = 0; i < w.count; i++) {
+      if (w.state[i] !== STATE_ALIVE || w.team[i] !== 1) continue;
       w.posX[i] = fx(980);
       w.posY[i] = fx(980);
     }
     const after = new Set<number>();
-    play(w, st, 150, () => after.add(st.posts[0].status));
+    // (Its squads live through the retreat now, and they walk: it takes them longer.)
+    play(w, st, 240, () => after.add(st.posts[0].status));
     expect(after.has(ST_REGROUP)).toBe(true);
     expect(st.posts[0].status).toBe(ST_DEFEND);
   }, 60000);
