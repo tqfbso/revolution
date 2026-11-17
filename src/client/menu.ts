@@ -19,6 +19,7 @@ const RELEASES: { version: string; notes: string[] }[] = [
     version: '0.9',
     notes: [
       'Open ground kills: tank rounds, missiles and helicopter rockets burst among men in the open and throw them. Ruins, trenches and walls protect. Every rifle squad has a machine gun that pins infantry caught in the open.',
+      'The main menu shows night battles from the game itself, three pictures in turn.',
       'Menus: a main menu, a New battle screen for the map, armies, time, weather and opponent, plus settings and how to play.',
       'A glass battle screen with a commander board: every commander and its orders in one list.',
       'Co-op with friends: two to four of you command one army against the computer, with one link for everyone.',
@@ -190,10 +191,53 @@ function seg(name: string, label: string, choices: Choice[], value: string): str
   );
 }
 
+/**
+ * The pictures behind the main menu (decision 151): stills taken in the game itself, shown
+ * in turn. The first is the one every other screen uses and is all a slow line or a reader
+ * who asked for less motion gets; the others are fetched only once it is on the screen.
+ */
+const SHOTS = ['./menu.jpg', './menu-2.jpg', './menu-3.jpg'];
+const SHOT_SECONDS = 14;
+
+function backdrop(): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'backdrop';
+  const saving = (navigator as { connection?: { saveData?: boolean } }).connection?.saveData;
+  const still = saving === true || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const layers: HTMLElement[] = [];
+  const add = (src: string): void => {
+    const layer = document.createElement('i');
+    layer.style.backgroundImage = `url('${src}')`;
+    if (layers.length === 0) layer.className = 'on';
+    layers.push(layer);
+    el.append(layer);
+  };
+  add(SHOTS[0]);
+  if (still) return el;
+  const first = new Image();
+  first.onload = () => {
+    for (const src of SHOTS.slice(1)) {
+      const img = new Image();
+      img.onload = () => add(src);
+      img.src = src;
+    }
+  };
+  first.src = SHOTS[0];
+  let shown = 0;
+  setInterval(() => {
+    if (layers.length < 2 || document.hidden) return;
+    layers[shown].classList.remove('on');
+    shown = (shown + 1) % layers.length;
+    layers[shown].classList.add('on');
+  }, SHOT_SECONDS * 1000);
+  return el;
+}
+
 export function openMenu(params: URLSearchParams): void {
   const root = document.createElement('div');
-  root.className = 'screen home';
+  root.className = 'screen shots home';
   document.body.append(root);
+  const shots = backdrop();
 
   const setup: Setup = { ...DEFAULTS };
   try {
@@ -338,7 +382,7 @@ export function openMenu(params: URLSearchParams): void {
   };
 
   const render = (): void => {
-    root.className = `screen${view === 'home' ? ' home' : ''}`;
+    root.className = `screen shots${view === 'home' ? ' home' : ''}`;
     root.innerHTML =
       view === 'home'
         ? home()
@@ -349,6 +393,8 @@ export function openMenu(params: URLSearchParams): void {
             : view === 'news'
               ? news()
               : howto();
+    // The same node goes back in: the picture that was showing still is.
+    root.prepend(shots);
     root.scrollTop = 0;
     root.querySelector<HTMLElement>('[autofocus]')?.focus();
   };

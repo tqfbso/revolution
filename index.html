@@ -1136,6 +1136,55 @@
       .screen.home::before {
         opacity: 1;
       }
+      /*
+       * The main menu's own backdrop (decision 151): stills of the game's battles, shown in
+       * turn, each drifting slowly. Only opacity and transform move, so the compositor does
+       * all of it; with reduced motion asked for it is one still picture.
+       */
+      .screen.shots::before {
+        display: none;
+      }
+      .screen .backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        overflow: hidden;
+        opacity: 0.35;
+        pointer-events: none;
+        transition: opacity 0.4s;
+      }
+      .screen.home .backdrop {
+        opacity: 1;
+      }
+      .backdrop i {
+        position: absolute;
+        inset: -5%;
+        background: center / cover no-repeat;
+        opacity: 0;
+        transition: opacity 3s ease;
+        animation: drift 50s ease-in-out infinite alternate;
+        will-change: transform, opacity;
+      }
+      .backdrop i:nth-child(even) {
+        animation-direction: alternate-reverse;
+      }
+      .backdrop i.on {
+        opacity: 1;
+      }
+      @keyframes drift {
+        from {
+          transform: scale(1) translate3d(-1.5%, 0.5%, 0);
+        }
+        to {
+          transform: scale(1.07) translate3d(1.5%, -1%, 0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .backdrop i {
+          animation: none;
+          transition: none;
+        }
+      }
       .screen.home::after {
         content: '';
         position: fixed;

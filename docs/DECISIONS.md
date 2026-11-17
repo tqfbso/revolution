@@ -3377,3 +3377,25 @@ stack of floors with the roof on top and a wall of dust and no blast when it goe
 Not built: the computer driving tanks up to a wall on purpose, civilians running from a
 fire, fire spreading to the house next door, a spoken report when a garrison is burnt out.
 The golden hashes moved (the hash now takes in the ground floor and the fire).
+
+## 151. The main menu shows the game's own battles (2026-11-17)
+
+Fabio asked for a more impressive picture on the menu. The old one was one shot from the
+game's own steep camera: mostly grass, the fight a small patch in the middle.
+
+- Three stills, taken in the game: a rocket salvo over the city centre, the ruins of the
+  European city's square, helicopters going down over the city. All by night, the look he
+  called "amazing". Nothing is painted in or graded afterwards.
+- They are staged, not found: two armies of every arm put a street apart on a square and
+  ordered at each other, photographed about a minute in, from a camera lower and closer
+  than the game allows (`tools/menushots.mjs` does all of it, so the pictures can be taken
+  again whenever the look of the game moves on).
+- On the menu they show in turn, 14 seconds each, fading into one another and drifting
+  slowly. Only opacity and transform move, so the browser's compositor does the work and
+  the menu costs nothing on a weak machine. The second and third are fetched only after
+  the first is on the screen. With "reduce motion" or data saving asked for, it is the
+  first picture, still.
+- Not a live 3D scene behind the menu: the game takes seconds to build its city and would
+  make the menu as heavy as a battle. Stills weigh 0.9 MB together.
+
+The other screens (new battle, settings, lobby, end of game) keep one dimmed picture.
