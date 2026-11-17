@@ -2593,18 +2593,20 @@ export class StructureView {
       this.alight[k] = fire & STRUCT_ALIGHT;
       this.scorched[k] = fire & (STRUCT_ALIGHT | STRUCT_BURNT) ? 1 : 0;
       this.pancaked[k] = fire & STRUCT_PANCAKE ? 1 : 0;
+      let look: number = this.stage[k];
       if (map.sKind[k] === S_BUILDING) {
         // What went in at the ground floor (I5) has not come off the top: such a building
         // keeps its storeys and burns from below.
         const low = Math.round(((255 - (s.structGround?.[k] ?? 255)) * GROUND_PCT) / 100);
-        const level =
-          hp > 0 && this.stage[k] === STAGE_DAMAGED
-            ? brokenLevel(Math.min(255, hp + low), map.sFloors[k])
-            : 0;
-        if (level > this.broken[k] || (this.stage[k] === STAGE_GUTTED && this.broken[k] < 250))
+        const top = Math.min(255, hp + low);
+        // Gutted by what went in below, its walls and roof still stand: it is drawn shot
+        // up and burning, not as an open shell, until it pancakes.
+        if (look === STAGE_GUTTED && low > 0 && top * 100 >= 255 * GUTTED_PCT) look = STAGE_DAMAGED;
+        const level = hp > 0 && look === STAGE_DAMAGED ? brokenLevel(top, map.sFloors[k]) : 0;
+        if (level > this.broken[k] || (look === STAGE_GUTTED && this.broken[k] < 250))
           this.burnAt[k] = seconds;
         // Gutted keeps a mark, so its fire is lit once and then burns down.
-        this.broken[k] = this.stage[k] === STAGE_GUTTED && hp > 0 ? 250 : level;
+        this.broken[k] = look === STAGE_GUTTED && hp > 0 ? 250 : level;
       }
       if (this.hidden(k) && !this.spot(k)) continue;
       const rising = this.baseTeam[k] >= 0 && this.basePct[k] < 100;
@@ -2615,9 +2617,9 @@ export class StructureView {
           : rising
             ? 3
             : map.sKind[k] === S_BUILDING
-              ? this.stage[k] === STAGE_GUTTED
+              ? look === STAGE_GUTTED
                 ? 4
-                : this.stage[k] === STAGE_DAMAGED
+                : look === STAGE_DAMAGED
                   ? 1
                   : 0
               : hp < DAMAGED_BELOW && this.baseTeam[k] < 0
