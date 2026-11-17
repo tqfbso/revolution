@@ -489,6 +489,9 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
       trench), and its fire pins infantry caught in the open (half speed, a quarter slower
       fire, three seconds). Measured against `tests/assault.test.ts`, `tools/pointduel.ts`
       and computer army mixes: equal cost in the open still goes to the squads.
+      Follow-up (decision 147): the computer on Normal and Hard, and the player's
+      commanders, keep their men out of the open under enemy armour and gunships: house to
+      house, apart where there is no house, missile teams hunting. `tools/assaults.ts`.
 - [ ] I4 Formations. One button on any selection and on every commander. Default on roads
       and streets: convoy (vehicles in file at fixed gaps, infantry on both pavements,
       corners cleared before vehicles cross). Default in the open: the doctrine shape for
