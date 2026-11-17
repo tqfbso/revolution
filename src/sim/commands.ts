@@ -405,6 +405,27 @@ export interface StyleCommand {
   style: number;
 }
 
+/**
+ * How `units` move from now on (SHAPE_* in formations.ts; decision 147): 0, Auto, lets the
+ * ground and the army's doctrine decide; any other shape is kept on every move until it is
+ * changed. It takes effect with their next move order.
+ */
+export const CMD_SHAPE = 43;
+export interface ShapeCommand {
+  type: typeof CMD_SHAPE;
+  units: number[];
+  shape: number;
+}
+
+/** The same for commander `slot` of `team`: its troops move in `shape` whatever the ground. */
+export const CMD_MARCH = 44;
+export interface MarchCommand {
+  type: typeof CMD_MARCH;
+  team: number;
+  slot: number;
+  shape: number;
+}
+
 /** The battle is fought at night (or, off, by day). Given once, when the game is set up. */
 export const CMD_NIGHT = 37;
 export interface NightCommand {
@@ -486,6 +507,8 @@ export interface Sender {
 }
 
 export type Command = (
+  | ShapeCommand
+  | MarchCommand
   | GiveCommand
   | DutyCommand
   | FellCommand

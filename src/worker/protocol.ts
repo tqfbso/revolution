@@ -17,6 +17,8 @@ export const COMMANDER_NEED = 2;
 export const COMMANDER_FIGHTING = 4;
 /** Bits 3 and 4: the commander's attack style (STYLE_* in the sim). */
 export const COMMANDER_STYLE_SHIFT = 3;
+/** Bits 5 to 7: how the commander's troops move (SHAPE_* in the sim). */
+export const COMMANDER_SHAPE_SHIFT = 5;
 
 /**
  * Bits of Snapshot.info: life state (2 bits), team (2 bits), inside a building, (for a
@@ -150,6 +152,8 @@ export interface Snapshot {
   dest: Uint8Array;
   /** Per unit: the sub-commander it answers to, or -1. */
   cmdr: Int8Array;
+  /** Per unit: how it is told to move (SHAPE_* in the sim; 0 is Auto). */
+  shape: Uint8Array;
   /** Per unit: the player of a shared army whose it is, or NO_SEAT (sim/world.ts). */
   owner: Uint8Array;
   /** By seat: the role each player has now. */

@@ -96,6 +96,9 @@ export const CF_AUTO = 1;
 /** Bits 1 and 2 of a commander's flags: its attack style (STYLE_*). */
 export const CF_STYLE_SHIFT = 1;
 export const CF_STYLE_MASK = 3;
+/** Bits 3 to 5: how its troops move (SHAPE_* in formations.ts). 0 is Auto. */
+export const CF_SHAPE_SHIFT = 3;
+export const CF_SHAPE_MASK = 7;
 export const STYLE_TOGETHER = 0;
 export const STYLE_INFANTRY = 1;
 export const STYLE_ARMOUR = 2;
@@ -424,6 +427,21 @@ export interface World {
   buildLen: Uint8Array;
   /** STANCE_*. Unlike an order, a stance stays until it is changed. */
   stance: Uint8Array;
+  /** How the unit is told to move (SHAPE_* in formations.ts). 0, Auto, until it is changed. */
+  shape: Uint8Array;
+  /**
+   * Keeping station on a march (formations.ts). `march` is the number of the move order the
+   * unit is on (0: none, or one that keeps no shape); `lead` the unit it keeps station on,
+   * or -1 for the guide and for anyone on its own; `berth` how (BERTH_*), with `offA` and
+   * `offB` the place relative to the lead. Only units of the same march follow each other.
+   */
+  march: Int32Array;
+  lead: Int32Array;
+  berth: Uint8Array;
+  offA: Int32Array;
+  offB: Int32Array;
+  /** The number the last shaped move order was given. */
+  marchSeq: number;
   /** Builders: the cell of the field work a JOB_WORK refers to. */
   jobCell: Int32Array;
   /**
@@ -640,6 +658,13 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     buildNext: new Int16Array(MAX_UNITS * BUILD_QUEUE),
     buildLen: new Uint8Array(MAX_UNITS),
     stance: new Uint8Array(MAX_UNITS),
+    shape: new Uint8Array(MAX_UNITS),
+    march: new Int32Array(MAX_UNITS),
+    lead: new Int32Array(MAX_UNITS).fill(-1),
+    berth: new Uint8Array(MAX_UNITS),
+    offA: new Int32Array(MAX_UNITS),
+    offB: new Int32Array(MAX_UNITS),
+    marchSeq: 0,
     jobCell: new Int32Array(MAX_UNITS),
     workCount: 0,
     workCells: new Int32Array(MAX_WORKS),
@@ -886,6 +911,14 @@ export function hashWorld(w: World): number {
     mix((w.jobSite[i] & 0xff) | ((w.jobStruct[i] & 0xfff) << 8) | (w.jobTimer[i] << 20));
     // (Only while a truck has a list, so that hashes taken before there were lists hold.)
     for (let q = 0; q < w.buildLen[i]; q++) mix(w.buildNext[i * BUILD_QUEUE + q] ^ (q << 16));
+    // (Only a unit told how to move, or on a march that keeps a shape: older hashes hold.)
+    if (w.shape[i] !== 0) mix(0x5a9e00 ^ w.shape[i]);
+    if (w.march[i] !== 0) {
+      mix(w.march[i]);
+      mix(w.lead[i] ^ (w.berth[i] << 28));
+      mix(w.offA[i]);
+      mix(w.offB[i]);
+    }
   }
   // Routes are part of the hash only while there are any, so that every hash taken before
   // they existed still holds.

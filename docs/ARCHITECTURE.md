@@ -94,7 +94,8 @@ move orders live in the world, shared by goal and class and built on first use.
 ## One tick (`src/sim/sim.ts`)
 
 1. Apply commands (move, attack-move, stop, spawn). A move order assigns formation slots and
-   a group pace.
+   a group pace, and (`src/sim/formations.ts`, decision 147) a shape kept on the way: each
+   unit a lead and a place relative to it, which the movement step puts before the route.
 2. Sort living units into two uniform grids by counting sort: 4-unit cells for collisions,
    16-unit cells for targeting.
 3. Refresh at most one "nearest enemy" chase field, if any unit asked for one last tick.

@@ -3,7 +3,15 @@
 // a place; from then on its staff runs them (src/sim/staff.ts) and the board shows how it
 // is going: what each is doing, how strong it still is, who is asking for more.
 import { ME } from './me';
-import { CMD_ASSIGN, CMD_MISSION, CMD_REINFORCE, CMD_STYLE, type Command } from '../sim/commands';
+import {
+  CMD_ASSIGN,
+  CMD_MARCH,
+  CMD_MISSION,
+  CMD_REINFORCE,
+  CMD_STYLE,
+  type Command,
+} from '../sim/commands';
+import { SHAPES, SHAPE_COUNT } from '../sim/formations';
 import type { GameMap } from '../sim/map';
 import {
   ST_ARRIVED,
@@ -37,6 +45,7 @@ import {
 import {
   COMMANDER_AUTO,
   COMMANDER_STYLE_SHIFT,
+  COMMANDER_SHAPE_SHIFT,
   COMMANDER_FIGHTING,
   COMMANDER_NEED,
   COMMANDER_STRIDE,
@@ -147,6 +156,8 @@ export interface CommanderInfo {
   auto: boolean;
   /** How it goes into an attack: 0 together, 1 infantry first, 2 armour first. */
   style: number;
+  /** How its troops move (SHAPE_*): 0 lets the ground decide. */
+  shape: number;
   need: boolean;
   fighting: boolean;
 }
@@ -229,6 +240,7 @@ export class MissionBoard {
         cz: 0,
         auto: false,
         style: 0,
+        shape: 0,
         need: false,
         fighting: false,
       });
@@ -297,6 +309,7 @@ export class MissionBoard {
       }
       c.auto = (flags & COMMANDER_AUTO) !== 0;
       c.style = (flags >> COMMANDER_STYLE_SHIFT) & 3;
+      c.shape = (flags >> COMMANDER_SHAPE_SHIFT) & 7;
       c.need = (flags & COMMANDER_NEED) !== 0;
       c.fighting = (flags & COMMANDER_FIGHTING) !== 0;
       // New orders, or troops for a commander that had none: whose is it now?
@@ -453,6 +466,9 @@ export class MissionBoard {
     } else if (act === 'style') {
       c.style = (c.style + 1) % STYLES.length;
       this.send({ type: CMD_STYLE, team: ME, slot, style: c.style });
+    } else if (act === 'shape') {
+      c.shape = (c.shape + 1) % SHAPE_COUNT;
+      this.send({ type: CMD_MARCH, team: ME, slot, shape: c.shape });
     } else if (act === 'disband') {
       this.send({ type: CMD_MISSION, team: ME, slot, mission: -1, x: 0, y: 0 });
       this.focus = -1;
@@ -557,7 +573,8 @@ export class MissionBoard {
           `</div><div class="orders rest">` +
           `<button data-act="jump" data-s="${c.slot}" title="Look at its troops">Go to</button>` +
           `<button data-act="auto" data-s="${c.slot}" title="Replace losses: what ${c.name} loses is ordered again from your factories and sent to it, as money allows">Replace losses: ${c.auto ? 'on' : 'off'}</button>` +
-          `<button data-act="style" data-s="${c.slot}" title="${STYLES[c.style].tip} Click to change.">Attack: ${STYLES[c.style].name}</button>`;
+          `<button data-act="style" data-s="${c.slot}" title="${STYLES[c.style].tip} Click to change.">Attack: ${STYLES[c.style].name}</button>` +
+          `<button data-act="shape" data-s="${c.slot}" title="${SHAPES[c.shape].tip} ${c.name} keeps this until you change it. Click to change: Auto, Convoy, Wedge, Line, Vee, Echelon, Block.">Movement: ${SHAPES[c.shape].name}</button>`;
         if (this.more) {
           html +=
             `<button data-act="stand" data-s="${c.slot}" title="Stop where it is and wait for orders">Stand down</button>` +
