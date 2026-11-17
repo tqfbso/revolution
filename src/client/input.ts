@@ -166,6 +166,7 @@ export class Input {
       } else if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && units.selectedCount > 0) {
         this.armAttackMove(!this.attackMoveArmed);
       } else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
+      else if (e.code === 'Comma' && units.selectedCount > 0) card.cycleShape();
       else if (e.code === 'KeyV' && units.selectedCount > 0) card.placeCamera();
       else if (e.code === 'KeyB' && units.selectedCount > 0) card.armEntrench();
       else if (e.code === 'KeyO' && units.selectedCount > 0) card.armDemolish();

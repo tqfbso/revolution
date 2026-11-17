@@ -3241,3 +3241,95 @@ simulation and belongs to I4 Formations), so squads still march 2.6 m apart and 
 apart only once halted. Routes are not planned through cover: the men take the cover
 that is beside the route. The computer still attacks a place held by gunships without air
 defence of its own.
+
+## 148. Formations and convoys: a shape for every move, kept on the way (2026-11-17)
+
+I4 of the inspiration build order (136). Fabio's answers: convoy by default on roads and in
+towns, the army's doctrine in open ground, Auto by default with a Movement button on
+selections and on commanders to override.
+
+Until now a move order ended in a block and promised nothing about the way there. Every
+move now has a shape (`src/sim/formations.ts`):
+
+- **Convoy.** Vehicles in file, 9 m centre to centre, fighting vehicles first; with three
+  or more of them and anything soft in the file, the rearmost closes it as a rear guard.
+  Squads walk in pairs on both sides of the vehicles, 3.5 m out, three pairs to a vehicle;
+  the first pair walks 6 m ahead of the lead vehicle, so men look round a corner before a
+  hull does. Squads there is no vehicle for follow in two files. A convoy halts in the old
+  block (vehicles in front).
+- **Wedge, line, vee, echelon.** Armour in front, the squads behind it in the same shape,
+  everything else (trucks, guns, air defence, jammers, aircraft) in lines at the back.
+  Ranks of eleven at most. The body stands in the shape where it stops.
+- **Block.** What a move always was. Keeps no shape on the way.
+
+**Auto** chooses: a convoy when the place ordered is in a town or within two cells of a
+street or a square, otherwise the army's doctrine: Western alliance a wedge, Russia a line,
+China a vee. The wedge (the standard US movement formation) and the line (the Soviet and
+Russian battle line of tanks with the carriers behind) are doctrine; the vee for China is
+a choice for the game, to give it a silhouette and a fire sack of its own, and is not a
+claim about how the PLA fights. An army with no faction keeps the block everywhere, so
+every test, every scenario and the golden hash (2037256287) play to the bit as before;
+it becomes the guerrilla army in I8 and gets its own way of moving there.
+
+The choice is made from where the body is sent, not from where it stands: a body leaving a
+town for a field forms up as it comes out, and one sent into a town across a field goes in
+file from the start (a road march). It is made once per order.
+
+**How the shape is kept.** Not by paths. One unit, the guide, follows the route; every
+other keeps station on a lead: behind it at a gap (the file), at a fixed offset on the map
+from the guide (the open shapes), or at an offset in the lead's own frame (the squads
+beside a vehicle, who turn the corner with it). A unit walks straight to its place when it
+has a clear line to it and closes up at its own top speed; the guide walks at seven
+eighths of the slowest unit's pace so that the slowest can close up at all. A unit with no
+clear line to its place, or whose lead is dead, has stopped, has been sent elsewhere or
+has stopped to fight on an attack-move, goes on to its own spot by the route, as every
+unit did before: nobody is ever left waiting on a lead. State per unit: `shape`, `march`
+(the number of the order; only units of one march follow each other), `lead`, `berth`,
+`offA`, `offB`, all hashed, and only for units that have them.
+
+**Orders.** `CMD_SHAPE` 43 (units, shape) is kept by the units until changed and applies
+from their next move order. `CMD_MARCH` 44 (team, slot, shape) is kept by a commander in
+three spare bits of `cFlags`; a commander's shape goes before what its troops were told.
+Both are checked like every other order: only an army's own units and commanders.
+
+**Cost.** A march in a shape goes at seven eighths of the pace of one in a block. In
+the pinned games (computers, with factions) the city game has 57 dead after eight minutes
+where it had 70 and the four corners game 179 where it had 156: the same order of battle,
+not measured for balance. A four army game of 15 minutes costs 1.08 ms a tick where it
+cost 0.96. `tests/shapes.test.ts` (14 tests); golden games re-pinned.
+
+Not done: the rest of the first sketch (a line that turns to face a known enemy, echelon
+by the open flank, infantry first in woods, bounding overwatch, herringbone at a halt),
+the computer choosing shapes on purpose, a drawing of the shape before the order is
+given, and any measurement of what convoys do to the computer's attacks in a city.
+
+## 149. Armour that holds a place stands at posts round it (2026-11-17)
+
+Fabio, playing: "when defending a grid inside a city, armour usually gathers together in
+the middle of the grid taking too long to respond to small firefights and moving as a big
+group".
+
+What the code did: a commander on Hold or Defend sent every vehicle of the line to the
+middle of the place (in a town, the square), and on Defend sent everyone who stood idle to
+the middle of all the enemy seen within 110 m, whatever had come.
+
+What it does now (`src/sim/staff.ts`, `posts`, `station`, `defend`):
+
+- Each vehicle has a post of its own on a ring round the place (40 m out; three quarters of
+  a town's radius, 32 to 46 m). The first post looks away from home, the next to either
+  side, the last behind; from the ninth vehicle on they double up 8 m further in. Near each
+  point of the ring the cell is taken that is beside a wall and on a street, and not in the
+  middle of a crossing. A vehicle keeps its post while the commander keeps its place; a
+  post left by a loss goes to the next vehicle that joins.
+- On Defend, enemies within 40 m of one another are one contact. Each contact is met by the
+  nearest vehicles, as many as make half again its strength, also by those still driving to
+  their posts. When that takes more than half the vehicles (or more than two of a small
+  body), or there are not enough, it is an attack on the place and the body meets it whole,
+  as before, at the strongest contact (not the middle of all of them).
+- When the contact is gone the vehicles drive back to their posts. Squads stay in their
+  houses for a small contact.
+
+Vehicles have no cover rule in the sim: "beside a wall" keeps them out of the long sight
+lines of a crossing and looks right, it does not make them harder to hit. The computer
+player's own defence (`ai.ts`) is unchanged. Staff orders are ordinary commands, so no
+golden hash moves. Tests: `tests/posts.test.ts`.

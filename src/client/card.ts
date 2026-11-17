@@ -1,4 +1,4 @@
-import { myKinds, myPrices } from './army';
+import { factionOf, myKinds, myPrices } from './army';
 import { ME } from './me';
 import * as THREE from 'three/webgpu';
 import {
@@ -17,6 +17,7 @@ import {
   CMD_RALLY,
   CMD_RESEARCH,
   CMD_CAMERA,
+  CMD_SHAPE,
   CMD_STANCE,
   CMD_STOP,
   CMD_TRAIN,
@@ -52,6 +53,7 @@ import {
 } from '../sim/units';
 import { MAX_ORDER, WORKS, WORK_BUILDABLE, WORK_COUNT, canFortify } from '../sim/works';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
+import { DOCTRINE, SHAPES, SHAPE_AUTO, SHAPE_BLOCK, SHAPE_COUNT } from '../sim/formations';
 import {
   BASE_STRIDE,
   TASK_HOLD_FIRE,
@@ -349,6 +351,7 @@ export class CommandCard {
     } else if (act === 'stop') this.send({ type: CMD_STOP, units: ids });
     else if (act === 'hold') this.send({ type: CMD_HOLD, units: ids });
     else if (act === 'fire') this.toggleFire();
+    else if (act === 'shape') this.cycleShape();
     else if (act === 'camera') this.placeCamera();
     else if (act === 'entrench') this.armEntrench();
     else if (act === 'demolish') this.armDemolish();
@@ -453,6 +456,23 @@ export class CommandCard {
     if (ids.length === 0) return;
     const all = ids.every((id) => (this.units.task[id] & TASK_HOLD_FIRE) !== 0);
     this.send({ type: CMD_STANCE, units: ids, stance: all ? STANCE_FREE : STANCE_HOLD_FIRE });
+  }
+
+  /** The shape the whole selection is told to move in, or -1 if they differ. */
+  private shapeOf(ids: readonly number[]): number {
+    if (ids.length === 0) return -1;
+    const shape = this.units.shape[ids[0]];
+    return ids.every((id) => this.units.shape[id] === shape) ? shape : -1;
+  }
+
+  /** The next way of moving for the selection: Auto, then each shape in turn. */
+  cycleShape(): void {
+    const ids = this.units.selectedIds().filter((id) => this.units.isMine(id));
+    if (ids.length === 0) return;
+    const shape = (this.shapeOf(ids) + 1) % SHAPE_COUNT;
+    for (const id of ids) this.units.shape[id] = shape;
+    this.send({ type: CMD_SHAPE, units: ids, shape });
+    this.render();
   }
 
   /** While placing: move the outline of the building to the plot under the pointer. */
@@ -865,6 +885,24 @@ export class CommandCard {
         'Hold fire keeps recon teams and ambushes hidden until you say so.',
         'G',
       );
+      if (mine) {
+        const shape = this.shapeOf(ids.filter((id) => u.isMine(id)));
+        const open = DOCTRINE[factionOf(ME)] ?? SHAPE_BLOCK;
+        const auto =
+          open === SHAPE_BLOCK
+            ? 'Now: a plain block (an army without a faction has no formation of its own).'
+            : `Now: a convoy on roads and into towns, a ${SHAPES[open].name.toLowerCase()} in open ground.`;
+        html += this.button(
+          'shape',
+          0,
+          `Movement: ${shape < 0 ? 'mixed' : SHAPES[shape].name}`,
+          null,
+          shape === SHAPE_AUTO ? 'by the ground' : shape < 0 ? '' : 'forced',
+          shape > SHAPE_AUTO,
+          `${shape < 0 ? 'These units move in different ways.' : SHAPES[shape].tip} ${shape === SHAPE_AUTO ? auto : ''} Click to change: Auto, Convoy, Wedge, Line, Vee, Echelon, Block. It applies from their next move order.`,
+          ',',
+        );
+      }
       html += '</div>';
       // What only some units can do. These used to be keys you had to know about.
       let special = '';

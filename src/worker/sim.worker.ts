@@ -28,6 +28,8 @@ import {
   MAX_CAMERAS,
   MAX_COMMANDERS,
   CF_AUTO,
+  CF_SHAPE_MASK,
+  CF_SHAPE_SHIFT,
   CF_STYLE_MASK,
   CF_STYLE_SHIFT,
 } from '../sim/world';
@@ -48,6 +50,7 @@ import {
   COMMANDER_FIGHTING,
   COMMANDER_NEED,
   COMMANDER_STYLE_SHIFT,
+  COMMANDER_SHAPE_SHIFT,
   COMMANDER_STRIDE,
   type Frame,
   type NetMode,
@@ -342,7 +345,8 @@ function postSnapshot(w: World, simMs: number): void {
     commanders[o + 2] = Math.round(fromFx(w.cY[k]));
     commanders[o + 9] =
       ((w.cFlags[k] & CF_AUTO) !== 0 ? COMMANDER_AUTO : 0) |
-      (((w.cFlags[k] >> CF_STYLE_SHIFT) & CF_STYLE_MASK) << COMMANDER_STYLE_SHIFT);
+      (((w.cFlags[k] >> CF_STYLE_SHIFT) & CF_STYLE_MASK) << COMMANDER_STYLE_SHIFT) |
+      (((w.cFlags[k] >> CF_SHAPE_SHIFT) & CF_SHAPE_MASK) << COMMANDER_SHAPE_SHIFT);
     if (!p) continue;
     commanders[o + 3] = p.status;
     commanders[o + 4] = p.power;
@@ -393,6 +397,7 @@ function postSnapshot(w: World, simMs: number): void {
     keep: w.keep.slice(),
     dest: w.dest.slice(),
     cmdr: w.cmdr.slice(0, n),
+    shape: w.shape.slice(0, n),
     owner: w.owner.slice(0, n),
     duties: Array.from(w.duty),
     commanders,

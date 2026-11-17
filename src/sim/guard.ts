@@ -41,6 +41,7 @@ import {
   CMD_HOLD,
   CMD_KEEP,
   CMD_LOAD,
+  CMD_MARCH,
   CMD_MISSION,
   CMD_MOVE,
   CMD_NIGHT,
@@ -51,6 +52,7 @@ import {
   CMD_REINFORCE,
   CMD_REPEAT,
   CMD_RESEARCH,
+  CMD_SHAPE,
   CMD_SPAWN,
   CMD_STANCE,
   CMD_STOP,
@@ -106,6 +108,8 @@ const LISTS: Record<number, readonly string[]> = {
   [CMD_WEATHER]: [],
   [CMD_GIVE]: ['units'],
   [CMD_DUTY]: [],
+  [CMD_SHAPE]: ['units'],
+  [CMD_MARCH]: [],
 };
 
 /** Fields that, when present, must be numbers; and those that must be true or false. */
@@ -133,6 +137,7 @@ const NUMBERS = [
   'weather',
   'to',
   'duty',
+  'shape',
   'by',
   'army',
   'seen',
@@ -178,6 +183,7 @@ const ARMY = new Set([
   CMD_DEST,
   CMD_MISSION,
   CMD_STYLE,
+  CMD_MARCH,
   CMD_REINFORCE,
   CMD_PARADROP,
   CMD_DEMOLISH,
