@@ -3122,3 +3122,36 @@ with a small flash, thrown earth and a scar; a pinned squad lies flat.
 
 Not done: the computer does not yet avoid open ground or spread out under armour; no
 suppression from vehicle machine guns; the unit card does not name the machine gun.
+
+## 146. A shared army: whose units are whose, hand-overs, names and marks (2026-11-17)
+
+The roadmap's next step for co-op ("orders that know who gave them: unit handover, my
+units, role-first screens"), possible since every order is signed with its seat (140).
+
+Every unit of a shared army is one player's or nobody's in particular (`World.owner`). A
+new unit goes to the player whose role covers its kind (`DUTY_KINDS` in `units.ts`; players
+with the same role take turns). One that is nobody's becomes his who first orders it
+himself. After that only a hand-over moves it: `CMD_GIVE` (to a teammate, to oneself, or
+back to nobody). Roles are part of the game now: they begin as the lobby set them and
+change by `CMD_DUTY`, so every machine agrees, including one that plays the game through
+to rejoin (the host sends the match as it began and the returning player's new role goes
+in as an order). Ownership decides nothing in the rules: any player may order any unit of
+his army, which was Fabio's condition. It is not in the hash (like `seat` and `born`, it
+follows from the orders); `tests/team.test.ts` checks a game with hand-overs and role
+changes against one without, hash for hash. The score credits a unit's owner, or, for a
+unit that is nobody's, whoever last ordered it.
+
+On screen (`src/client/team.ts`): a team panel with each player's name, colour, role, and
+how much of the army is his; Give and Take for the selection; Go to a teammate's view; the
+player's own role as a menu. A teammate's units carry a thin ring in his colour and show
+in it on the minimap (a switch turns both off). A box drawn over a crowd takes one's own
+units and nobody's and leaves teammates' alone; a box or a click on theirs alone still
+takes them. Players give a name in the lobby (cleaned to letters, digits and a few marks,
+12 long, checked on arrival like every message). Z marks the ground for the team: a pole,
+a ring and a label on the battlefield, a ring on the minimap, a spoken line with the grid
+square; 1, 2 or 3 just after makes it Attack here, Defend here or Help me here.
+
+Left for later: who spent what (bulk orders are paid when a factory takes them up, so the
+spender is not known there yet), commanders that belong to a player in the sim (today the
+board remembers its own orders), and a role-first production screen beyond the marks on
+its rows.
