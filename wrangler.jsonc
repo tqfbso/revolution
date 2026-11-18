@@ -1,6 +1,7 @@
 {
   // Serves the built game (dist/) as plain static files on Cloudflare Workers.
   // Cloudflare's GitHub integration runs `npm run build` then `npx wrangler deploy`.
+  // Each merge to main rebuilds this copy; the menu corner shows the commit it was built from.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "revolution",
   "compatibility_date": "2026-11-01",
