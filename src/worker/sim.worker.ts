@@ -13,6 +13,7 @@ import { KINDS } from '../sim/units';
 import { NEEDS_SUPPLY, upkeepPerMinute } from '../sim/logistics';
 import { WORKS } from '../sim/works';
 import { stageOf } from '../sim/sim';
+import { onRoof } from '../sim/ambush';
 import { fortified } from '../sim/urban';
 import {
   FLAG_MOVING,
@@ -34,6 +35,8 @@ import {
   CF_SHAPE_SHIFT,
   CF_STYLE_MASK,
   CF_STYLE_SHIFT,
+  STANCE_AMBUSH,
+  STANCE_FREE,
 } from '../sim/world';
 import { CAPTURE_POINTS } from '../sim/units';
 import {
@@ -48,6 +51,9 @@ import {
   NO_AIM,
   TASK_MOVING,
   TASK_HUNGRY,
+  TASK_HOLD_FIRE,
+  TASK_AMBUSH,
+  TASK_ROOF,
   COMMANDER_AUTO,
   COMMANDER_FIGHTING,
   COMMANDER_NEED,
@@ -280,7 +286,9 @@ function postSnapshot(w: World, simMs: number): void {
     if (w.cargo[i] > 0) load[i] = 1 + w.cargoKind[i];
     task[i] =
       w.job[i] |
-      (w.stance[i] << 3) |
+      (w.stance[i] !== STANCE_FREE ? TASK_HOLD_FIRE : 0) |
+      (w.stance[i] === STANCE_AMBUSH ? TASK_AMBUSH : 0) |
+      (onRoof(w, i) ? TASK_ROOF : 0) |
       ((w.flags[i] & FLAG_MOVING) !== 0 ? TASK_MOVING : 0) |
       (w.ration[i] === 0 && NEEDS_SUPPLY[kind] ? TASK_HUNGRY : 0);
     if (KINDS[kind].turn > 0) {

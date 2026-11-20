@@ -23,6 +23,8 @@ import {
   CMD_TRAIN,
   CMD_LOAD,
   CMD_UNLOAD,
+  CMD_ROOF,
+  CMD_AMBUSH,
   type Command,
 } from '../sim/commands';
 import {
@@ -48,12 +50,22 @@ import {
   STRIKE_READY,
   STRIKE_TIER_LOW,
 } from '../sim/air';
-import { fx } from '../sim/fixed';
+import { fromFx, fx } from '../sim/fixed';
 import { FELL_CELLS } from '../sim/demolish';
-import { MAP_CELLS, MAP_SIZE, S_BUILDING, T_FOREST, canPlace, type GameMap } from '../sim/map';
+import {
+  CLASS_AIR,
+  MAP_CELLS,
+  MAP_SIZE,
+  S_BUILDING,
+  T_FOREST,
+  canPlace,
+  type GameMap,
+} from '../sim/map';
 import {
   CAMERA_COST,
   KINDS,
+  AMBUSH_MAX,
+  AMBUSH_MIN,
   KIND_HELI,
   KIND_LIFT,
   KIND_PARA,
@@ -73,6 +85,8 @@ import {
   TASK_HOLD_FIRE,
   TASK_JOB_MASK,
   TASK_MOVING,
+  TASK_ROOF,
+  TASK_AMBUSH,
   type Snapshot,
 } from '../worker/protocol';
 import type { StructureView } from './structures';
@@ -82,6 +96,8 @@ import type { WorksView } from './works';
 
 /** World units per map cell. */
 const CELL = MAP_SIZE / MAP_CELLS;
+/** An ambush laid with a click and no drag covers this much round the point (metres). */
+const AMBUSH_DEFAULT = 15;
 const QUEUE_SLOTS = 8;
 /** Names short enough for a queue slot, and what each unit is for (the button's tooltip). */
 const SHORT = [
@@ -101,6 +117,7 @@ const SHORT = [
   'Lift',
   'Paras',
   'Plane',
+  'Mortar',
 ];
 const HINT = [
   'Main battle tank. Kills vehicles and breaks walls; weak to missile teams, to infantry up close in streets, and to strike drones without air defence or a jammer near.',
@@ -119,6 +136,7 @@ const HINT = [
   'Transport helicopter. Lifts four squads over rivers, walls and front lines (L to board, U to set down). Unarmed. Each helipad holds three helicopters.',
   'Paratroopers. Trained into a reserve that waits off the map. Press J and click the map: a transport plane drops up to eight squads there. Air defence can shoot the plane down with everyone aboard.',
   'Transport plane.',
+  'Mortar team. Lobs bombs over the houses at anything your army has spotted within 65 m (not closer than 12): bombs pin men in the open, barely scratch armour or walls. Ctrl + right click: shell a spot. F: smoke. Fires from a roof (Roof order) but not from inside a house. Helpless up close.',
 ];
 /** The tool after the kinds of field work: take works down. */
 export const TOOL_REMOVE = WORK_COUNT;
@@ -145,6 +163,7 @@ export class CommandCard {
   private dragCost = 0;
   readonly group = new THREE.Group();
   private readonly ghost: THREE.Mesh;
+  private readonly lurkRing: THREE.Mesh;
   private readonly ghostMaterial: THREE.MeshBasicNodeMaterial;
   private readonly outline: THREE.LineSegments;
   private readonly rally: THREE.Mesh;
@@ -219,7 +238,15 @@ export class CommandCard {
     ring.depthWrite = false;
     this.rally = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.3, 24).rotateX(-Math.PI / 2), ring);
     this.ghost.visible = this.outline.visible = this.rally.visible = false;
-    this.group.add(this.ghost, this.outline, this.rally);
+    // The circle of an ambush being drawn (I6): amber, flat on the ground.
+    const lurk = new THREE.MeshBasicNodeMaterial({ color: 0xffb347, transparent: true });
+    lurk.opacity = 0.7;
+    lurk.depthWrite = false;
+    lurk.depthTest = false;
+    this.lurkRing = new THREE.Mesh(new THREE.RingGeometry(0.96, 1, 96).rotateX(-Math.PI / 2), lurk);
+    this.lurkRing.renderOrder = 3;
+    this.lurkRing.visible = false;
+    this.group.add(this.ghost, this.outline, this.rally, this.lurkRing);
     // Act on press, not on click: the card is redrawn as numbers change, and a redraw
     // between press and release would swallow a click.
     el.addEventListener('pointerdown', (e) => {
@@ -410,6 +437,9 @@ export class CommandCard {
     else if (act === 'camera') this.placeCamera();
     else if (act === 'entrench') this.armEntrench();
     else if (act === 'demolish') this.armDemolish();
+    else if (act === 'roof') this.armRoof();
+    else if (act === 'down') this.comeDown();
+    else if (act === 'ambush') this.armAmbush();
     else if (act === 'amove') this.arm(this.armed === 'attack' ? '' : 'attack');
     else if (act === 'smoke') this.arm(this.armed === 'smoke' ? '' : 'smoke');
     else if (act === 'flare') this.arm(this.armed === 'flare' ? '' : 'flare');
@@ -452,6 +482,122 @@ export class CommandCard {
     this.demolish = !this.demolish && this.sappers().length > 0;
     this.entrench = false;
     this.html = '';
+  }
+
+  /**
+   * "Roof" is in hand (I6): the next right click on a building sends the selected squads
+   * up on its roof (those already inside it climb up; the rest walk there first).
+   */
+  roof = false;
+
+  armRoof(): void {
+    this.roof = !this.roof && this.climbers().length > 0;
+    this.entrench = this.demolish = false;
+    this.cancelAmbush();
+    this.html = '';
+  }
+
+  /** Squads of yours in the selection that can go into a building, and so up on a roof. */
+  private climbers(): number[] {
+    const u = this.units;
+    return u.selectedIds().filter((id) => u.isMine(id) && KINDS[u.kindOf(id)].garrison);
+  }
+
+  /** Selected squads on a roof come back down inside. */
+  comeDown(): void {
+    const u = this.units;
+    const by = new Map<number, number[]>();
+    for (const id of u.selectedIds()) {
+      if (!u.isMine(id) || (u.task[id] & TASK_ROOF) === 0) continue;
+      const st = u.insideOf(id);
+      if (st < 0) continue;
+      const list = by.get(st) ?? [];
+      list.push(id);
+      by.set(st, list);
+    }
+    for (const [structure, units] of by) this.send({ type: CMD_ROOF, units, structure, off: true });
+  }
+
+  /**
+   * "Ambush" is in hand (I6): press on the ground where the vehicles will come and drag
+   * out the circle. The selected units hold their fire until a vehicle enters it.
+   */
+  ambush = false;
+  private ambushX = 0;
+  private ambushZ = 0;
+  private ambushR = -1;
+
+  armAmbush(): void {
+    const on = !this.ambush && this.lurkers().length > 0;
+    this.cancelAmbush();
+    this.ambush = on;
+    this.roof = this.entrench = this.demolish = false;
+    this.html = '';
+  }
+
+  /** Selected units of yours that can lie in wait: armed, on the ground, not guns. */
+  private lurkers(): number[] {
+    const u = this.units;
+    return u.selectedIds().filter((id) => {
+      const k = KINDS[u.kindOf(id)];
+      return u.isMine(id) && !k.indirect && k.cls !== CLASS_AIR && k.damage.some((d) => d > 0);
+    });
+  }
+
+  /** The circle starts here (the press). */
+  ambushDown(x: number, z: number): void {
+    this.ambushX = x;
+    this.ambushZ = z;
+    this.ambushR = AMBUSH_DEFAULT;
+    this.showLurk();
+  }
+
+  /** The pointer moved with the button held: the circle reaches it. */
+  ambushDrag(x: number, z: number): void {
+    if (this.ambushR < 0) return;
+    const r = Math.hypot(x - this.ambushX, z - this.ambushZ);
+    this.ambushR = Math.min(fromFx(AMBUSH_MAX), Math.max(fromFx(AMBUSH_MIN), r));
+    this.showLurk();
+  }
+
+  /** Released: the order goes out. A click without a drag lays an ambush of the usual size. */
+  ambushUp(): void {
+    if (this.ambushR < 0) return;
+    const units = this.lurkers();
+    if (units.length > 0) {
+      this.send({
+        type: CMD_AMBUSH,
+        units,
+        x: fx(this.ambushX),
+        y: fx(this.ambushZ),
+        radius: fx(this.ambushR),
+      });
+    }
+    this.cancelAmbush();
+    this.render();
+  }
+
+  /** Is a circle being drawn right now? */
+  get drawingAmbush(): boolean {
+    return this.ambushR >= 0;
+  }
+
+  cancelAmbush(): void {
+    this.ambush = false;
+    this.ambushR = -1;
+    this.lurkRing.visible = false;
+    this.html = '';
+  }
+
+  private showLurk(): void {
+    const r = this.ambushR;
+    this.lurkRing.visible = r > 0;
+    this.lurkRing.position.set(
+      this.ambushX,
+      this.terrain.heightAt(this.ambushX, this.ambushZ) + 0.3,
+      this.ambushZ,
+    );
+    this.lurkRing.scale.set(r, 1, r);
   }
 
   /** Your selected engineer squads. */
@@ -681,6 +827,15 @@ export class CommandCard {
       const rx = site >= 0 ? this.map.siteX[site] : fx(x);
       const ry = site >= 0 ? this.map.siteY[site] : fx(z);
       this.send({ type: CMD_RALLY, structure: this.building, x: rx, y: ry });
+      return true;
+    }
+    if (this.roof) {
+      // Stays in hand until a building is clicked.
+      if (structure < 0 || this.map.sKind[structure] !== S_BUILDING) return true;
+      const units = this.climbers();
+      if (units.length > 0) this.send({ type: CMD_ROOF, units, structure });
+      this.roof = false;
+      this.html = '';
       return true;
     }
     if (this.demolish) {
@@ -999,6 +1154,43 @@ export class CommandCard {
           'O',
         );
       } else this.demolish = false;
+      if (this.climbers().length > 0) {
+        special += this.button(
+          'roof',
+          0,
+          'Roof',
+          null,
+          this.roof ? 'right click a building' : 'then right click',
+          this.roof,
+          'Right click a building: the selected squads go up on its roof (those inside it climb up, the rest walk there first). From a roof they see and reach further, a mortar can fire, and rockets hit a vehicle on its thin top plate. But there are no walls round them: they are seen, splinters reach them and machine guns pin them. A roof goes when the building is gutted.',
+          'Shift R',
+        );
+      } else this.roof = false;
+      if (ids.some((id) => u.isMine(id) && (u.task[id] & TASK_ROOF) !== 0)) {
+        special += this.button(
+          'down',
+          0,
+          'Off the roof',
+          null,
+          '',
+          false,
+          'The selected squads on a roof come back down into the building.',
+          '',
+        );
+      }
+      if (this.lurkers().length > 0) {
+        const waiting = ids.filter((id) => u.isMine(id) && (u.task[id] & TASK_AMBUSH) !== 0);
+        special += this.button(
+          'ambush',
+          0,
+          waiting.length > 0 ? `Ambush (${waiting.length} waiting)` : 'Ambush',
+          null,
+          this.ambush ? 'drag a circle' : 'then drag',
+          this.ambush || waiting.length > 0,
+          'Press on the ground where vehicles will come and drag out a circle. The selected units stay where they are (in a house, on a roof, in a wood) and hold their fire, and men lying in wait are as hard to see as in a forest. When an enemy vehicle enters the circle, or the enemy finds one of them, every unit waiting on it opens fire at once. Any other order calls it off.',
+          'Shift H',
+        );
+      } else if (this.ambush) this.cancelAmbush();
       if (has((k) => KINDS[k].indirect)) {
         special += this.button(
           'smoke',

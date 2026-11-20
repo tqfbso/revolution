@@ -8,6 +8,7 @@ import {
   KIND_ENGINEER,
   KIND_INFANTRY,
   KIND_PARA,
+  KIND_MORTAR,
   KIND_RECON,
   KIND_TANK,
   PROFILE_COUNT,
@@ -40,16 +41,16 @@ describe('damage by target profile', () => {
   });
 
   it('men on foot are one target, a tank another', () => {
-    for (const k of [KIND_INFANTRY, KIND_RECON, KIND_ENGINEER, KIND_PARA]) {
+    for (const k of [KIND_INFANTRY, KIND_RECON, KIND_ENGINEER, KIND_PARA, KIND_MORTAR]) {
       expect(KINDS[k].profile).toBe(PROFILE_FOOT);
     }
     expect(KINDS[KIND_TANK].profile).toBe(PROFILE_TANK);
     // The numbers the game has always had (decision 058's toughness aside, damage is as written).
     expect(KINDS[KIND_TANK].damage).toEqual([
-      60, 75, 75, 80, 90, 75, 0, 0, 90, 90, 90, 75, 0, 0, 75, 0,
+      60, 75, 75, 80, 90, 75, 0, 0, 90, 90, 90, 75, 0, 0, 75, 0, 75,
     ]);
     expect(KINDS[KIND_INFANTRY].damage).toEqual([
-      3, 9, 9, 5, 10, 9, 1, 1, 10, 10, 10, 9, 2, 2, 9, 0,
+      3, 9, 9, 5, 10, 9, 1, 1, 10, 10, 10, 9, 2, 2, 9, 0, 9,
     ]);
   });
 });

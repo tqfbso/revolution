@@ -3534,3 +3534,58 @@ they must not take over from the infantry fight.
 
 Not done: the computer does not plan its air defence against strikes, there is no target
 marker for the defender, and the jet does not avoid air defence on its own.
+
+## 155. Mortars, rooftops and ambushes (I6) (2026-11-20)
+
+Fabio approved roadmap item I6 (inspiration review, decision 136): one new kind of unit for
+every army, a Roof order, an ambush stance. Destruction rates are untouched (decision 120,
+"perfect now").
+
+- **Mortar team** (`KIND_MORTAR` 16, `KIND_COUNT` 17; the one new kind the review allowed).
+  Foot, built at the barracks from tier 1 (60 supplies, 20 credits, 9 s, 1 army point).
+  Indirect fire like the gun: a bomb every 5 s at anything the army has spotted from 12 to
+  65 away, blast 3.5. 40 to men at the centre, 10 to a tank (and only on a near hit),
+  siege 8: it barely marks a wall. A bomb among men in the open pins them (`PIN_TICKS`),
+  as the squad machine gun does. It fires from a roof, never from inside a house. Ctrl +
+  right click shells a spot, F smoke, I a flare, as with the gun. Faction flavour: the
+  alliance's reaches 5 further (dearer), Russia's bursts wider and fires a little slower,
+  China's is cheaper and quicker to build. Enemy guns do not go counter-battery on a mortar
+  (they did at first, and the city took a fifth less damage in computer games because the
+  guns spent their shells on mortar teams instead of houses).
+- **Roof** (`CMD_ROOF` 49, button and Shift + R, then right click a building; "Off the roof"
+  brings them down). Any squad that can go into a house: those inside climb up, the rest
+  walk there first. On the roof: eyes a man's height above the top floor, at least 6 more
+  reach (a window gives 3), 44% more sight area, and a rocket or missile meets a vehicle's
+  top plate (`ROOF_TOP_PCT` 200, whichever way it faces). The price: a parapet, not walls.
+  They take 80% of what men in the open would (splinters and HE bursts included, no wall
+  in the way), machine guns pin them, they are never hidden, and what a gun does not do to
+  them it does to the top of the house, as at a window. A tank cannot raise its gun to men
+  on a roof within 16 horizontally (`ROOF_DEAD`, the dead ground under the eaves); carriers,
+  helicopters and everyone else can. A gutted building has no roof: the men are inside.
+- **Ambush** (`CMD_AMBUSH` 50, `STANCE_AMBUSH` 2, button and Shift + H, then press and drag
+  a circle of 6 to 40). Armed ground units (not guns) stop where they are, in a house, on
+  a roof or in the open, and hold their fire; men on foot are as hard to see as in forest
+  (`lurking`). When an enemy vehicle the army knows of (or the unit can see) enters the
+  circle, or the enemy spots one of them, everyone waiting on the same circle opens fire
+  together, their first round ready (`EV_AMBUSH` 38, alerts both sides). Any other order
+  calls it off. Rules in `src/sim/ambush.ts`.
+- **Computer**: it keeps a few mortar teams (6 at tier 1, four more a tier, counted by the
+  head like scouts) that go to town garrisons and up on roofs. On Normal and Hard its
+  missile teams hold roofs of houses of two floors or more and, with no enemy vehicle known
+  within 70, lie in wait on a circle of 30 round themselves. Easy and Recruit unchanged.
+- Hashes: a world without mortars, roofs or ambushes hashes as before (per-kind tables went
+  from 16 to 32 slots, `KIND_SLOTS`, hashed as 16 unless the rest are used; a shell keeps
+  its kind's low four bits where they were). The golden game hashes move because the
+  computer now builds mortars.
+
+Measured (`tools/toll.ts` now counts mortars, bombs, roofs, ambushes; probes in the
+thread): 8 hard-vs-hard city games of 30 minutes, buildings marked or worse 890 with I6
+against 1015 before, within the spread of seeds (98 to 180 a game); no stalls; sim mean
+1.2 to 1.4 ms a tick both ways. Two missile teams holding a three-floor house against three
+tanks driving past 6 m from the wall, 12 seeds: from windows they kill 3 tanks and 13 of 24
+teams survive; from the roof they kill 12 and none survive. Two mortars with a recon team
+on four squads bunched in the open for a minute: 16 of 32 squads dead.
+
+Not done: mortars in the commander board's establishment presets (they can be added by
+hand), AI ambushes for anything but missile teams, drawing the circles of ambushes already
+laid, an animated crew for the mortar.

@@ -515,9 +515,10 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
       forty seconds later. Fire does no damage. Times to level from range and with charges
       are to the second what they were (`tools/level.ts`); battles cost the city what they
       did (`tools/toll.ts`, eight games before and after).
-- [ ] I6 Mortars, rooftops, ambush. A mortar team for every army (the one new kind of
-      unit); a Roof order with reach and top attack on tanks, at the price of exposure; an
-      ambush stance that holds fire until a vehicle enters a drawn zone.
+- [x] I6 Mortars, rooftops, ambush (decision 155). A mortar team for every army (the one
+      new kind of unit); a Roof order with reach and top attack on tanks, at the price of
+      exposure (Shift + R); an ambush stance that holds fire until a vehicle enters a drawn
+      circle (Shift + H, drag).
 - [x] I7 Air strikes for the three big armies only, on a long cooldown, each with its own
       flavour (one guided bomb, a stick of bombs, a drone swarm). Today's civilian fine is
       the only penalty (Fabio: the cost today is fine). Decision 154: tier 3 and a standing

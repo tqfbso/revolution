@@ -15,7 +15,9 @@ import { seedRng } from './rng';
 import { CIV_FLEEING, DANGER_DIM, MAX_CIVILIANS, placeCivilians } from './civilians';
 
 /** Room per team in the per-kind tables of the world (at least KIND_COUNT of the unit table). */
-export const KIND_SLOTS = 16;
+export const KIND_SLOTS = 32;
+/** Kinds there were when the per-kind tables had 16 slots (see the hash). */
+const OLD_KINDS = 16;
 
 /** Surveillance cameras on the map at once, all armies together (see the unit rules). */
 export const MAX_CAMERAS = 64;
@@ -125,6 +127,12 @@ export const MAX_WORKS = 4096;
 /** Stances: fire at will (the default), or hold fire until told otherwise. */
 export const STANCE_FREE = 0;
 export const STANCE_HOLD_FIRE = 1;
+/**
+ * Lying in wait (I6, the Ambush order): fire held, and men on foot as hard to see as in
+ * forest, until an enemy vehicle enters the circle (`ambX`, `ambY`, `ambR`) or the enemy
+ * spots one of them. Then everyone waiting on the same circle opens fire at once.
+ */
+export const STANCE_AMBUSH = 2;
 
 /** Owner of a town nobody holds. */
 export const NO_TEAM = 255;
@@ -209,6 +217,8 @@ export const EV_BOMB = 37;
 export const EV_FELL = 31;
 /** a = building, b = 0 its ground floor has caught fire, 1 the fire has burnt out. */
 export const EV_FIRE = 32;
+/** a = the unit that sprang it, b = the enemy vehicle in the circle (or -1): an ambush opens fire (I6). */
+export const EV_AMBUSH = 38;
 /** Flares burning at once. */
 export const MAX_FLARES = 16;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
@@ -426,6 +436,15 @@ export interface World {
   ration: Uint8Array;
   /** Until which tick the unit is pinned by machine-gun fire (see PIN_TICKS); 0 = never was. */
   pinned: Int32Array;
+  /**
+   * 1: up on the roof of the building it is in, or going up when it gets in (I6, the Roof
+   * order). Counts only while the building still has a roof (see onRoof in the sim).
+   */
+  roof: Uint8Array;
+  /** The circle an ambush waits on (STANCE_AMBUSH): centre and radius. */
+  ambX: Int32Array;
+  ambY: Int32Array;
+  ambR: Int32Array;
   supplyMap: Uint8Array;
   supplyTick: number;
   /**
@@ -671,6 +690,10 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     cEst: new Int16Array(MAX_TEAMS * MAX_COMMANDERS * KIND_SLOTS),
     ration: new Uint8Array(MAX_UNITS),
     pinned: new Int32Array(MAX_UNITS),
+    roof: new Uint8Array(MAX_UNITS),
+    ambX: new Int32Array(MAX_UNITS),
+    ambY: new Int32Array(MAX_UNITS),
+    ambR: new Int32Array(MAX_UNITS),
     supplyMap: new Uint8Array(MAX_TEAMS * (MAP_CELLS >> 2) * (MAP_CELLS >> 2)),
     supplyTick: -1,
     routeOf: new Int32Array(MAX_UNITS),
@@ -828,10 +851,23 @@ export function hashWorld(w: World): number {
   }
   for (let t = 0; t < OLD_TEAMS; t++) mix(w.credits[t]);
   for (let t = 0; t < OLD_TEAMS; t++) mix(w.orderTurn[t] | (w.orderWait[t] << 8));
-  for (let k = 0; k < OLD_TEAMS * KIND_SLOTS; k++) {
-    mix((w.orders[k] & 0xffff) | (w.keep[k] << 16));
-    mix(w.dest[k]);
-  }
+  // Per-kind tables: the first OLD_KINDS of each row always, the rest only when they hold
+  // something (the mortar, I6, came later), so that older hashes hold.
+  const kindRow = (row: number): void => {
+    for (let k = row * KIND_SLOTS; k < row * KIND_SLOTS + KIND_SLOTS; k++) {
+      const v = (w.orders[k] & 0xffff) | (w.keep[k] << 16);
+      if (k - row * KIND_SLOTS >= OLD_KINDS && v === 0 && w.dest[k] === 0) continue;
+      mix(v);
+      mix(w.dest[k]);
+    }
+  };
+  const estRow = (row: number): void => {
+    for (let k = row * KIND_SLOTS; k < row * KIND_SLOTS + KIND_SLOTS; k++) {
+      if (k - row * KIND_SLOTS >= OLD_KINDS && w.cEst[k] === 0) continue;
+      mix(w.cEst[k]);
+    }
+  };
+  for (let t = 0; t < OLD_TEAMS; t++) kindRow(t);
   for (let c = 0; c < OLD_TEAMS * MAX_COMMANDERS; c++) {
     mix(w.cMission[c] | (w.cFlags[c] << 8) | (w.cSeq[c] << 16));
     mix(w.cX[c]);
@@ -839,7 +875,7 @@ export function hashWorld(w: World): number {
     mix(w.cAX[c]);
     mix(w.cAY[c]);
   }
-  for (let k = 0; k < OLD_TEAMS * MAX_COMMANDERS * KIND_SLOTS; k++) mix(w.cEst[k]);
+  for (let c = 0; c < OLD_TEAMS * MAX_COMMANDERS; c++) estRow(c);
   mix(w.shellCount);
   for (let k = 0; k < w.shellCount; k++) {
     mix(w.shX[k]);
@@ -900,17 +936,14 @@ export function hashWorld(w: World): number {
     mix(w.credits[t]);
     mix(w.orderTurn[t] | (w.orderWait[t] << 8));
     mix(w.civKilled[t]);
-    for (let k = t * KIND_SLOTS; k < (t + 1) * KIND_SLOTS; k++) {
-      mix((w.orders[k] & 0xffff) | (w.keep[k] << 16));
-      mix(w.dest[k]);
-    }
+    kindRow(t);
     for (let c = t * MAX_COMMANDERS; c < (t + 1) * MAX_COMMANDERS; c++) {
       mix(w.cMission[c] | (w.cFlags[c] << 8) | (w.cSeq[c] << 16));
       mix(w.cX[c]);
       mix(w.cY[c]);
       mix(w.cAX[c]);
       mix(w.cAY[c]);
-      for (let k = c * KIND_SLOTS; k < (c + 1) * KIND_SLOTS; k++) mix(w.cEst[k]);
+      estRow(c);
     }
     for (let f = t * CLASS_COUNT; f < (t + 1) * CLASS_COUNT; f++) {
       mix(w.chaseBuilt[f] ^ Math.imul(w.chaseWanted[f], 31));
@@ -948,6 +981,12 @@ export function hashWorld(w: World): number {
     for (let q = 0; q < w.buildLen[i]; q++) mix(w.buildNext[i * BUILD_QUEUE + q] ^ (q << 16));
     // (Only a unit told how to move, or on a march that keeps a shape: older hashes hold.)
     if (w.shape[i] !== 0) mix(0x5a9e00 ^ w.shape[i]);
+    // (Only on a roof or in an ambush (I6): older hashes hold.)
+    if (w.roof[i] !== 0) mix(0x7e0f00 ^ w.roof[i]);
+    if (w.stance[i] === STANCE_AMBUSH) {
+      mix(w.ambX[i]);
+      mix(w.ambY[i] ^ (w.ambR[i] << 16));
+    }
     if (w.march[i] !== 0) {
       mix(w.march[i]);
       mix(w.lead[i] ^ (w.berth[i] << 28));

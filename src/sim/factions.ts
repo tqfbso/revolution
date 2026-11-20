@@ -1,4 +1,4 @@
-// The three armies (M10). A faction is the same sixteen kinds of unit with its own version
+// The three armies (M10). A faction is the same seventeen kinds of unit with its own version
 // of each: different toughness, reach, rate of fire, price and time to build, its own
 // names, and one kind it does not field at all. Nothing else in the sim knows about
 // factions: it asks `kindOf` for a unit's numbers where it used to read the one table.
@@ -20,6 +20,7 @@ import {
   KIND_IFV,
   KIND_INFANTRY,
   KIND_LIFT,
+  KIND_MORTAR,
   KIND_PARA,
   KIND_RECON,
   KIND_STRIKE,
@@ -107,6 +108,7 @@ const SPECS: readonly Spec[] = [
       [KIND_HELI]: { name: 'Gunship', hp: 115, damage: 110, cost: 110 },
       [KIND_LIFT]: { name: 'Transport helicopter' },
       [KIND_PARA]: { name: 'Airborne infantry', hp: 110 },
+      [KIND_MORTAR]: { name: 'Mortar section', range: 5, cost: 110 },
     },
   },
   {
@@ -135,6 +137,7 @@ const SPECS: readonly Spec[] = [
       [KIND_EW]: { name: 'Heavy jammer', jam: 130, cost: 90, share: 150 },
       [KIND_HELI]: { name: 'Armoured gunship', hp: 130, speed: 92, cost: 105 },
       [KIND_PARA]: { name: 'Air assault troops', damage: 110 },
+      [KIND_MORTAR]: { name: 'Heavy mortar team', blast: 115, reload: 110 },
     },
   },
   {
@@ -161,6 +164,7 @@ const SPECS: readonly Spec[] = [
       [KIND_ENGINEER]: { name: 'Combat engineers', hp: 115, siege: 120, time: 80 },
       [KIND_HELI]: { name: 'Light gunship', hp: 90, cost: 80, time: 80 },
       [KIND_TRUCK]: { name: 'Logistics truck', speed: 108 },
+      [KIND_MORTAR]: { name: 'Mortar team', cost: 85, time: 85 },
     },
   },
 ];

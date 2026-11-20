@@ -99,6 +99,13 @@ export class Input {
           this.drawing = true;
           dom.setPointerCapture(e.pointerId);
         } else card.cancelTool();
+      } else if (card.ambush) {
+        // Ambush in hand (I6): press and drag out the circle; anything else calls it off.
+        const { ground } = this.structureAt(e.clientX, e.clientY);
+        if (e.button === 0 && ground) {
+          card.ambushDown(ground.x, ground.z);
+          dom.setPointerCapture(e.pointerId);
+        } else card.cancelAmbush();
       } else if (e.button === 0 && (card.armed === 'smoke' || card.armed === 'flare')) {
         const flare = card.armed === 'flare';
         card.arm('');
@@ -119,6 +126,11 @@ export class Input {
     dom.addEventListener('pointermove', (e) => {
       this.pointerX = e.clientX;
       this.pointerY = e.clientY;
+      if (card.drawingAmbush) {
+        const { ground } = this.structureAt(e.clientX, e.clientY);
+        if (ground) card.ambushDrag(ground.x, ground.z);
+        return;
+      }
       if (card.placing >= 0 || card.tool !== 0) {
         const { ground } = this.structureAt(e.clientX, e.clientY);
         if (ground && card.placing >= 0) card.hover(ground.x, ground.z);
@@ -136,6 +148,10 @@ export class Input {
       this.box.style.height = `${h}px`;
     });
     dom.addEventListener('pointerup', (e) => {
+      if (e.button === 0 && card.drawingAmbush) {
+        card.ambushUp();
+        return;
+      }
       if (e.button === 0 && this.drawing) {
         this.drawing = false;
         card.toolUp(e.shiftKey);
@@ -156,6 +172,8 @@ export class Input {
         this.ask(null);
       } else if (e.code === 'Escape') {
         card.arm('');
+        card.cancelAmbush();
+        card.roof = false;
         this.drawing = false;
         if (card.placing >= 0) card.cancelPlacing();
         else if (card.tool !== 0) card.cancelTool();
@@ -179,6 +197,10 @@ export class Input {
         );
       } else if (e.code === 'KeyX' && units.selectedCount > 0) {
         send({ type: CMD_STOP, units: units.selectedIds() });
+      } else if (e.code === 'KeyR' && e.shiftKey && units.selectedCount > 0) {
+        card.armRoof();
+      } else if (e.code === 'KeyH' && e.shiftKey && units.selectedCount > 0) {
+        card.armAmbush();
       } else if (e.code === 'KeyH' && units.selectedCount > 0) {
         send({ type: CMD_HOLD, units: units.selectedIds() });
       } else if (e.code === 'KeyF' && units.selectedCount > 0) {
