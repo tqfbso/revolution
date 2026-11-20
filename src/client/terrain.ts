@@ -411,7 +411,11 @@ export class Terrain {
       pools.magFilter = pools.minFilter = THREE.LinearFilter;
       pools.needsUpdate = true;
       const pool = texture(pools, xz.div(MAP_SIZE)).r;
-      m.colorNode = mix(surface, mix(color(0x86cfd6), sky, sheen.mul(0.3)).mul(shade), pool.mul(0.9));
+      m.colorNode = mix(
+        surface,
+        mix(color(0x86cfd6), sky, sheen.mul(0.3)).mul(shade),
+        pool.mul(0.9),
+      );
       m.opacityNode = mix(opacity, float(0.5), pool);
     }
     return m;
