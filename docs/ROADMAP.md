@@ -541,7 +541,10 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
 
 ## M11 Polish for v1
 
-- Authored or CC0 models replacing procedural ones, animation
+- Authored or CC0 models replacing procedural ones, animation. IN PROGRESS 2026-11-20:
+  phase 1 BUILT (decision 156): each army's own ground vehicles, written by hand in code,
+  and vehicles that lean with the ground and rock on firing. Phase 2: infantry kit per
+  army, animation, crews. Phase 3: helicopters, jets, planes, drones
 - Menus and settings: BUILT 2026-11-15 (decision 127). The v1 interface: glass HUD with the
   commander board always on screen, main menu, new battle screen, settings, glass lobby and
   end screen. Still to do: save/replay
