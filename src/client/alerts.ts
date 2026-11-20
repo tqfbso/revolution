@@ -1,6 +1,7 @@
 // Battle alerts: the map is far larger than the screen, so what happens off it has to be
 // announced. A banner with a tone and a spoken line, a ping on the minimap, an arrow at
 // the screen edge pointing at it, and Backspace to jump there.
+import { STRIKE_NAMES } from '../sim/air';
 import { factionOf, myKinds, nameOf } from './army';
 import { FACTIONS } from '../sim/factions';
 import { KINDS, KIND_DRONE, KIND_TRUCK } from '../sim/units';
@@ -13,6 +14,7 @@ import {
   EV_STRIKE,
   EV_PLANE,
   EV_PARADROP,
+  EV_AIRSTRIKE,
   unpackX,
   unpackY,
   MAX_UNITS,
@@ -238,6 +240,16 @@ export class Alerts {
           this.show(
             this.book.raise(ALERT_DRONES, x, z, 'Enemy transport plane: air defence!', now),
           );
+        }
+      } else if (type === EV_AIRSTRIKE) {
+        // A strike jet (I7): radar has it as it crosses the edge of the map.
+        const x = s.positions[2 * a];
+        const z = s.positions[2 * a + 1];
+        const name = STRIKE_NAMES[b & 15].toLowerCase();
+        if (b >> 4 === me) {
+          this.show(this.book.raise(ALERT_NOTE, x, z, `Air strike inbound: ${name}`, now));
+        } else {
+          this.show(this.book.raise(ALERT_DRONES, x, z, `Enemy jet inbound: air defence!`, now));
         }
       } else if (type === EV_PARADROP) {
         const x = unpackX(a);

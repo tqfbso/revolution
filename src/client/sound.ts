@@ -17,19 +17,21 @@ export const SND_MISSILE = 4;
 export const SND_EXPLOSION = 5;
 export const SND_IMPACT = 6;
 export const SND_COLLAPSE = 7;
-const SOUNDS = 8;
+/** A jet going over low and fast (I7): a tearing roar that swells and falls away. */
+export const SND_JET = 8;
+const SOUNDS = 9;
 
 /** World units a second. Slower than the real thing would be at this scale, but audibly late. */
 const SPEED_OF_SOUND = 170;
 /** Distance at which a sound is at half its level. */
-const HALF_LEVEL = [26, 34, 55, 80, 30, 70, 60, 60];
+const HALF_LEVEL = [26, 34, 55, 80, 30, 70, 60, 60, 140];
 /** How loud each is at the source, relative to the others. */
-const LEVEL = [0.3, 0.42, 0.85, 1, 0.4, 1, 0.8, 0.9];
+const LEVEL = [0.3, 0.42, 0.85, 1, 0.4, 1, 0.8, 0.9, 0.75];
 /** The most of each that may start in one tick: a hundred rifles are not a hundred voices. */
-const PER_TICK = [3, 2, 2, 2, 1, 2, 2, 1];
+const PER_TICK = [3, 2, 2, 2, 1, 2, 2, 1, 1];
 const MAX_VOICES = 36;
 /** Voices in use above which a kind no longer starts: small arms never crowd out a blast. */
-const ROOM = [20, 24, 30, 36, 28, 36, 36, 36];
+const ROOM = [20, 24, 30, 36, 28, 36, 36, 36, 36];
 const VARIANTS = 3;
 /** The level of the far-battle bed with the whole map firing. */
 const BED = 0.3;
@@ -168,6 +170,21 @@ export function makeBuffers(ctx: AudioContext): AudioBuffer[][] {
         },
         2.4,
       ),
+    );
+    // A jet: broadband roar, darker and then brighter as it closes, a whine on top that
+    // drops in pitch as it passes, then the long rumble it leaves behind.
+    out[SND_JET].push(
+      render(ctx, 4.5, 97 + v, (t, noise, st) => {
+        const pass = 1.6 * j;
+        const near = Math.exp(-((t - pass) * (t - pass)) / 0.5);
+        const swell = Math.min(1, t * 0.8) * (0.25 + near) * Math.exp(-Math.max(0, t - pass) / 1.4);
+        const k = 0.03 + 0.25 * near;
+        const roar = (low(st, 0, noise(), k) - low(st, 1, noise(), 0.004)) * 6 * swell;
+        const f = (t < pass ? 900 : 620) * j;
+        st[2] += (2 * Math.PI * f) / 48000;
+        const whine = Math.sin(st[2]) * 0.08 * near;
+        return roar + whine;
+      }),
     );
     // A building coming down: a long rumble with slabs landing in it.
     out[SND_COLLAPSE].push(
