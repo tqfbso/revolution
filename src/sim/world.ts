@@ -12,6 +12,7 @@ import {
   type GameMap,
 } from './map';
 import { seedRng } from './rng';
+import { SCAR_CELLS } from './scars';
 import { CIV_FLEEING, DANGER_DIM, MAX_CIVILIANS, placeCivilians } from './civilians';
 
 /** Room per team in the per-kind tables of the world (at least KIND_COUNT of the unit table). */
@@ -340,6 +341,11 @@ export interface World {
   sGround: Int32Array;
   sFire: Int32Array;
   sFell: Uint8Array;
+  /**
+   * Buildings: where the damage landed, SCAR_CELLS sections each (see scars.ts). It only
+   * shapes how the building is drawn coming down, and is not in the hash.
+   */
+  sScar: Uint16Array;
   sRepair: Int32Array;
   /** Per building: work-ticks of fortification done (FORT_TICKS in urban.ts = fortified). */
   sFort: Uint16Array;
@@ -638,6 +644,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     sGround: new Int32Array(MAX_STRUCTS),
     sFire: new Int32Array(MAX_STRUCTS),
     sFell: new Uint8Array(MAX_STRUCTS),
+    sScar: new Uint16Array(MAX_STRUCTS * SCAR_CELLS),
     sRepair: new Int32Array(MAX_STRUCTS),
     sFort: new Uint16Array(MAX_STRUCTS),
     sOcc: new Uint8Array(MAX_STRUCTS),

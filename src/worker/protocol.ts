@@ -137,6 +137,11 @@ export interface Snapshot {
   /** Per building: what is left of its ground floor as 0..255 of that floor's own health. */
   structGround: Uint8Array;
   /**
+   * Per building, SCAR_CELLS sections each (see src/sim/scars.ts): where the damage landed,
+   * 0..255 of its most-hit section, so the client can bring it down where it was hit.
+   */
+  structScar: Uint8Array;
+  /**
    * Surveillance cameras standing: four numbers each. Slot, x and z in world units, then
    * the owner's team in the low four bits with CAMERA_KNOWN and CAMERA_BLIND above.
    */
