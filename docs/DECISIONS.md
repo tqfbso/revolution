@@ -3589,3 +3589,50 @@ on four squads bunched in the open for a minute: 16 of 32 squads dead.
 Not done: mortars in the commander board's establishment presets (they can be added by
 hand), AI ambushes for anything but missile teams, drawing the circles of ambushes already
 laid, an animated crew for the mortar.
+
+## 156. Each army's own vehicles (models and animation, phase 1) (2026-11-20)
+
+Roadmap M11, "authored or CC0 models replacing procedural ones, animation", which Fabio
+asked to start. The CC0 asset sites are still closed to the cloud build (decision 069), so
+"authored" means written by hand in code, to the standard a modeller would work to, instead
+of downloaded. Render only: the sim, its hashes and every number in it are untouched.
+
+- **The kit** (`src/client/kit.ts`). Models are now written in metres at their true size
+  and scaled to the map (`M` 0.36 map units a metre, where a soldier is 0.344). New shapes
+  beside the box and the cylinder: `prism` (a side view pushed across the width, with a
+  half width per point, so a turret can narrow to its gun and a glacis can slope: flat
+  armour plate with hard edges), `fuselage` (a smooth skin over stations along the length)
+  and wheels with tyres. `Parts` is the bench: a model is written once and built at three
+  levels of detail, each part saying how far out it is still drawn, round things losing
+  sides with distance. The far model is therefore the near model's own silhouette, not a
+  separate guess of three boxes, and it wears the team colour over its paint as before.
+- **Eighteen ground vehicles** (`src/client/armour.ts`): tank, carrier, self-propelled gun,
+  air defence, jammer and truck, each in each army's own shape, original designs in the
+  manner of its present-day equipment. The alliance: tall, slab-sided, long turret bustles
+  with stowage racks. Russia: low, a round turret under wedges of reactive armour, fuel
+  drums and an unditching log on the tail, a carrier with a bow like a boat's, a jammer
+  with two great dishes. China: an arrowhead turret with a slatted basket, and wheels
+  wherever a wheel will do (its carrier has eight, its gun and air defence ride lorries).
+  A column can be told from its outline before its colour. No faction (0) draws as the
+  alliance.
+- **Per army in the renderer.** `UnitView` keeps a fleet per faction (`fleet()`), built for
+  the factions in the match when the battle loads (about 0.1 s each). A batch nobody is in
+  costs nothing, so a two-army game draws what it drew before.
+- **Motion.** A ground vehicle now lies along the slope under it (four height samples,
+  eased), rocks back from its own gun in a couple of dying swings (a gun most, a tank less,
+  an autocannon a little) and works on its springs as it drives; the turret turns on the
+  hull's own tilted deck and its gun runs back on firing. A wreck stays as it stopped. The
+  far level is still an upright instance.
+- **Paint.** One material as before, moved to `src/client/unitpaint.ts`; the wear width on
+  vehicles is 7 cm (it was about 12), so chipped edges read as wear and not as an outline.
+- **Bench** (`tools/modelview.html`, `tools/modelview.mjs`): every army's models in rows in
+  the game's paint and light, in ten seconds instead of the two minutes a picture of the
+  game takes in the cloud. `tools/paradeshots.mjs` stands them on a field in the game.
+
+Numbers: a near vehicle is 1,500 to 3,400 triangles (the old tank was 1,470 and the others
+about 600), a middle one 300 to 900 (was about 80), a far one 100 to 250 (was 36). The near
+level is rationed to 300 units as before. Not measured: frames a second on a real graphics
+card, which only Fabio's machine can show.
+
+Not done in this phase: infantry and their crew-served weapons (phase 2), aircraft (phase
+3), turning wheels and running tracks, gun elevation, per-army wrecks of helicopters.
