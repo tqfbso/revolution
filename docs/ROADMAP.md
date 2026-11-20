@@ -406,6 +406,9 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 7. European city map: BUILT (decision 107). `?map=euro` or Menu > Map: European city. One
    dense city on both banks of a river: four bridges that can be cut, three covered
    crossings that cannot, two parks, a motorway on an embankment, a station.
+   Kowloon map (Fabio, 2026-11-20, asked for directly, outside this list): BUILT
+   (decision 153). `?map=kowloon` or Menu > Map: Kowloon. Tsim Sha Tsui and Jordan round
+   Kowloon Park: towers and tenements on a 48 m grid, the harbour on two sides, no bridges.
 8. The computer fighting in cities (U5): BUILT (decision 110). Its sappers fortify the
    houses its garrisons hold, garrisons without houses lie up in the ruins, and the
    player's commanders do both as well. Garrisoning and storming were already there.

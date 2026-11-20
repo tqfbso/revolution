@@ -3,6 +3,7 @@
 // client (what is drawn) derive the identical map without sending it over the wire.
 import { generateCity } from './city';
 import { generateEuro } from './euro';
+import { generateKowloon } from './kowloon';
 import { FP_SHIFT, clampInt, fx, isqrt } from './fixed';
 
 // Map is a square of MAP_SIZE world units. Sim (x, y) maps to render (x, z).
@@ -237,7 +238,7 @@ export interface GameMap {
  * Which battlefield: the river with its fords and bridges, the ridge with its four ways,
  * or the city, a town at every flag and streets between them (see city.ts).
  */
-export type Layout = 'river' | 'ridge' | 'city' | 'euro' | 'four';
+export type Layout = 'river' | 'ridge' | 'city' | 'euro' | 'kowloon' | 'four';
 
 /** A battlefield as the menu, the lobby, the tests and the tools know it. */
 export interface MapInfo {
@@ -264,6 +265,13 @@ export const MAPS: readonly MapInfo[] = [
     id: 'euro',
     name: 'European city',
     blurb: 'An old city on a river: cathedral square, station, park and a motorway round it.',
+    armies: 2,
+  },
+  {
+    id: 'kowloon',
+    name: 'Kowloon',
+    blurb:
+      'A harbour city of towers round Kowloon Park: Nathan Road, the Star Ferry, Gun Club Hill.',
     armies: 2,
   },
   {
@@ -347,6 +355,7 @@ export function generateMap(seed: number, layout: Layout = 'river'): GameMap {
   if (layout === 'ridge') return generateRidge(seed);
   if (layout === 'city') return generateCity(seed);
   if (layout === 'euro') return generateEuro(seed);
+  if (layout === 'kowloon') return generateKowloon(seed);
   if (layout === 'four') return generateFour(seed);
   const s = seed | 0;
   const heights = new Int32Array(MAP_VERTS * MAP_VERTS);
