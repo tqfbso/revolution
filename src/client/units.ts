@@ -1,7 +1,7 @@
 import { factionOf, kindIn } from './army';
 import { FACTIONS } from '../sim/factions';
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix, smoothstep, step, uv, vec3 } from 'three/tsl';
+import { attribute, float, smoothstep, uv, vec3 } from 'three/tsl';
 import {
   AIR_HEIGHT,
   BLAST_STRAY,
@@ -89,27 +89,18 @@ import type { Effects } from './effects';
 import type { Fog } from './fog';
 import { COMMANDER_RGB, ICON_FROM, ICON_FULL, ICON_PENNANT, Icons } from './icons';
 import type { Look } from './look';
-import { fieldPaint } from './surface';
+import { BURN_BASE, BURN_SCALE, SEEDS, unitMaterial } from './unitpaint';
 import {
   SQUAD_OFFSETS,
   TEAM_OFFSETS,
-  buildAirDefence,
-  buildArtillery,
-  buildIfv,
-  buildJammer,
-  buildTruck,
-  buildReconDrone,
+  buildArsenal,
   buildStrikeDrone,
-  buildHelicopter,
   buildHelicopterWrecks,
-  buildTransportPlane,
-  buildJet,
   buildBomb,
   box,
   buildInfantry,
   buildLauncher,
   buildMortar,
-  buildTank,
   type VehicleModel,
 } from './models';
 import type { StructureView } from './structures';
@@ -170,11 +161,40 @@ const LOD_HIDDEN = 3;
 const DRILL_SQUAD = 0;
 const DRILL_CREW = 1;
 const DRILL_SCOUT = 2;
-/** Paint patterns to go round, and the room left under 1 for the burn (see the material). */
-const SEEDS = 16;
-const BURN_SCALE = 0.97;
-/** Keeps the packed value clear of a whole number, where rounding would flip the seed. */
-const BURN_BASE = 0.01;
+
+/** Kinds drawn as one model (a vehicle or an aircraft), as against men on foot. */
+const HAS_MODEL = KINDS.map((k) => k.cls !== CLASS_FOOT);
+/** Room for each kind's instances at most. */
+const FLEET_ROOM: Partial<Record<number, number>> = {
+  [KIND_TANK]: MAX_UNITS,
+  [KIND_IFV]: MAX_UNITS >> 1,
+  [KIND_ARTILLERY]: MAX_UNITS >> 2,
+  [KIND_AD]: MAX_UNITS >> 3,
+  [KIND_EW]: MAX_UNITS >> 3,
+  [KIND_TRUCK]: MAX_UNITS >> 4,
+  [KIND_DRONE]: MAX_UNITS >> 2,
+  [KIND_STRIKE]: MAX_UNITS >> 1,
+  [KIND_HELI]: 128,
+  [KIND_LIFT]: 128,
+  [KIND_PLANE]: 32,
+};
+
+/** How far a vehicle rocks back from its own gun, radians: by the weight of the shot. */
+const ROCK = KINDS.map((_, k) =>
+  k === KIND_ARTILLERY
+    ? 0.07
+    : k === KIND_TANK
+      ? 0.045
+      : k === KIND_IFV || k === KIND_AD
+        ? 0.012
+        : 0,
+);
+
+/** One army's vehicles and aircraft as they are drawn. */
+interface Fleet {
+  vehicles: (VehicleDraw | null)[];
+  jet: VehicleDraw;
+}
 
 /** How a vehicle type is drawn: hull and turret batches per level of detail. */
 interface VehicleDraw {
@@ -220,17 +240,6 @@ const NIGHT_FOG_SIGHT = FACTIONS.map((f, n) =>
 const FLARE_CELLS = Math.round(FLARE_RADIUS / 4096);
 const FLASH_SECONDS = FLASH_TICKS / 20;
 const BURN_SECONDS = BURN_TICKS / 20;
-/**
- * The base coat of each faction's vehicles and uniforms, as a multiple of the model's own
- * olive: none, the alliance's olive drab, Russia's darker green, China's sand khaki.
- */
-const COATS = [
-  [1, 1, 1],
-  [1, 1, 1],
-  [0.66, 0.9, 0.62],
-  [1.55, 1.38, 1.02],
-];
-
 /** How high a flare hangs: it bursts at 46 m and comes down under its parachute. */
 export function flareHeight(
   f: { y: number; from: number; until: number },
@@ -253,6 +262,7 @@ export interface LodStats {
  * between the last two 20 Hz snapshots, cull against the view frustum, pick a level of
  * detail by distance, and write the instance into that level's batch.
  */
+/** Room a unit batch starts with; it doubles as needed up to its capacity (see Batch). */
 /** Room a unit batch starts with; it doubles as needed up to its capacity (see Batch). */
 const UNIT_BATCH_START = 256;
 
@@ -353,13 +363,19 @@ export class UnitView {
   /** Whether teammates' units carry a mark in their colour on the ground. */
   ownerMarks = true;
   private readonly ownerRings: Batch;
-  private readonly vehicles: (VehicleDraw | null)[] = new Array(KIND_COUNT).fill(null);
+  /** Each army's vehicles, by faction then kind, built when that faction first takes the field. */
+  private readonly fleets: (Fleet | undefined)[] = [];
+  private readonly material: THREE.MeshStandardNodeMaterial;
+  private readonly castShadows: boolean;
+  /** How each ground vehicle lies on its slope and its springs: pitch and roll, eased. */
+  private readonly tiltP = new Float32Array(MAX_UNITS);
+  private readonly tiltR = new Float32Array(MAX_UNITS);
+  private readonly hullFrame = new Float32Array(12);
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
   private readonly chutes: Batch;
   /** Planes that are strike jets (I7), drawn as one: set by EV_AIRSTRIKE, cleared by EV_PLANE. */
   private readonly jets = new Uint8Array(MAX_UNITS);
-  private readonly jetDraw: VehicleDraw;
   /** Bombs and swarm munitions on their way down (EV_BOMB), drawn until they land. */
   private readonly falling: {
     x0: number;
@@ -398,65 +414,12 @@ export class UnitView {
     private readonly structures: StructureView,
     private readonly scars: Scars,
   ) {
-    const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.82, metalness: 0.08 });
-    const tint = attribute('aTint', 'vec4');
-    const marking = attribute('teamMask', 'float');
-    // The whole part of tint.w is a number per unit (see SEEDS) plus SEEDS times its faction.
-    const army = tint.w.floor().div(SEEDS).floor();
-    const coat = mix(
-      mix(vec3(1, 1, 1), vec3(...COATS[2]), step(1.5, army)),
-      vec3(...COATS[3]),
-      step(2.5, army),
-    );
-    const painted = mix(attribute('color', 'vec3').mul(coat), tint.xyz, marking);
-    // tint.w carries two things: its whole part is a number per unit (see SEEDS), its
-    // fraction is "burn", where 1 turns the model into a scorched wreck.
-    const burn = tint.w.fract().sub(BURN_BASE).div(BURN_SCALE).clamp(0, 1);
-    if (look.rich) {
-      const paint = fieldPaint(
-        look,
-        painted,
-        marking,
-        tint.w.floor().mod(SEEDS),
-        burn,
-        attribute('aBoxP', 'vec3'),
-        attribute('aBoxH', 'vec4'),
-      );
-      material.colorNode = paint.colour.mul(fog.cloud());
-      material.roughnessNode = paint.roughness;
-      material.metalnessNode = paint.metalness;
-    } else material.colorNode = mix(painted, vec3(0.022, 0.02, 0.019), burn);
-
-    const shadows = look.shadows;
+    const material = (this.material = unitMaterial(look, fog.cloud()));
+    const shadows = (this.castShadows = look.shadows);
     this.nearBudget = look.quality === 'low' ? 120 : look.quality === 'high' ? 500 : 300;
-    const batch = (g: THREE.BufferGeometry, cap: number, lod: number, men = false) => {
-      const b = new Batch(g, material, cap, UNIT_BATCH_START);
-      // Far LOD is a few pixels: no shadow work for it. Soldiers are five meshes a squad, so
-      // only the nearest cast any; a vehicle keeps its shadow one level further out.
-      b.mesh.castShadow = shadows && lod < (men ? 1 : 2);
-      b.mesh.receiveShadow = shadows && lod === 0;
-      this.group.add(b.mesh);
-      this.batches.push(b);
-      return b;
-    };
-    const vehicle = (model: VehicleModel, cap: number): VehicleDraw => ({
-      model,
-      hull: model.hull.map((g, lod) => batch(g, cap, lod)),
-      turret: model.turret.map((g, lod) => batch(g, cap, lod)),
-      far: batch(model.far, cap, 2),
-    });
-    this.vehicles[KIND_TANK] = vehicle(buildTank(), MAX_UNITS);
-    this.vehicles[KIND_IFV] = vehicle(buildIfv(), MAX_UNITS >> 1);
-    this.vehicles[KIND_ARTILLERY] = vehicle(buildArtillery(), MAX_UNITS >> 2);
-    this.vehicles[KIND_AD] = vehicle(buildAirDefence(), MAX_UNITS >> 3);
-    this.vehicles[KIND_EW] = vehicle(buildJammer(), MAX_UNITS >> 3);
-    this.vehicles[KIND_TRUCK] = vehicle(buildTruck(), MAX_UNITS >> 4);
-    this.vehicles[KIND_DRONE] = vehicle(buildReconDrone(), MAX_UNITS >> 2);
-    this.vehicles[KIND_STRIKE] = vehicle(buildStrikeDrone(), MAX_UNITS >> 1);
-    this.vehicles[KIND_HELI] = vehicle(buildHelicopter(true), 128);
-    this.vehicles[KIND_LIFT] = vehicle(buildHelicopter(false), 128);
-    this.vehicles[KIND_PLANE] = vehicle(buildTransportPlane(), 32);
-    this.jetDraw = vehicle(buildJet(), 16);
+    const batch = (g: THREE.BufferGeometry, cap: number, lod: number, men = false) =>
+      this.batch(g, cap, lod, men);
+    for (let t = 0; t < 4; t++) this.fleet(factionOf(t));
     this.bombs = batch(buildBomb(), 64, 1);
     this.munitions = batch(buildStrikeDrone().hull[1], 64, 1);
     this.chutes = batch(
@@ -609,6 +572,45 @@ export class UnitView {
     this.group.add(this.rings);
   }
 
+  /** One more instanced draw call in the unit material, emptied and refilled every frame. */
+  private batch(g: THREE.BufferGeometry, cap: number, lod: number, men = false): Batch {
+    const b = new Batch(g, this.material, cap, UNIT_BATCH_START);
+    // Far LOD is a few pixels: no shadow work for it. Soldiers are five meshes a squad, so
+    // only the nearest cast any; a vehicle keeps its shadow one level further out.
+    b.mesh.castShadow = this.castShadows && lod < (men ? 1 : 2);
+    b.mesh.receiveShadow = this.castShadows && lod === 0;
+    this.group.add(b.mesh);
+    this.batches.push(b);
+    return b;
+  }
+
+  /** The vehicles of a faction: its own models (models.ts), built the first time it is asked for. */
+  private fleet(faction: number): Fleet {
+    const have = this.fleets[faction];
+    if (have) return have;
+    const arsenal = buildArsenal(faction);
+    const draw = (model: VehicleModel, cap: number): VehicleDraw => ({
+      model,
+      hull: model.hull.map((g, lod) => this.batch(g, cap, lod)),
+      turret: model.turret.map((g, lod) => this.batch(g, cap, lod)),
+      far: this.batch(model.far, cap, 2),
+    });
+    const made: Fleet = {
+      vehicles: arsenal.vehicles.map((m, kind) => (m ? draw(m, FLEET_ROOM[kind] ?? 256) : null)),
+      jet: draw(arsenal.jet, 16),
+    };
+    this.fleets[faction] = made;
+    return made;
+  }
+
+  /** How unit `i` is drawn if it is a vehicle or an aircraft; null for men on foot. */
+  private drawOf(i: number): VehicleDraw | null {
+    const fleet = this.fleet(factionOf((this.info[i] >> INFO_TEAM_SHIFT) & INFO_TEAM_MASK));
+    return this.kind[i] === KIND_PLANE && this.jets[i] !== 0
+      ? fleet.jet
+      : fleet.vehicles[this.kind[i]];
+  }
+
   applySnapshot(s: Snapshot, now: number): void {
     const n = s.count;
     const before = this.count;
@@ -648,7 +650,7 @@ export class UnitView {
       if (
         wasAlive &&
         i < before &&
-        this.vehicles[this.kind[i]] === null &&
+        !HAS_MODEL[this.kind[i]] &&
         (this.info[i] & (INFO_CARRIED | INFO_INSIDE)) === 0
       ) {
         // Men drop out of a squad as it loses health: each leaves a body (I1).
@@ -710,6 +712,7 @@ export class UnitView {
       if (!wasAlive) {
         // New unit (or a reused slot): do not interpolate from wherever the slot was before.
         this.gen[i]++;
+        this.tiltP[i] = this.tiltR[i] = 0;
         prev[2 * i] = curr[2 * i];
         prev[2 * i + 1] = curr[2 * i + 1];
         // Face the enemy side of the map until it moves.
@@ -879,7 +882,7 @@ export class UnitView {
         ? SND_MISSILE
         : kind === KIND_IFV || kind === KIND_AD
           ? SND_AUTOCANNON
-          : this.vehicles[kind]
+          : HAS_MODEL[kind]
             ? SND_CANNON
             : SND_RIFLE;
     sound.at(snd, x, z, this.fog.sees(x, z));
@@ -1158,7 +1161,7 @@ export class UnitView {
           this.fog.sees(pos[3 * a], pos[3 * a + 2]),
         );
         if (this.lodOf[a] === LOD_HIDDEN) continue;
-        const m = this.vehicles[this.kind[a]]?.model;
+        const m = this.drawOf(a)?.model;
         const d = Math.hypot(unpackX(b) - pos[3 * a], unpackY(b) - pos[3 * a + 2]) || 1;
         const ux = (unpackX(b) - pos[3 * a]) / d;
         const uz = (unpackY(b) - pos[3 * a + 2]) / d;
@@ -1178,7 +1181,7 @@ export class UnitView {
         );
         continue;
       }
-      const veh = this.vehicles[this.kind[a]];
+      const veh = this.drawOf(a);
       const ax = pos[3 * a];
       const ay = pos[3 * a + 1];
       const az = pos[3 * a + 2];
@@ -1294,7 +1297,7 @@ export class UnitView {
   ): void {
     const fx = this.effects;
     const kind = this.kind[a];
-    const veh = this.vehicles[kind];
+    const veh = this.drawOf(a);
     if (kind === KIND_STRIKE) {
       // The drone dives into its target.
       fx.missile(ax, ay, az, bx, by, bz);
@@ -1478,10 +1481,7 @@ export class UnitView {
     for (let i = 0; i < n; i++) {
       const state = info[i] & INFO_STATE_MASK;
       if (state === STATE_FREE) continue;
-      const veh =
-        this.kind[i] === KIND_PLANE && this.jets[i] !== 0
-          ? this.jetDraw
-          : this.vehicles[this.kind[i]];
+      const veh = this.drawOf(i);
       const isTank = veh !== null;
       const alive = state === STATE_ALIVE;
       // Fallen squads and shot-down drones leave no wreck.
@@ -1652,22 +1652,113 @@ export class UnitView {
           coatOf +
           BURN_BASE +
           BURN_SCALE * (alive ? (jammedNow ? 0.45 + 0.4 * Math.sin(seconds * 24 + i) : 0) : 1);
+        const m = veh.model;
         if (lod === 2) {
           veh.far.put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
-        } else {
+        } else if (flying) {
           veh.hull[lod].put(x, y, z, sin, cos, 1, team[0], team[1], team[2], burn);
+          const th = this.turret[i];
+          if (veh.turret.length > 0) {
+            veh.turret[lod].put(
+              x + sin * m.turretZ,
+              y + m.turretY,
+              z + cos * m.turretZ,
+              Math.sin(th),
+              Math.cos(th),
+              1,
+              team[0],
+              team[1],
+              team[2],
+              burn,
+            );
+          }
+        } else {
+          // On the ground a vehicle lies along the slope under it, rocks back from its own
+          // gun and works on its springs as it drives. A wreck stays as it stopped.
           // Wrecks keep the turret where it died, knocked slightly askew.
           const th = this.turret[i] + (alive ? 0 : 0.5);
-          const ts = Math.sin(th);
-          const tc = Math.cos(th);
-          // Recoil: the turret kicks back along the gun and recovers.
           const since = seconds - this.shotAt[i];
-          const kick = since < 0.35 ? 0.16 * (1 - since / 0.35) ** 2 : 0;
-          const m = veh.model;
-          const px = x + sin * m.turretZ - ts * kick;
-          const pz = z + cos * m.turretZ - tc * kick;
+          if (alive) {
+            const reach = 1.1;
+            const half = 0.6;
+            const ht = this.terrain;
+            const front = ht.heightAt(x + sin * reach, z + cos * reach);
+            const back = ht.heightAt(x - sin * reach, z - cos * reach);
+            const left = ht.heightAt(x + cos * half, z - sin * half);
+            const right = ht.heightAt(x - cos * half, z + sin * half);
+            let pitch = Math.atan2(front - back, reach * 2);
+            let roll = Math.atan2(left - right, half * 2);
+            // The gun's kick: a shove away from where the turret points, dying away in a
+            // couple of swings. Heavier guns shove harder.
+            if (since < 1.2) {
+              const k = ROCK[kindNow] * Math.exp(-since * 4.2) * Math.cos(since * 11);
+              const rel = th - h;
+              pitch += k * Math.cos(rel);
+              roll += k * Math.sin(rel);
+            }
+            if (this.moving[i] === 1) {
+              pitch += 0.008 * Math.sin(seconds * 7.3 + i * 1.7);
+              roll += 0.006 * Math.sin(seconds * 5.1 + i * 2.9);
+            }
+            const ease = Math.min(1, dt * 9);
+            this.tiltP[i] += (pitch - this.tiltP[i]) * ease;
+            this.tiltR[i] += (roll - this.tiltR[i]) * ease;
+          }
+          const pitch = this.tiltP[i];
+          const roll = this.tiltR[i];
+          const f = this.hullFrame;
+          // Forward leans up the slope; the right-hand axis leans with the roll, then is
+          // squared to forward; up is what is left.
+          const cp = Math.cos(pitch);
+          const zx = sin * cp;
+          const zy = Math.sin(pitch);
+          const zz = cos * cp;
+          let xx = cos;
+          let xy = Math.tan(roll);
+          let xz = -sin;
+          const along = xx * zx + xy * zy + xz * zz;
+          xx -= zx * along;
+          xy -= zy * along;
+          xz -= zz * along;
+          const xl = Math.hypot(xx, xy, xz);
+          xx /= xl;
+          xy /= xl;
+          xz /= xl;
+          const yx = zy * xz - zz * xy;
+          const yy = zz * xx - zx * xz;
+          const yz = zx * xy - zy * xx;
+          f[0] = xx;
+          f[1] = xy;
+          f[2] = xz;
+          f[3] = yx;
+          f[4] = yy;
+          f[5] = yz;
+          f[6] = zx;
+          f[7] = zy;
+          f[8] = zz;
+          f[9] = x;
+          f[10] = y;
+          f[11] = z;
+          veh.hull[lod].frame(f, team[0], team[1], team[2], burn);
           if (veh.turret.length > 0) {
-            veh.turret[lod].put(px, y + m.turretY, pz, ts, tc, 1, team[0], team[1], team[2], burn);
+            // The turret turns on the hull's own deck, and its gun runs back on firing.
+            const rel = th - h;
+            const rs = Math.sin(rel);
+            const rc = Math.cos(rel);
+            const kick = since < 0.35 ? 0.1 * (1 - since / 0.35) ** 2 : 0;
+            const tzx = xx * rs + zx * rc;
+            const tzy = xy * rs + zy * rc;
+            const tzz = xz * rs + zz * rc;
+            f[0] = xx * rc - zx * rs;
+            f[1] = xy * rc - zy * rs;
+            f[2] = xz * rc - zz * rs;
+            f[6] = tzx;
+            f[7] = tzy;
+            f[8] = tzz;
+            f[9] = x + yx * m.turretY + zx * m.turretZ - tzx * kick;
+            f[10] = y + yy * m.turretY + zy * m.turretZ - tzy * kick;
+            f[11] = z + yz * m.turretY + zz * m.turretZ - tzz * kick;
+            veh.turret[lod].frame(f, team[0], team[1], team[2], burn);
           }
         }
         if (!alive && lod < 2) {
