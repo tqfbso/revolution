@@ -110,6 +110,33 @@ const HK_WALLS = [
 ]; // prettier-ignore
 /** Whether the buildings are drawn the Hong Kong way (set by the Structures of the map). */
 let hk = false;
+/** What each building of the map is (Kowloon: map.sStyle), or null. */
+let hkStyle: Uint8Array | null = null;
+// The styles (sim/kowloon.ts).
+const ST_TENEMENT = 1;
+const ST_OFFICE = 2;
+const ST_MALL = 3;
+const ST_HOTEL = 4;
+const ST_CIVIC = 5;
+const ST_HERITAGE = 6;
+const ST_CLOCK = 8;
+const ST_MOSQUE = 9;
+const ST_SPORTS = 10;
+const ST_KIOSK = 11;
+const ST_CHURCH = 12;
+/** Walls by style: curtain glass for offices, stone for hotels, pale panels for malls. */
+const HK_STYLE_WALLS: Record<number, readonly number[]> = {
+  [ST_OFFICE]: [0x3c4a54, 0x44535b, 0x4e5c62, 0x56646c, 0x394650, 0x5d6a6a],
+  [ST_MALL]: [0xb9b4a8, 0xc6c0b2, 0xa9a69c, 0xcfcabe, 0x9f9b92],
+  [ST_HOTEL]: [0xb7a58a, 0xc2b49b, 0x9e9384, 0xcdc3ae, 0xa89c88],
+  [ST_CIVIC]: [0xa7a49c, 0xbab6ab, 0x8f8f88, 0xc4bfb3],
+  [ST_HERITAGE]: [0xd2c8ae, 0xcabd98, 0xddd4bf],
+  [ST_CLOCK]: [0xa35a40],
+  [ST_MOSQUE]: [0xe0dccf],
+  [ST_SPORTS]: [0xc4c1b7, 0xb5b3ab],
+  [ST_KIOSK]: [0x8c3027],
+  [ST_CHURCH]: [0x9a6a52, 0xa49e92],
+};
 /** Their roofs: bare concrete and screed, a shade lighter than tarred felt. */
 const HK_ROOFS = [0x66645e, 0x5c5a55, 0x716e66, 0x5f615e];
 const ASPHALT = 0x39393a;
@@ -630,9 +657,12 @@ function ribbons(
   wall: number,
   wear: number,
   wsurf: number,
+  curtain = false,
 ): Part[] {
   const parts: Part[] = [];
   const h = floors * FLOOR;
+  // A curtain wall is glass from floor to floor, a thin mullion every metre and a half.
+  const band = curtain ? 0.8 : 0.44;
   const faces: [number, number, boolean, number][] = [
     [FACE_SOUTH, w, true, 1],
     [FACE_NORTH, w, true, -1],
@@ -646,19 +676,20 @@ function ribbons(
       const y = base + f * FLOOR + FLOOR * 0.55;
       const lit = !damaged && rand(id, 5000 + face * 97 + f) < 0.16;
       parts.push({
-        size: alongX ? [len - 0.5, FLOOR * 0.44, 0.05] : [0.05, FLOOR * 0.44, len - 0.5],
+        size: alongX ? [len - 0.5, FLOOR * band, 0.05] : [0.05, FLOOR * band, len - 0.5],
         at: alongX ? [cx, y, cz + off] : [cx + off, y, cz],
-        color: GLASS,
+        color: curtain ? 0x2b3a44 : GLASS,
         gloss: lit ? LIT_GLOSS : 1,
       });
     }
     // The frame: a column every two metres or so, the full height of the block.
-    const n = Math.max(2, Math.round(len / 2.3));
+    const n = Math.max(2, Math.round(len / (curtain ? 1.6 : 2.3)));
     const out = side * ((alongX ? d : w) / 2 + 0.07);
     for (let i = 0; i <= n; i++) {
       const t = (i / n - 0.5) * (len - 0.2);
+      const thin = curtain ? 0.07 : 0.16;
       parts.push({
-        size: alongX ? [0.16, h, 0.12] : [0.12, h, 0.16],
+        size: alongX ? [thin, h, 0.12] : [0.12, h, thin],
         at: alongX ? [cx + t, base + h / 2, cz + out] : [cx + out, base + h / 2, cz + t],
         color: wall,
         shade: wear * (0.86 + rand(id, 5400 + i) * 0.1),
@@ -678,6 +709,302 @@ function ribbons(
         });
       }
     }
+  }
+  return parts;
+}
+
+/**
+ * What makes a Kowloon building read as what it is from the air: a mall's glazed ground
+ * floor, canopy and boards, an office's plant room, a hotel's porch, the mosque's dome and
+ * minarets, the clock tower's faces and cupola, a church's spire.
+ */
+function hkDressing(
+  id: number,
+  style: number,
+  cx: number,
+  cz: number,
+  w: number,
+  d: number,
+  base: number,
+  floors: number,
+  damaged: boolean,
+  wall: number,
+): Part[] {
+  const parts: Part[] = [];
+  const top = base + floors * FLOOR;
+  const worn = damaged ? 0.55 : 1;
+  const long = w >= d;
+  if (style === ST_MALL) {
+    // Shop glass all round the ground floor, a deep canopy over it, boards up the wall.
+    const gh = FLOOR * 0.8;
+    parts.push({
+      size: [w + 0.06, gh, 0.05],
+      at: [cx, base + gh / 2 + 0.1, cz + d / 2 + 0.03],
+      color: GLASS,
+      gloss: 1,
+    });
+    parts.push({
+      size: [w + 0.06, gh, 0.05],
+      at: [cx, base + gh / 2 + 0.1, cz - d / 2 - 0.03],
+      color: GLASS,
+      gloss: 1,
+    });
+    parts.push({
+      size: [0.05, gh, d + 0.06],
+      at: [cx + w / 2 + 0.03, base + gh / 2 + 0.1, cz],
+      color: GLASS,
+      gloss: 1,
+    });
+    parts.push({
+      size: [0.05, gh, d + 0.06],
+      at: [cx - w / 2 - 0.03, base + gh / 2 + 0.1, cz],
+      color: GLASS,
+      gloss: 1,
+    });
+    const cy = base + FLOOR * 0.95;
+    if (long) {
+      parts.push({
+        size: [w + 0.4, 0.14, 1.3],
+        at: [cx, cy, cz + d / 2 + 0.65],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+      parts.push({
+        size: [w + 0.4, 0.14, 1.3],
+        at: [cx, cy, cz - d / 2 - 0.65],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+    } else {
+      parts.push({
+        size: [1.3, 0.14, d + 0.4],
+        at: [cx + w / 2 + 0.65, cy, cz],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+      parts.push({
+        size: [1.3, 0.14, d + 0.4],
+        at: [cx - w / 2 - 0.65, cy, cz],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+    }
+    // A band of darker cladding at each upper floor so the box is not blank.
+    for (let f = 2; f < floors; f += 2) {
+      const y = base + f * FLOOR;
+      parts.push({
+        size: [w + 0.08, 0.3, d + 0.08],
+        at: [cx, y, cz],
+        color: 0x7d7a73,
+        shade: worn,
+      });
+    }
+    if (floors >= 2) {
+      const boards = Math.max(1, Math.min(3, Math.floor((long ? w : d) / 7)));
+      const bh = Math.min(3.2, (floors - 1) * FLOOR * 0.6);
+      for (let i = 0; i < boards; i++) {
+        const t = ((i + 0.5) / boards - 0.5) * ((long ? w : d) - 3);
+        const bw = Math.min(5.5, bh * 1.8);
+        const y = base + FLOOR * 1.2 + bh / 2;
+        const cell =
+          rand(id, 7100 + i) < 0.5
+            ? SIGN_HOARDINGS.from + Math.floor(rand(id, 7110 + i) * SIGN_HOARDINGS.count)
+            : SIGN_SHOPS.from + Math.floor(rand(id, 7120 + i) * SIGN_SHOPS.count);
+        const shade = damaged ? 0.45 : 0.85;
+        if (long) {
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx + t, y, cz + d / 2 + 0.06],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+          });
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx - t, y, cz - d / 2 - 0.06],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+            rot: [0, Math.PI, 0],
+          });
+        } else {
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx + w / 2 + 0.06, y, cz + t],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+            rot: [0, Math.PI / 2, 0],
+          });
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx - w / 2 - 0.06, y, cz - t],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+            rot: [0, -Math.PI / 2, 0],
+          });
+        }
+      }
+    }
+  } else if (style === ST_OFFICE) {
+    // A plant room set back on the roof, and a thin crown round the parapet.
+    if (!damaged) {
+      parts.push({
+        size: [w * 0.55, FLOOR * 1.2, d * 0.55],
+        at: [cx, top + FLOOR * 0.6, cz],
+        color: 0x54595c,
+      });
+      parts.push({
+        size: [w * 0.6, 0.12, d * 0.6],
+        at: [cx, top + FLOOR * 1.25, cz],
+        color: 0x3e4346,
+      });
+    }
+    parts.push({
+      size: [w + 0.16, 0.5, d + 0.16],
+      at: [cx, top - 0.1, cz],
+      color: 0x8a8d8c,
+      shade: worn,
+    });
+    // A podium: the lower two floors in stone.
+    if (floors >= 8)
+      parts.push({
+        size: [w + 0.1, FLOOR * 1.9, d + 0.1],
+        at: [cx, base + FLOOR * 0.95, cz],
+        color: 0x8e8a82,
+        shade: worn,
+      });
+  } else if (style === ST_HOTEL) {
+    // A porch over the door and a pale stone base.
+    const pw = Math.min(6, (long ? w : d) * 0.4);
+    if (long)
+      parts.push({
+        size: [pw, 0.18, 2.6],
+        at: [cx, base + FLOOR * 0.9, cz + d / 2 + 1.3],
+        color: 0x3b3a38,
+        shade: worn,
+      });
+    else
+      parts.push({
+        size: [2.6, 0.18, pw],
+        at: [cx + w / 2 + 1.3, base + FLOOR * 0.9, cz],
+        color: 0x3b3a38,
+        shade: worn,
+      });
+    if (floors >= 6)
+      parts.push({
+        size: [w + 0.1, FLOOR * 1.9, d + 0.1],
+        at: [cx, base + FLOOR * 0.95, cz],
+        color: 0xcfc6b4,
+        shade: worn,
+      });
+    parts.push({
+      size: [w + 0.14, 0.4, d + 0.14],
+      at: [cx, top - 0.05, cz],
+      color: 0xd8d0be,
+      shade: worn,
+    });
+  } else if (style === ST_HERITAGE || style === ST_CIVIC) {
+    // A colonnade of piers along the long front, white against the wall.
+    const len = long ? w : d;
+    const n = Math.max(3, Math.round(len / 2.4));
+    const ph = Math.min(floors, 2) * FLOOR - 0.2;
+    if (style === ST_HERITAGE || floors <= 4)
+      for (let i = 0; i <= n; i++) {
+        const t = (i / n - 0.5) * (len - 0.4);
+        const at: [number, number, number] = long
+          ? [cx + t, base + ph / 2, cz + d / 2 + 0.25]
+          : [cx + w / 2 + 0.25, base + ph / 2, cz + t];
+        parts.push({ size: [0.32, ph, 0.32], at, color: 0xe3dccb, shade: worn });
+      }
+  } else if (style === ST_MOSQUE && !damaged) {
+    // The Kowloon Mosque: a white dome on a drum, a minaret at each corner.
+    const r = Math.min(w, d) * 0.22;
+    parts.push({ size: [r * 2.1, 1.4, r * 2.1], at: [cx, top + 0.7, cz], color: wall });
+    // A dome as rings drawn in step by step: radius r cos(a) at height r sin(a).
+    let y0 = top + 1.4;
+    const steps = 5;
+    for (let i = 0; i < steps; i++) {
+      const a0 = (i / steps) * (Math.PI / 2);
+      const a1 = ((i + 1) / steps) * (Math.PI / 2);
+      const r0 = r * Math.cos(a0);
+      const r1 = r * Math.cos(a1) + (i === steps - 1 ? 0.12 : 0);
+      const hh = r * (Math.sin(a1) - Math.sin(a0));
+      parts.push({
+        size: [r0 * 2, hh, r0 * 2],
+        at: [cx, y0 + hh / 2, cz],
+        color: 0xe9e6dc,
+        taper: [r0 - r1, r0 - r1],
+      });
+      y0 += hh;
+    }
+    parts.push({ size: [0.08, 1.4, 0.08], at: [cx, y0 + 0.7, cz], color: 0xb99a52 });
+    for (const [sx, sz] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ]) {
+      const mx = cx + sx * (w / 2 - 0.5);
+      const mz = cz + sz * (d / 2 - 0.5);
+      const mh = floors * FLOOR + 5;
+      parts.push({ size: [0.7, mh, 0.7], at: [mx, base + mh / 2, mz], color: 0xe6e2d6 });
+      parts.push({ size: [1.0, 0.25, 1.0], at: [mx, base + mh - 1.2, mz], color: 0xd8d3c4 });
+      parts.push({
+        size: [0.7, 1.3, 0.7],
+        at: [mx, base + mh + 0.65, mz],
+        color: 0xe6e2d6,
+        taper: [0.33, 0.33],
+      });
+    }
+  } else if (style === ST_CLOCK) {
+    // The old railway clock tower: stone bands, four clock faces, a cupola and a mast.
+    const s = Math.min(w, d);
+    for (let f = 3; f < floors; f += 3)
+      parts.push({
+        size: [w + 0.1, 0.35, d + 0.1],
+        at: [cx, base + f * FLOOR, cz],
+        color: 0xd2c8b2,
+        shade: worn,
+      });
+    if (!damaged) {
+      const cy = top - FLOOR * 1.2;
+      const c = s * 0.62;
+      parts.push({ size: [c, c, 0.06], at: [cx, cy, cz + d / 2 + 0.04], color: 0xece7da });
+      parts.push({ size: [c, c, 0.06], at: [cx, cy, cz - d / 2 - 0.04], color: 0xece7da });
+      parts.push({ size: [0.06, c, c], at: [cx + w / 2 + 0.04, cy, cz], color: 0xece7da });
+      parts.push({ size: [0.06, c, c], at: [cx - w / 2 - 0.04, cy, cz], color: 0xece7da });
+      parts.push({
+        size: [w * 0.7, FLOOR, d * 0.7],
+        at: [cx, top + FLOOR / 2, cz],
+        color: 0xd2c8b2,
+      });
+      parts.push({
+        size: [w * 0.7, FLOOR * 1.1, d * 0.7],
+        at: [cx, top + FLOOR * 1.55, cz],
+        color: 0x4f5a52,
+        taper: [w * 0.3, d * 0.3],
+      });
+      parts.push({
+        size: [0.1, 2.5, 0.1],
+        at: [cx, top + FLOOR * 2.1 + 1.25, cz],
+        color: 0x3a3a36,
+      });
+    }
+  } else if (style === ST_CHURCH && !damaged) {
+    // A square tower and a spire at one end.
+    const tw = Math.min(w, d) * 0.45;
+    const ex = long ? cx - w / 2 + tw / 2 : cx;
+    const ez = long ? cz : cz - d / 2 + tw / 2;
+    const th = floors * FLOOR + 3;
+    parts.push({ size: [tw, th, tw], at: [ex, base + th / 2, ez], color: wall });
+    parts.push({
+      size: [tw, tw * 2.2, tw],
+      at: [ex, base + th + tw * 1.1, ez],
+      color: 0x4b4f4d,
+      taper: [tw * 0.47, tw * 0.47],
+    });
   }
   return parts;
 }
@@ -794,8 +1121,11 @@ export function buildingParts(
   const h = floors * FLOOR;
   // Plaster and brick for houses; precast panels for most blocks and halls.
   const brick = !hk && cls === BUILD_HOUSE && rand(id, 41) < 0.42;
-  const wall =
-    hk && cls !== BUILD_HALL
+  const style = hkStyle ? hkStyle[id] : 0;
+  const styleWalls = HK_STYLE_WALLS[style];
+  const wall = styleWalls
+    ? styleWalls[Math.floor(rand(id, 1) * styleWalls.length)]
+    : hk && cls !== BUILD_HALL
       ? HK_WALLS[Math.floor(rand(id, 1) * HK_WALLS.length)]
       : brick
         ? BRICKS[Math.floor(rand(id, 1) * BRICKS.length)]
@@ -1071,7 +1401,11 @@ export function buildingParts(
   // or a low hipped roof of zinc; halls a row of gables in sheet, or one low one.
   const rr = rand(id, 10);
   const roof = hk
-    ? 'flat'
+    ? style === ST_HERITAGE || style === ST_CHURCH || style === ST_KIOSK
+      ? 'gable'
+      : style === ST_SPORTS && cls === BUILD_HALL
+        ? 'saw'
+        : 'flat'
     : cls === BUILD_HALL
       ? rr < 0.55 && L / Math.max(2, Math.round(L / 4)) < S
         ? 'saw'
@@ -1486,9 +1820,33 @@ export function buildingParts(
   // Windows on all four faces: dark glass set just proud of the wall. A Hong Kong block
   // has them in bands, one to a floor, between the columns of its frame.
   let k = 10;
-  if (hk && floors >= 5)
-    parts.push(...ribbons(id, cx, cz, w, d, base, floors, shopFace, damaged, wall, wear, wsurf));
-  for (let f = 0; f < (hk && floors >= 5 ? 0 : floors); f++) {
+  // A mall has no windows to speak of: a glazed ground floor, a canopy, big boards.
+  const banded =
+    hk && floors >= 5 && (style <= ST_OFFICE || style === ST_HOTEL || style === ST_CIVIC);
+  if (banded)
+    parts.push(
+      ...ribbons(
+        id,
+        cx,
+        cz,
+        w,
+        d,
+        base,
+        floors,
+        shopFace,
+        damaged,
+        wall,
+        wear,
+        wsurf,
+        style === ST_OFFICE,
+      ),
+    );
+  if (style !== 0) parts.push(...hkDressing(id, style, cx, cz, w, d, base, floors, damaged, wall));
+  const plainWindows =
+    style === ST_MALL || style === ST_KIOSK || style === ST_SPORTS || style === ST_CLOCK
+      ? 0
+      : floors;
+  for (let f = 0; f < (banded ? 0 : plainWindows); f++) {
     const y = base + f * FLOOR + FLOOR * 0.56;
     for (const [len, alongX] of [
       [w, true],
@@ -1527,7 +1885,7 @@ export function buildingParts(
       }
     }
   }
-  if (hk && floors >= 3 && cls !== BUILD_HALL) {
+  if (hk && floors >= 3 && cls !== BUILD_HALL && style <= ST_TENEMENT) {
     parts.push(...streetFront(id, cx, cz, w, d, base, floors, shopFace, damaged));
   }
   if (damaged) {
@@ -2464,6 +2822,7 @@ export class StructureView {
     }
     // Signs: a panel shows its cell of the sign sheet instead of its own colour.
     hk = map.layout === 'kowloon';
+    hkStyle = hk ? map.sStyle : null;
     const signs = makeSigns(hk);
     const tint = attribute('color', 'vec3');
     const sign = attribute('sign', 'float');

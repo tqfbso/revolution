@@ -3,6 +3,17 @@
 // plus a list of small things (hedges, bales, fences, poles) for `Clutter` to stand on it.
 // All of it is cosmetic (decision 071): nothing here blocks a unit, hides one or slows one.
 import * as THREE from 'three/webgpu';
+import { HK_CROSSINGS, HK_MTR, HK_PATHS, HK_ROADS, HK_STOPS, HK_TREES } from '../sim/kowloon-data';
+import {
+  HK_BUILT,
+  HK_EARTH,
+  HK_PATH,
+  HK_PAVE,
+  HK_PITCH,
+  HK_POOL,
+  HK_ROAD,
+  hkCells,
+} from '../sim/kowloon';
 import {
   MAP_CELLS,
   MAP_SIZE,
@@ -32,7 +43,15 @@ export const P_CAR = 11;
 export const P_VAN = 12;
 export const P_BIN = 13;
 export const P_TREE = 14;
-export const P_KINDS = 15;
+/** Hong Kong's street furniture (Kowloon): a length of kerbside railing, a red taxi, a
+ * double-decker bus, a green minibus, the glass kiosk over an MTR stair, a palm. */
+export const P_RAIL = 15;
+export const P_TAXI = 16;
+export const P_BUS = 17;
+export const P_MINIBUS = 18;
+export const P_MTR = 19;
+export const P_PALM = 20;
+export const P_KINDS = 21;
 
 /** One small thing standing on the land. */
 export interface Prop {
@@ -125,7 +144,8 @@ export class Land {
     this.marks = new THREE.DataTexture(new Uint8Array(4), 1, 1);
     this.reserve();
     this.occlusion();
-    if (map.streets.length > 0) this.city();
+    if (map.layout === 'kowloon') this.kowloon();
+    else if (map.streets.length > 0) this.city();
     else this.towns();
   }
 
@@ -326,6 +346,325 @@ export class Land {
         }
       }
     });
+  }
+
+  /**
+   * Kowloon: the real streets, drawn from their lines (see kowloon-data.ts) rather than
+   * from cells. Pavements of grey slabs from wall to wall, the carriageways at their widths
+   * with lane lines and yellow kerb lines, zebra crossings where the map has them, the
+   * park's paths as curves through its lawns, the pools tiled. Along the main roads: the
+   * railings that keep people off the carriageway, lamps, palms; taxis, buses and minibuses
+   * in the lanes; shelters at the bus stops and kiosks over the MTR stairs.
+   */
+  private kowloon(): void {
+    const map = this.map;
+    const ctx = this.mc;
+    const cells = hkCells();
+    // The ground: pavement wherever the city is paved, plazas a shade lighter.
+    for (let j = 0; j < MAP_CELLS; j++) {
+      for (let i = 0; i < MAP_CELLS; i++) {
+        const c = j * MAP_CELLS + i;
+        const k = cells[c];
+        const x = i * CELL;
+        const z = j * CELL;
+        if (k === HK_PAVE || k === HK_BUILT || k === HK_ROAD) {
+          this.taken[c] = 1;
+          const v = hash(i, j, 91);
+          ctx.fillStyle = rgba(v < 0.33 ? 0x9a978e : v < 0.66 ? 0x948f86 : 0x9f9b92, 0.97);
+          ctx.fillRect(x - 0.05, z - 0.05, CELL + 0.1, CELL + 0.1);
+          // Slabs.
+          ctx.fillStyle = rgba(0x7e7a72, 0.35);
+          for (let q = 1; q < 4; q++) {
+            ctx.fillRect(x + q, z, 0.06, CELL);
+            ctx.fillRect(x, z + q, CELL, 0.06);
+          }
+        } else if (k === HK_PATH) {
+          // The lawn the path runs over; the path itself is drawn below, as a line.
+          this.taken[c] = 1;
+        } else if (k === HK_EARTH) {
+          ctx.fillStyle = rgba(hash(i, j, 93) < 0.5 ? 0x7a6a55 : 0x84735c, 0.92);
+          ctx.fillRect(x - 0.05, z - 0.05, CELL + 0.1, CELL + 0.1);
+        } else if (k === HK_PITCH) {
+          this.taken[c] = 1;
+          ctx.fillStyle = rgba(j % 2 === 0 ? 0x4f7a3a : 0x587f40, 0.9);
+          ctx.fillRect(x - 0.05, z - 0.05, CELL + 0.1, CELL + 0.1);
+        } else if (k === HK_POOL) {
+          // Pale blue tiles under the water, a white deck round the pool.
+          ctx.fillStyle = rgba(0x5fb7c4, 1);
+          ctx.fillRect(x - 0.05, z - 0.05, CELL + 0.1, CELL + 0.1);
+          ctx.fillStyle = rgba(0x3f8f9e, 0.8);
+          ctx.fillRect(x + 1.9, z, 0.2, CELL);
+          for (const [di, dj] of [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+          ]) {
+            const n = (j + dj) * MAP_CELLS + i + di;
+            if (cells[n] === HK_POOL) continue;
+            ctx.fillStyle = rgba(0xd9d6cc, 1);
+            ctx.fillRect(
+              x + (di > 0 ? CELL : di < 0 ? -1.4 : 0),
+              z + (dj > 0 ? CELL : dj < 0 ? -1.4 : 0),
+              di === 0 ? CELL : 1.4,
+              dj === 0 ? CELL : 1.4,
+            );
+          }
+        }
+      }
+    }
+    // Round each building, a strip of pavement a shade darker where the wall meets it.
+    for (let s = 0; s < map.structCount; s++) {
+      if (map.sKind[s] !== S_BUILDING) continue;
+      ctx.fillStyle = rgba(0x75716a, 0.55);
+      ctx.fillRect(
+        map.sX[s] * CELL - 0.6,
+        map.sY[s] * CELL - 0.6,
+        map.sW[s] * CELL + 1.2,
+        map.sH[s] * CELL + 1.2,
+      );
+    }
+    const line = (r: readonly number[], f: (x: number, z: number, n: number) => void) => {
+      for (let n = 3; n + 1 < r.length; n += 2) f(r[n] / 10, r[n + 1] / 10, (n - 3) >> 1);
+    };
+    const stroke = (r: readonly number[], width: number, style: string, dash: number[] = []) => {
+      ctx.strokeStyle = style;
+      ctx.lineWidth = width;
+      ctx.setLineDash(dash);
+      ctx.lineCap = dash.length > 0 ? 'butt' : 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      line(r, (x, z, n) => (n === 0 ? ctx.moveTo(x, z) : ctx.lineTo(x, z)));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    /** A line `off` metres to the left of the road's own line, segment by segment. */
+    const offset = (
+      r: readonly number[],
+      off: number,
+      width: number,
+      style: string,
+      dash: number[] = [],
+    ) => {
+      ctx.strokeStyle = style;
+      ctx.lineWidth = width;
+      ctx.setLineDash(dash);
+      ctx.lineCap = 'butt';
+      for (let n = 3; n + 3 < r.length; n += 2) {
+        const ax = r[n] / 10;
+        const az = r[n + 1] / 10;
+        const bx = r[n + 2] / 10;
+        const bz = r[n + 3] / 10;
+        const len = Math.hypot(bx - ax, bz - az);
+        if (len < 0.5) continue;
+        const nx = -(bz - az) / len;
+        const nz = (bx - ax) / len;
+        ctx.beginPath();
+        ctx.moveTo(ax + nx * off, az + nz * off);
+        ctx.lineTo(bx + nx * off, bz + nz * off);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    };
+    // The park's paths: a gravel edge, then the paving.
+    for (const p of HK_PATHS) stroke(p, p[0] / 10 + 0.6, rgba(0x8a8270, 0.7));
+    for (const p of HK_PATHS) {
+      stroke(p, p[0] / 10, rgba(p[1] === 1 ? 0xa6a196 : 0xb3aa94, 0.95));
+      if (p[1] === 1) stroke(p, p[0] / 10, rgba(0x6f6a60, 0.6), [0.12, 0.35]);
+    }
+    // The carriageways: kerbs, then asphalt, all of them before any line on them.
+    for (const r of HK_ROADS) stroke(r, r[0] / 10 + 0.7, rgba(0x6f6c66, 1));
+    for (const r of HK_ROADS) stroke(r, r[0] / 10, rgba(r[1] & 1 ? 0x3f4043 : 0x46474a, 1));
+    for (let k = 0; k < HK_ROADS.length; k++) {
+      const r = HK_ROADS[k];
+      const w = r[0] / 10;
+      const lanes = r[2];
+      const oneway = (r[1] & 2) !== 0;
+      // Patches and old repairs.
+      line(r, (x, z, n) => {
+        if (hash(k, n, 21) > 0.5) return;
+        ctx.fillStyle = rgba(hash(k, n, 23) < 0.5 ? 0x333437 : 0x55565a, 0.7);
+        const a = 1.2 + 3 * hash(k, n, 24);
+        ctx.fillRect(
+          x - a / 2 + (hash(k, n, 22) - 0.5) * w * 0.5,
+          z - 0.6,
+          a,
+          0.8 + hash(k, n, 25),
+        );
+      });
+      // Yellow lines along the kerbs (no stopping), on the busy roads.
+      if (r[1] & 1) {
+        offset(r, w / 2 - 0.35, 0.14, rgba(0xc8a53a, 0.85));
+        offset(r, -w / 2 + 0.35, 0.14, rgba(0xc8a53a, 0.85));
+      }
+      // Lanes: broken white lines between lanes going the same way, a double line where a
+      // two-way road changes direction.
+      if (oneway) {
+        for (let q = 1; q < lanes; q++) {
+          offset(r, -w / 2 + (w * q) / lanes, 0.13, rgba(0xd8d6cc, 0.8), [2.2, 3.3]);
+        }
+      } else if (w > 4) {
+        offset(r, 0.18, 0.1, rgba(0xd8d6cc, 0.8));
+        offset(r, -0.18, 0.1, rgba(0xd8d6cc, 0.8));
+      }
+    }
+    // Crossings: white bars across the carriageway, studs either side.
+    for (let k = 0; k + 3 < HK_CROSSINGS.length; k += 4) {
+      const ax = HK_CROSSINGS[k] / 10;
+      const az = HK_CROSSINGS[k + 1] / 10;
+      const bx = HK_CROSSINGS[k + 2] / 10;
+      const bz = HK_CROSSINGS[k + 3] / 10;
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 2 || len > 40) continue;
+      ctx.strokeStyle = rgba(0xdcdad0, 0.85);
+      ctx.lineWidth = 2.6;
+      ctx.setLineDash([0.5, 0.55]);
+      ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.moveTo(ax, az);
+      ctx.lineTo(bx, bz);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // What stands along the roads.
+    const cellOf = (x: number, z: number) =>
+      x < 0 || z < 0 || x >= MAP_SIZE || z >= MAP_SIZE
+        ? -1
+        : Math.floor(z / CELL) * MAP_CELLS + Math.floor(x / CELL);
+    const onPavement = (x: number, z: number) => {
+      const c = cellOf(x, z);
+      return c >= 0 && cells[c] === HK_PAVE && map.structAt[c] < 0;
+    };
+    const onRoad = (x: number, z: number) => {
+      const c = cellOf(x, z);
+      return c >= 0 && cells[c] === HK_ROAD;
+    };
+    for (let k = 0; k < HK_ROADS.length; k++) {
+      const r = HK_ROADS[k];
+      const w = r[0] / 10;
+      const main = (r[1] & 1) !== 0;
+      const oneway = (r[1] & 2) !== 0;
+      const lanes = r[2];
+      let carry = hash(k, 0, 51) * 12;
+      for (let n = 3; n + 3 < r.length; n += 2) {
+        const ax = r[n] / 10;
+        const az = r[n + 1] / 10;
+        const bx = r[n + 2] / 10;
+        const bz = r[n + 3] / 10;
+        const len = Math.hypot(bx - ax, bz - az);
+        if (len < 0.5) continue;
+        const ux = (bx - ax) / len;
+        const uz = (bz - az) / len;
+        const nx = -uz;
+        const nz = ux;
+        const rot = Math.atan2(-uz, ux);
+        for (let t = carry; t < len; t += 3) {
+          const x = ax + ux * t;
+          const z = az + uz * t;
+          const step = Math.round((t - carry) / 3) + n * 7;
+          for (const side of [-1, 1]) {
+            const ox = x + nx * side * (w / 2 + 0.55);
+            const oz = z + nz * side * (w / 2 + 0.55);
+            // Railings along the busy roads, broken where something comes in.
+            if (main && onPavement(ox, oz) && !onRoad(ox + nx * side * 3, oz + nz * side * 3)) {
+              this.props.push({ kind: P_RAIL, x: ox, z: oz, rot, scale: 1 });
+            }
+            // Lamps every 27 m, one side then the other.
+            if (step % 9 === (side > 0 ? 0 : 4) && w > 4) {
+              const lx = x + nx * side * (w / 2 + 1.3);
+              const lz = z + nz * side * (w / 2 + 1.3);
+              if (onPavement(lx, lz))
+                this.props.push({
+                  kind: P_LAMP,
+                  x: lx,
+                  z: lz,
+                  rot: Math.atan2(-side * nx, -side * nz),
+                  scale: 1.25,
+                });
+            }
+          }
+          // The traffic: a vehicle in a lane here and there.
+          if (step % 3 === 0 && hash(k, step, 61) < (main ? 0.42 : 0.22)) {
+            const lane = Math.floor(hash(k, step, 62) * lanes);
+            const off = -w / 2 + ((lane + 0.5) * w) / lanes;
+            const vx = x + nx * off;
+            const vz = z + nz * off;
+            const back = !oneway && off > 0;
+            const roll = hash(k, step, 63);
+            const kind =
+              roll < 0.42
+                ? P_TAXI
+                : roll < 0.58 && main
+                  ? P_BUS
+                  : roll < 0.68
+                    ? P_MINIBUS
+                    : roll < 0.9
+                      ? P_CAR
+                      : P_VAN;
+            if (onRoad(vx, vz))
+              this.props.push({ kind, x: vx, z: vz, rot: rot + (back ? Math.PI : 0), scale: 1 });
+          }
+        }
+        carry = (((carry - len) % 3) + 3) % 3;
+      }
+    }
+    // Trees the map knows of, on the pavements and in the gardens.
+    for (let k = 0; k + 1 < HK_TREES.length; k += 2) {
+      const x = HK_TREES[k] / 10;
+      const z = HK_TREES[k + 1] / 10;
+      const c = cellOf(x, z);
+      if (c < 0 || map.structAt[c] >= 0 || cells[c] === HK_ROAD) continue;
+      this.props.push({ kind: P_TREE, x, z, rot: k, scale: 1.1 + 0.5 * hash(k, 1, 71) });
+    }
+    // Shelters at the bus stops, turned to the nearest carriageway.
+    const facing = (x: number, z: number): number | null => {
+      for (let d = 1; d <= 8; d++) {
+        for (let q = 0; q < 8; q++) {
+          const a = (q * Math.PI) / 4;
+          if (onRoad(x + Math.cos(a) * d, z + Math.sin(a) * d)) return a;
+        }
+      }
+      return null;
+    };
+    for (let k = 0; k + 1 < HK_STOPS.length; k += 2) {
+      const x = HK_STOPS[k] / 10;
+      const z = HK_STOPS[k + 1] / 10;
+      if (!onPavement(x, z)) continue;
+      const a = facing(x, z);
+      if (a === null) continue;
+      // The shelter's open side (+z) faces the road.
+      this.props.push({ kind: P_SHELTER, x, z, rot: Math.PI / 2 - a, scale: 1 });
+    }
+    for (let k = 0; k + 1 < HK_MTR.length; k += 2) {
+      const x = HK_MTR[k] / 10;
+      const z = HK_MTR[k + 1] / 10;
+      if (!onPavement(x, z)) continue;
+      const a = facing(x, z);
+      this.props.push({ kind: P_MTR, x, z, rot: a === null ? 0 : Math.PI / 2 - a, scale: 1 });
+    }
+    // Palms along the waterfront promenades.
+    for (let j = 2; j < MAP_CELLS - 2; j += 2) {
+      for (let i = 2; i < MAP_CELLS - 2; i += 2) {
+        const c = j * MAP_CELLS + i;
+        if (cells[c] !== HK_PAVE || map.structAt[c] >= 0) continue;
+        let sea = false;
+        for (let d = 1; d <= 2 && !sea; d++) {
+          sea =
+            cells[c + d] === 0 ||
+            cells[c - d] === 0 ||
+            cells[c + d * MAP_CELLS] === 0 ||
+            cells[c - d * MAP_CELLS] === 0;
+        }
+        if (sea && hash(i, j, 81) < 0.5)
+          this.props.push({
+            kind: P_PALM,
+            x: (i + 0.5) * CELL,
+            z: (j + 0.5) * CELL,
+            rot: hash(i, j, 82) * 6.3,
+            scale: 0.9 + 0.3 * hash(i, j, 83),
+          });
+      }
+    }
   }
 
   /**

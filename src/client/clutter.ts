@@ -18,7 +18,13 @@ import {
   P_KINDS,
   P_VAN,
   P_LAMP,
+  P_MINIBUS,
+  P_MTR,
+  P_PALM,
   P_POLE,
+  P_RAIL,
+  P_TAXI,
+  P_BUS,
   P_ROCK,
   P_SHED,
   P_SHELTER,
@@ -210,10 +216,79 @@ function shapes(): THREE.BufferGeometry[] {
     blob(0.85, 0.7, 0.9, -0.55, 2.8, -0.4, 0x3a4c24),
     blob(0.75, 0.6, 0.75, 0.05, 3.5, -0.2, 0x5b7335),
   ]);
+  // Hong Kong (Kowloon). A length of the grey-green railing along the kerbs, 3 m.
+  const rail = 0x5f6b64;
+  g[P_RAIL] = merge([
+    box(3.0, 0.07, 0.06, 0, 1.0, 0, rail),
+    box(3.0, 0.05, 0.05, 0, 0.55, 0, rail),
+    box(0.07, 1.04, 0.07, -1.47, 0.52, 0, rail),
+    box(0.05, 0.45, 0.04, -0.75, 0.77, 0, rail),
+    box(0.05, 0.45, 0.04, 0, 0.77, 0, rail),
+    box(0.05, 0.45, 0.04, 0.75, 0.77, 0, rail),
+  ]);
+  // The red urban taxi: a saloon with a silver roof and the sign on top.
+  g[P_TAXI] = merge([
+    box(4.4, 0.66, 1.72, 0, 0.64, 0, 0x9a2a24),
+    box(2.3, 0.54, 1.56, -0.25, 1.22, 0, 0x22282c),
+    box(2.4, 0.07, 1.6, -0.25, 1.52, 0, 0xb9b8b0),
+    box(0.5, 0.18, 0.2, -0.1, 1.64, 0, 0xd8d3b8),
+    box(0.62, 0.62, 1.8, 1.35, 0.31, 0, 0x1c1c1e),
+    box(0.62, 0.62, 1.8, -1.35, 0.31, 0, 0x1c1c1e),
+  ]);
+  // A double-decker: tall, cream and red, a dark band of windows on each deck.
+  g[P_BUS] = merge([
+    box(11.2, 3.9, 2.5, 0, 2.35, 0, 0xc9c0a8),
+    box(11.0, 0.9, 2.54, 0, 1.75, 0, 0x22282c),
+    box(11.0, 0.9, 2.54, 0, 3.4, 0, 0x22282c),
+    box(11.25, 0.5, 2.55, 0, 0.75, 0, 0x8c2a22),
+    box(0.06, 1.7, 2.3, 5.62, 2.6, 0, 0x22282c),
+    box(0.95, 0.95, 2.6, 3.6, 0.48, 0, 0x1c1c1e),
+    box(0.95, 0.95, 2.6, -3.3, 0.48, 0, 0x1c1c1e),
+  ]);
+  // A public light bus: a white van with a green roof.
+  g[P_MINIBUS] = merge([
+    box(6.0, 1.75, 2.0, 0, 1.22, 0, 0xd2d0c6),
+    box(5.6, 0.6, 2.04, -0.1, 1.6, 0, 0x22282c),
+    box(6.02, 0.25, 2.02, 0, 2.2, 0, 0x2f5f3e),
+    box(0.7, 0.7, 2.1, 1.9, 0.35, 0, 0x1c1c1e),
+    box(0.7, 0.7, 2.1, -1.9, 0.35, 0, 0x1c1c1e),
+  ]);
+  // The glass kiosk over an MTR stair: a steel frame, a glass canopy, the red sign.
+  g[P_MTR] = merge([
+    box(3.2, 0.12, 4.4, 0, 2.7, 0, 0x7f8a8e),
+    box(0.1, 2.7, 0.1, -1.55, 1.35, -2.15, 0x55595b),
+    box(0.1, 2.7, 0.1, 1.55, 1.35, -2.15, 0x55595b),
+    box(0.1, 2.7, 0.1, -1.55, 1.35, 2.15, 0x55595b),
+    box(0.1, 2.7, 0.1, 1.55, 1.35, 2.15, 0x55595b),
+    box(3.1, 2.4, 0.05, 0, 1.4, -2.15, 0x5d6d73),
+    box(0.05, 1.0, 4.3, -1.55, 0.5, 0, 0x5d6d73),
+    box(0.05, 1.0, 4.3, 1.55, 0.5, 0, 0x5d6d73),
+    box(1.2, 0.5, 0.08, 0, 3.05, 2.1, 0x8e2b25),
+  ]);
+  // A palm: a tall bare trunk, a few fronds at the top.
+  const palmTrunk = new THREE.CylinderGeometry(0.16, 0.24, 7.5, 6);
+  palmTrunk.translate(0, 3.75, 0);
+  const fronds: THREE.BufferGeometry[] = [tint(palmTrunk, 0x6a5d4a)];
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2;
+    fronds.push(
+      box(
+        2.6,
+        0.06,
+        0.55,
+        Math.cos(a) * 1.2,
+        7.45,
+        Math.sin(a) * 1.2,
+        k % 2 ? 0x4b6330 : 0x56703a,
+        [0, -a, -0.32],
+      ),
+    );
+  }
+  g[P_PALM] = merge(fronds);
   return g;
 }
 
-const SMALL = new Set([P_TUFT, P_ROCK, P_BALE, P_STACK, P_BIN]);
+const SMALL = new Set([P_TUFT, P_ROCK, P_BALE, P_STACK, P_BIN, P_RAIL]);
 const NO_SHADOW = new Set([P_TUFT]);
 
 interface Batch {
