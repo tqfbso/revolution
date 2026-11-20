@@ -3715,3 +3715,39 @@ shape are unchanged, and Fabio asked for true proportions (2026-11-15).
 
 Not done: per-army far-level shapes, hands on the weapon at the middle "still figure"
 level, a bomb in the loader's hands, engineers' and scouts' own kit.
+
+## 159. Each army's own aircraft, rotors that turn, and flight that banks (models and animation, phase 3) (2026-11-20)
+
+Drawing only, as phases 1 and 2: the sim, its commands and the golden hash are untouched.
+
+- **Models.** `src/client/aircraft.ts` holds eighteen aircraft, six per army: gunship,
+  transport helicopter, strike jet, transport plane, scout drone and one-way attack drone.
+  Original designs in the manner of each army's present-day types, chosen so the outline
+  from above tells them apart. Alliance: a narrow tandem gunship, a lifter with a rotor at
+  each end, a single-engine jet with two leaning fins, a four-propeller transport. Russia:
+  a gunship with two rotors one over the other and no tail rotor, a round-nosed lifter, a
+  straight-winged jet built to work low, a transport with four jets under drooping wings.
+  China: a gunship and lifter with long low cabins and a fan inside the fin, a delta jet
+  with a small wing ahead of it, a wide twin-engine transport. The army with no faction
+  flies the alliance's. The old shared aircraft builders in `models.ts` are gone.
+- **Rotors and propellers** are separate shapes (`VehicleModel.rotors`, `rotorShapes`),
+  each with a place, an axis and a rate, drawn by one instanced batch per shape and turned
+  from the clock in the unit view. The far level of detail carries a flat disc instead.
+- **Flight.** Flying units now share the hull frame code vehicles got in phase 1. They
+  roll into a turn in proportion to how fast the heading changes, put the nose down when
+  moving (helicopters most, planes least), and ride a slow swell when hovering. All eased,
+  all from positions the view already has.
+- **Wrecks.** A helicopter that comes down leaves its own army's airframe: `buildWrecks`
+  makes three poses from the model's body and its tail (whatever the builder put on
+  `tail` snaps off). Wrecks still stay all game (decision of 2026-11-17).
+- **Paint.** The unit shader puts mud on anything low in model space, right for a tank
+  and wrong for a jet. Aircraft models are therefore stored `AIR_LIFT` up from their
+  origin and drawn lowered along their own up axis (`VehicleModel.lift`), so no shader
+  change and no extra material. Aircraft wear is a narrower band than armour's
+  (`atLevels(build, wear)`), or a blade is all edge.
+- **Kit.** `fuselage` takes its stations in either order (nose first used to turn the
+  skin inside out).
+- **Cost.** Same budgets as phase 1, checked by `tests/models.test.ts`: under 6,500
+  triangles near, 1,400 mid, 420 far, per model with its rotors. Draw calls rise by the
+  rotor batches of the aircraft actually in the match. Frame rate on a real graphics card
+  is not measured from the cloud.

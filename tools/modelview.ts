@@ -213,7 +213,8 @@ async function start(): Promise<void> {
       if (!m) return;
       const px = xs[n] - mid + ox;
       widest = Math.max(widest, Math.abs(px));
-      const y = num('y', 0) + ([6, 7, 12, 13, 15, 17].includes(k) ? num('air', 1.2) : 0);
+      const y =
+        num('y', 0) + ([6, 7, 12, 13, 15, 17].includes(k) ? num('air', 1.2) : 0) - (m.lift ?? 0);
       const sin = Math.sin(heading);
       const cos = Math.cos(heading);
       const w = tintW(n + row * 3);
@@ -242,6 +243,35 @@ async function start(): Promise<void> {
         );
         count(m.turret[lod]);
       }
+      // Rotors and propellers where they sit, each stopped at its own angle.
+      (m.rotors ?? []).forEach((r, q) => {
+        const a = 0.4 + q * 0.7;
+        const c = Math.cos(a);
+        const sn = Math.sin(a);
+        // The airframe's axes: left, up, forward.
+        const X = [cos, 0, -sin];
+        const Y = [0, 1, 0];
+        const Z = [sin, 0, cos];
+        const mix = (u: number[], v: number[], p: number, q2: number) =>
+          u.map((e, k) => e * p + v[k] * q2);
+        const [fx, fy, fz] =
+          r.axis === 'y'
+            ? [mix(X, Z, c, -sn), Y, mix(X, Z, sn, c)]
+            : r.axis === 'x'
+              ? [X, mix(Y, Z, c, sn), mix(Z, Y, c, -sn)]
+              : [mix(X, Y, c, sn), mix(Y, X, c, -sn), Z];
+        const f = new Float32Array([
+          ...fx,
+          ...fy,
+          ...fz,
+          px + X[0] * r.x + Z[0] * r.z,
+          y + r.y,
+          z + X[2] * r.x + Z[2] * r.z,
+        ]);
+        const g = m.rotorShapes![r.shape][lod];
+        batch(g.clone()).frame(f, team[0], team[1], team[2], w);
+        count(g);
+      });
     });
   });
   for (const b of batches) b.flush();
