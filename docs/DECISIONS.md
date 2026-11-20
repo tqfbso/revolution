@@ -3636,3 +3636,46 @@ card, which only Fabio's machine can show.
 
 Not done in this phase: infantry and their crew-served weapons (phase 2), aircraft (phase
 3), turning wheels and running tracks, gun elevation, per-army wrecks of helicopters.
+
+## 157. Each army's own men, and crews that serve their weapons (models and animation, phase 2) (2026-11-20)
+
+Drawing only, as phase 1: the sim, its commands and the golden hash are untouched.
+
+- **Kit.** `Soldiers` is built once per faction in the match (`UnitView.troop`, as vehicles
+  are by `fleet`). The figure and its eight death poses are the same; what a man wears and
+  carries is his army's. The alliance keeps the high-cut helmet with a headset, the tall
+  pack with a bedroll, and the carbine with an optic and suppressor. Russia has the deep
+  round helmet with goggles, dark green cloth, a squat pack over a rolled mat, and a rifle
+  with a curved magazine and a gas tube. China has the helmet with a flared rim, sand khaki
+  with olive webbing, a slim pack with a spade and canteen, and a bullpup with a carrying
+  handle. Cloth colours are stated as they should look and divided by the faction's coat
+  (`under`), so the shader's coat still applies once.
+- **Squad weapons.** One man in five carries the machine gun (he is also one of the two
+  who go prone in a fight) and one has a rocket on his back: a disposable tube, or for
+  Russia the thin launcher with the warhead standing over his shoulder. Two more near
+  batches a faction; the middle level draws them with a rifle.
+- **Team weapons at the men's scale.** The mortar and the missile launcher were about
+  twice life size. They are rebuilt in metres and scaled with the men, one outline an army.
+  A team on the move has packed its weapon: it is not on the ground and the first man
+  carries the tube. Halted, it is set down and served (`src/client/drills.ts`): the mortar's
+  gunner kneels at the sight, the loader at the muzzle; on a shot the loader's hands are at
+  the muzzle, both duck with hands to helmets, he comes up with the next bomb and reaches
+  for the muzzle as the reload comes due. The missile gunner kneels behind the launcher
+  with his hands on the grips. Rifles ride slung, muzzle down. Mortar flash and missile
+  launch moved to the new muzzles.
+- **Stride.** A squad's stride now advances with the ground it covers (1.6 map units a
+  full stride) and not with the clock, so feet keep pace at any speed and stop when the
+  squad stops. Near men breathe at the halt.
+- **The dead** are baked per faction from that faction's kit (`Bodies.addSet`), so a body
+  is in its own army's helmet and colours. Poses, counts and persistence are unchanged.
+- **Cost.** Unit and body batches with nothing in them are now hidden, which the old code
+  did not do, so a second or third army's batches cost nothing until its men are in view
+  and an ordinary two-army battle issues fewer draws than before. Body batches start at
+  256 instances and grow.
+
+Trade-off taken: at true scale a mortar team is harder to tell from a rifle squad at
+distance than it was beside a two-metre-wide base plate. Its map symbol and the far-level
+shape are unchanged, and Fabio asked for true proportions (2026-11-15).
+
+Not done: per-army far-level shapes, hands on the weapon at the middle "still figure"
+level, a bomb in the loader's hands, engineers' and scouts' own kit.

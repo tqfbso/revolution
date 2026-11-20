@@ -80,7 +80,8 @@ await page.evaluate(
   },
   [PX, PZ, kinds],
 );
-await page.waitForTimeout(6000);
+// Time to walk to their places and settle (longer for men, who then set their weapons down).
+await page.waitForTimeout(Number(process.env.WAIT ?? 6000));
 await page.keyboard.press('Space');
 await page.addStyleTag({ content: '#paused{display:none!important}' });
 // Where they ended up standing: the last units made are ours.
@@ -95,6 +96,12 @@ const [CX, CZ] = await page.evaluate((n) => {
   return [x, z];
 }, kinds.length);
 console.log('standing at', CX.toFixed(0), CZ.toFixed(0));
+// POSE=halted,fight,since holds every squad in one stance (halted and in a fight, so many seconds after a shot).
+if (process.env.POSE)
+  await page.evaluate(
+    (p) => (window.__revolution.units.pose = p),
+    process.env.POSE.split(',').map(Number),
+  );
 const shot = async (name, dist, yaw = 0.5) => {
   await page.evaluate(
     ([x, z, d, yaw]) => window.__revolution.look(x, z, d, yaw),

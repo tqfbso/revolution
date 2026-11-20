@@ -3,14 +3,21 @@
 // before-and-after pictures. Run `npx vite` and open /tools/modelview.html with:
 //
 //   ?factions=1,2,3   which armies (a row each)        ?kinds=0,3,4   which kinds (default all)
-//   ?lod=0|1|2        level of detail                  ?men=1         foot soldiers instead
+//   ?lod=0|1|2        level of detail                  ?men=1|2       foot soldiers, or teams at their weapons
 //   ?yaw=&pitch=&dist=&x=&z=   the camera              ?gap=          room between models
 //   ?burn=1           as wrecks                        ?renderer=webgl
 import * as THREE from 'three/webgpu';
 import { Batch } from '../src/client/batch';
 import { makeLook, skyScene } from '../src/client/look';
-import { buildArsenal } from '../src/client/models';
-import { Soldiers } from '../src/client/soldiers';
+import {
+  LAUNCHER_AT,
+  MORTAR_AT,
+  buildArsenal,
+  buildLauncher,
+  buildMortar,
+} from '../src/client/models';
+import { ARM_TUBE, Soldiers } from '../src/client/soldiers';
+import { CREW, WEAPON_LAUNCHER, WEAPON_MORTAR, serve } from '../src/client/drills';
 import { BURN_BASE, BURN_SCALE, SEEDS, unitMaterial } from '../src/client/unitpaint';
 
 const params = new URLSearchParams(location.search);
@@ -87,8 +94,66 @@ async function start(): Promise<void> {
     const z = across ? 0 : -row * num('rows', 5.5);
     const ox = across ? (row - (factions.length - 1) / 2) * num('rows', 5.5) : 0;
     const tintW = (n: number) => (n % SEEDS) + faction * SEEDS + BURN_BASE + BURN_SCALE * burn;
+    if (params.get('men') === '2') {
+      // Teams at their weapons: the mortar just fired, ducking, and ready; the missile
+      // team; and a team packed up and running.
+      const soldiers = new Soldiers((g, cap) => batch(g, Math.min(cap, 256)), faction);
+      const guns = [
+        null,
+        batch(buildLauncher(faction).launcher, 8),
+        batch(buildMortar(faction).tube, 8),
+      ];
+      const sin = Math.sin(heading);
+      const cos = Math.cos(heading);
+      const teams: [number, number, number][] = [
+        [WEAPON_MORTAR, 0.05, 1],
+        [WEAPON_MORTAR, 0.6, 1],
+        [WEAPON_MORTAR, 3, 1],
+        [WEAPON_LAUNCHER, 3, 1],
+        [WEAPON_MORTAR, 3, 0],
+      ];
+      teams.forEach(([weapon, since, halted], t) => {
+        const cx = (t - (teams.length - 1) / 2) * num('gap', 1.6);
+        const at = weapon === WEAPON_MORTAR ? MORTAR_AT : LAUNCHER_AT;
+        const put = (fx: number, fz: number): [number, number] => [
+          cx + fx * cos + fz * sin,
+          z - fx * sin + fz * cos,
+        ];
+        if (halted) {
+          const [wx, wz] = put(at[0], at[1]);
+          guns[weapon]!.put(wx, 0, wz, sin, cos, 1, team[0], team[1], team[2], tintW(t));
+        }
+        CREW[weapon].forEach((place, m) => {
+          const [mx, mz] = put(place.x, place.z);
+          const face = heading + place.turn * halted;
+          if (halted) serve(soldiers, weapon, m, since, 7);
+          soldiers.man(
+            Math.min(lod, 1),
+            mx,
+            0,
+            mz,
+            Math.sin(face),
+            Math.cos(face),
+            halted,
+            0,
+            1 - halted,
+            0,
+            1 + m * 2.1,
+            0,
+            team[0],
+            team[1],
+            team[2],
+            tintW(t + m),
+            0,
+            !halted && m === 0 ? ARM_TUBE : 0,
+          );
+        });
+        widest = Math.max(widest, Math.abs(cx));
+      });
+      return;
+    }
     if (params.get('men') === '1') {
-      const soldiers = new Soldiers((g, cap) => batch(g, Math.min(cap, 256)), undefined);
+      const soldiers = new Soldiers((g, cap) => batch(g, Math.min(cap, 256)), faction);
       const poses: [number, number, number, number, number][] = [
         [0, 0, 0, 0, 0],
         [0, 0, 0, 1, 0],
@@ -118,6 +183,8 @@ async function start(): Promise<void> {
           team[1],
           team[2],
           tintW(k),
+          0,
+          k % 3,
         );
         widest = Math.max(widest, Math.abs(x));
       });
