@@ -208,7 +208,7 @@ export const EV_FELL = 31;
 /** a = building, b = 0 its ground floor has caught fire, 1 the fire has burnt out. */
 export const EV_FIRE = 32;
 /** a = the unit that sprang it, b = the enemy vehicle in the circle (or -1): an ambush opens fire (I6). */
-export const EV_AMBUSH = 37;
+export const EV_AMBUSH = 38;
 /** Flares burning at once. */
 export const MAX_FLARES = 16;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy

@@ -1,4 +1,4 @@
-// I6: rooftops and ambushes (the inspiration review, decision 154).
+// I6: rooftops and ambushes (the inspiration review, decision 155).
 //
 // A squad on a roof sees and reaches further and hits a vehicle on its top plate, but has
 // only a parapet round it (the rules are in fire() and resolveShells() in sim.ts; the

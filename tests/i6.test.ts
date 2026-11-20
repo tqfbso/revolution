@@ -1,4 +1,4 @@
-// I6 (decision 154): mortar teams, squads on roofs, ambushes.
+// I6 (decision 155): mortar teams, squads on roofs, ambushes.
 import { describe, expect, it } from 'vitest';
 import {
   CMD_AMBUSH,

@@ -1396,7 +1396,7 @@ export class UnitView {
       if (onRoof) {
         // Up on the roof (I6): the men are drawn standing on it, for anyone who can see it.
         const st = this.insideOf(i);
-        if (st >= 0) pos[3 * i + 1] = y = this.structures.topOf(st);
+        if (st >= 0) pos[3 * i + 1] = y = this.structures.roofAt(st, x, z);
       } else if (alive && (info[i] & INFO_INSIDE) !== 0) {
         // In a building: no model to draw. The house shows a pip per squad, for your own
         // garrisons always and for the enemy's once its fire has given it away.
@@ -1625,7 +1625,12 @@ export class UnitView {
             const f = figures[k];
             let sx = x + f.x * cos + f.z * sin;
             let sz = z - f.x * sin + f.z * cos;
-            let sy = onRoof ? y : this.terrain.heightAt(sx, sz) + fall;
+            let sy: number;
+            if (onRoof) {
+              const st = this.insideOf(i);
+              [sx, sz] = this.structures.onRoof(st, sx, sz);
+              sy = this.structures.roofAt(st, sx, sz);
+            } else sy = this.terrain.heightAt(sx, sz) + fall;
             let mfs = fs;
             let mfc = fc;
             let out = 1;
