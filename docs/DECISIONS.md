@@ -3636,6 +3636,7 @@ card, which only Fabio's machine can show.
 
 Not done in this phase: infantry and their crew-served weapons (phase 2), aircraft (phase
 3), turning wheels and running tracks, gun elevation, per-army wrecks of helicopters.
+
 ## 157. Buildings come down where they are hit (2026-11-20)
 
 Fabio, on the destruction since I1: "the destruction from top down is not realistic... it
