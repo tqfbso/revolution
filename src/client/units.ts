@@ -18,6 +18,7 @@ import {
   KIND_LIFT,
   KIND_PARA,
   KIND_PLANE,
+  KIND_MORTAR,
   KIND_INFANTRY,
   KIND_RECON,
   KIND_STRIKE,
@@ -68,6 +69,7 @@ import {
 import {
   INFO_CARRIED,
   INFO_INSIDE,
+  TASK_ROOF,
   INFO_REVEALED,
   INFO_SPOTTED,
   INFO_STATE_MASK,
@@ -101,6 +103,7 @@ import {
   box,
   buildInfantry,
   buildLauncher,
+  buildMortar,
   buildTank,
   type VehicleModel,
 } from './models';
@@ -113,6 +116,7 @@ import {
   SND_EXPLOSION,
   SND_HOWITZER,
   SND_IMPACT,
+  SND_MORTAR,
   SND_MISSILE,
   SND_RIFLE,
   type Sound,
@@ -491,6 +495,14 @@ export class UnitView {
       figures: [{ batch: launcher, x: 0, z: 0.25 }, ...TEAM_OFFSETS.map(([x, z]) => ({ x, z }))],
       drill: DRILL_CREW,
       far: batch(team.far, MAX_UNITS >> 2, 2),
+    };
+    // The mortar team (I6): the tube in front, its two crewmen beside it.
+    const mortar = buildMortar();
+    const tube = [0, 1].map((lod) => batch(mortar.tube.clone(), MAX_UNITS >> 3, lod, true));
+    this.squads[KIND_MORTAR] = {
+      figures: [{ batch: tube, x: 0, z: 0.45 }, ...TEAM_OFFSETS.map(([x, z]) => ({ x, z }))],
+      drill: DRILL_CREW,
+      far: batch(mortar.far, MAX_UNITS >> 3, 2),
     };
     // A recon team is two men: fewer, and that is how you tell it from a rifle squad.
     const pair: [number, number][] = [
@@ -1024,8 +1036,9 @@ export class UnitView {
       }
       if (ev[e] === EV_LAUNCH) {
         this.shotAt[a] = seconds;
+        const tube = this.kind[a] === KIND_MORTAR;
         this.sound?.at(
-          SND_HOWITZER,
+          tube ? SND_MORTAR : SND_HOWITZER,
           pos[3 * a],
           pos[3 * a + 2],
           this.fog.sees(pos[3 * a], pos[3 * a + 2]),
@@ -1037,6 +1050,11 @@ export class UnitView {
         const uz = (unpackY(b) - pos[3 * a + 2]) / d;
         this.turret[a] = Math.atan2(ux, uz);
         fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
+        if (tube) {
+          // A small flash and a puff at the muzzle, up and forward.
+          fx.mortar(pos[3 * a] + ux * 0.6, pos[3 * a + 1] + 0.9, pos[3 * a + 2] + uz * 0.6, ux, uz);
+          continue;
+        }
         fx.howitzer(
           pos[3 * a] + ux * (m?.muzzleZ ?? 2),
           pos[3 * a + 1] + (m ? m.turretY + m.muzzleY : 1.5),
@@ -1364,7 +1382,7 @@ export class UnitView {
         kindNow === KIND_PARA
           ? Math.max(0, 1 - (seconds - this.dropAt[i]) / CHUTE_SECONDS) * CHUTE_HEIGHT
           : 0;
-      const y =
+      let y =
         this.terrain.heightAt(x, z) +
         fall +
         (flying
@@ -1374,7 +1392,12 @@ export class UnitView {
       pos[3 * i + 1] = y;
       pos[3 * i + 2] = z;
       const teamId = (info[i] >> INFO_TEAM_SHIFT) & INFO_TEAM_MASK;
-      if (alive && (info[i] & INFO_INSIDE) !== 0) {
+      const onRoof = alive && (info[i] & INFO_INSIDE) !== 0 && (this.task[i] & TASK_ROOF) !== 0;
+      if (onRoof) {
+        // Up on the roof (I6): the men are drawn standing on it, for anyone who can see it.
+        const st = this.insideOf(i);
+        if (st >= 0) pos[3 * i + 1] = y = this.structures.topOf(st);
+      } else if (alive && (info[i] & INFO_INSIDE) !== 0) {
         // In a building: no model to draw. The house shows a pip per squad, for your own
         // garrisons always and for the enemy's once its fire has given it away.
         const st = this.insideOf(i);
@@ -1602,7 +1625,7 @@ export class UnitView {
             const f = figures[k];
             let sx = x + f.x * cos + f.z * sin;
             let sz = z - f.x * sin + f.z * cos;
-            let sy = this.terrain.heightAt(sx, sz) + fall;
+            let sy = onRoof ? y : this.terrain.heightAt(sx, sz) + fall;
             let mfs = fs;
             let mfc = fc;
             let out = 1;

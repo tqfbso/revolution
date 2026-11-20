@@ -17,19 +17,21 @@ export const SND_MISSILE = 4;
 export const SND_EXPLOSION = 5;
 export const SND_IMPACT = 6;
 export const SND_COLLAPSE = 7;
-const SOUNDS = 8;
+/** A mortar bomb leaving its tube (I6): a hollow knock, not a gun's boom. */
+export const SND_MORTAR = 8;
+const SOUNDS = 9;
 
 /** World units a second. Slower than the real thing would be at this scale, but audibly late. */
 const SPEED_OF_SOUND = 170;
 /** Distance at which a sound is at half its level. */
-const HALF_LEVEL = [26, 34, 55, 80, 30, 70, 60, 60];
+const HALF_LEVEL = [26, 34, 55, 80, 30, 70, 60, 60, 40];
 /** How loud each is at the source, relative to the others. */
-const LEVEL = [0.3, 0.42, 0.85, 1, 0.4, 1, 0.8, 0.9];
+const LEVEL = [0.3, 0.42, 0.85, 1, 0.4, 1, 0.8, 0.9, 0.55];
 /** The most of each that may start in one tick: a hundred rifles are not a hundred voices. */
-const PER_TICK = [3, 2, 2, 2, 1, 2, 2, 1];
+const PER_TICK = [3, 2, 2, 2, 1, 2, 2, 1, 2];
 const MAX_VOICES = 36;
 /** Voices in use above which a kind no longer starts: small arms never crowd out a blast. */
-const ROOM = [20, 24, 30, 36, 28, 36, 36, 36];
+const ROOM = [20, 24, 30, 36, 28, 36, 36, 36, 30];
 const VARIANTS = 3;
 /** The level of the far-battle bed with the whole map firing. */
 const BED = 0.3;
@@ -120,6 +122,18 @@ export function makeBuffers(ctx: AudioContext): AudioBuffer[][] {
           Math.exp(-t / 0.3) * Math.sin(2 * Math.PI * 44 * j * t * (1 - Math.min(0.4, t)));
         const tail = low(st, 0, noise(), 0.018) * 8 * Math.exp(-t / 0.7) * Math.min(1, t * 25);
         return crack * 0.7 + boom * 1.2 + tail;
+      }),
+    );
+    // A mortar: the bomb slides down the tube and goes off with a hollow knock, ringing a
+    // little in the tube, with a short puff of noise and no long tail.
+    out[SND_MORTAR].push(
+      render(ctx, 0.9, 61 + v, (t, noise, st) => {
+        const pop = noise() * Math.exp(-t / 0.008);
+        const knock =
+          Math.exp(-t / 0.07) * Math.sin(2 * Math.PI * 150 * j * t * (1 - Math.min(0.3, t * 2)));
+        const ring = Math.exp(-t / 0.16) * Math.sin(2 * Math.PI * 410 * j * t) * 0.18;
+        const puff = low(st, 0, noise(), 0.05) * 3 * Math.exp(-t / 0.12) * Math.min(1, t * 60);
+        return pop * 0.6 + knock + ring + puff;
       }),
     );
     // A missile leaving: a bang, then the motor tearing away.

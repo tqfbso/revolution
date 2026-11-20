@@ -33,6 +33,8 @@ import {
   CMD_ENTRENCH,
   CMD_STOP,
   CMD_UNLOAD,
+  CMD_ROOF,
+  CMD_AMBUSH,
   type Command,
 } from './commands';
 import {
@@ -98,6 +100,7 @@ import {
   AA_AVOID,
   KIND_ARTILLERY,
   KIND_ATGM,
+  KIND_MORTAR,
   KIND_COUNT,
   KIND_DRONE,
   KIND_ENGINEER,
@@ -135,6 +138,7 @@ import {
   NO_TEAM,
   QUEUE_MAX,
   STATE_ALIVE,
+  STANCE_FREE,
   TICK_RATE,
   type World,
 } from './world';
@@ -420,7 +424,7 @@ const CD = MAP_SIZE >> 4;
 const CC = CD * CD;
 
 /** What a unit of each type is worth in a fight, roughly. Strength is this times health. */
-export const POWER = [30, 8, 12, 16, 20, 2, 1, 10, 4, 2, 0, 6, 24, 2, 11, 0];
+export const POWER = [30, 8, 12, 16, 20, 2, 1, 10, 4, 2, 0, 6, 24, 2, 11, 0, 8];
 /** Units that form the line of an attack; the rest follow behind it. */
 export const LINE = KINDS.map(
   (k, i) => k.cls !== CLASS_AIR && !k.indirect && k.damage.some((d) => d > 0) && i !== KIND_TRUCK,
@@ -1533,13 +1537,16 @@ function wantedMix(ai: Ai, w: World): void {
   want.fill(0);
   // Roughly by head count: a mass of rifles and missile teams, a few carriers, and tanks
   // as the scarce asset (about one unit in ten) since they cost five army points each.
+  // A few mortar teams (I6) from the start: they go where the infantry goes.
   if (tier === 1) {
     want[KIND_INFANTRY] = 62;
     want[KIND_ATGM] = 18;
     want[KIND_IFV] = 20;
+    want[KIND_MORTAR] = 3;
   } else {
     want[KIND_INFANTRY] = 48;
     want[KIND_ATGM] = 18;
+    want[KIND_MORTAR] = 3;
     want[KIND_IFV] = 12;
     want[KIND_TANK] = 10;
     want[KIND_AD] = 3;
@@ -1575,6 +1582,7 @@ function wantedMix(ai: Ai, w: World): void {
     // Infantry: autocannon and shells.
     want[KIND_IFV] += 8;
     want[KIND_ARTILLERY] += 3;
+    want[KIND_MORTAR] += 2;
     want[KIND_TANK] -= 4;
   }
   if (air >= 2) {
@@ -1584,6 +1592,7 @@ function wantedMix(ai: Ai, w: World): void {
   if (dug >= 3) {
     // A dug-in enemy (houses today, field works later) is a job for guns.
     want[KIND_ARTILLERY] += 5;
+    want[KIND_MORTAR] += 2;
     want[KIND_TANK] += 2;
   }
   if (ai.foeWorks >= 6) {
@@ -1606,6 +1615,9 @@ function wantedMix(ai: Ai, w: World): void {
     else if (share[k] !== 100) want[k] = Math.trunc((want[k] * share[k]) / 100);
   }
 }
+
+/** Mortar teams the computer keeps at tier 1; four more for each tier after it. */
+const MORTARS = 6;
 
 function production(ai: Ai, w: World, out: Command[]): void {
   const map = w.map;
@@ -1661,6 +1673,9 @@ function production(ai: Ai, w: World, out: Command[]): void {
       } else if (k === KIND_ENGINEER && have[k] < sappers) {
         // So are the sappers, once there is a town to dig in at.
         score = 1 << 19;
+      } else if (k === KIND_MORTAR && have[k] >= MORTARS + 4 * (tier - 1)) {
+        // Mortars too are counted by the head (I6): a few per town is all they are for.
+        continue;
       } else if (k === KIND_HELI || k === KIND_PARA) {
         // And what flies: as many helicopters as it keeps, one planeload of paratroops.
         if (!calm || have[k] >= (k === KIND_HELI ? ai.tune.helis : paras)) continue;
@@ -2010,7 +2025,8 @@ function enlist(ai: Ai, w: World): void {
     } else if (kind === KIND_ENGINEER && ai.sappers.length < ai.tune.sappers) {
       role = R_SAPPER;
       ai.sappers.push(i);
-    } else if (FOOT(kind) || kind === KIND_RECON) {
+    } else if (FOOT(kind) || kind === KIND_RECON || kind === KIND_MORTAR) {
+      // (A mortar team holds a town from a roof, I6.)
       let best = -1;
       let need = 0;
       for (let t = 0; t < map.townCount && inTowns < cap; t++) {
@@ -2072,6 +2088,40 @@ export function billetStart(w: World, lists: readonly number[][]): void {
 }
 
 /**
+ * Does unit `i` hold house `s` from its roof (I6)? A mortar always: it cannot fire from
+ * inside. A missile team on Normal and Hard, on a house of two floors or more, where it
+ * reaches over the street and hits a tank on its top.
+ */
+function roofer(ai: Ai, w: World, i: number, s: number): boolean {
+  if (stageOf(w, s) >= STAGE_GUTTED) return false;
+  const k = w.kind[i];
+  if (k === KIND_MORTAR) return true;
+  return k === KIND_ATGM && ai.tune.cover && w.map.sFloors[s] >= 2;
+}
+
+/** The circle a computer's missile team on a roof waits on: most of its reach from up there. */
+const WAIT_R = fx(30);
+/** It lies in wait only with no enemy vehicle it knows of nearer than this. */
+const WAIT_CLEAR = fx(70);
+
+/**
+ * Should missile team `i` (on a roof) lie in wait (I6, Normal and Hard)? Only with nothing
+ * to shoot at and no enemy vehicle known nearby: an ambush is laid before the fight, never
+ * in the middle of one.
+ */
+function lieInWait(ai: Ai, w: World, i: number): boolean {
+  if (w.kind[i] !== KIND_ATGM || !ai.tune.cover) return false;
+  if (w.stance[i] !== STANCE_FREE || w.attack[i] !== NO_TARGET) return false;
+  // Found out already: lying low now would only cost it its first shots.
+  if (w.spotted[i] > w.tick) return false;
+  for (const e of ai.seen) {
+    if (w.state[e] !== STATE_ALIVE || kindOf(w, e).cls !== CLASS_VEHICLE) continue;
+    if (dist(w.posX[e], w.posY[e], w.posX[i], w.posY[i]) < WAIT_CLEAR) return false;
+  }
+  return true;
+}
+
+/**
  * Put `units` into `houses`, the first in the list first and three to a house before any
  * house is filled. Who finds no house holds the sandbags at `nest` (a cell, or -1), or
  * stays within `r` of (x, y). Call `billetStart` first.
@@ -2093,7 +2143,17 @@ export function billet(
   for (const i of units) {
     const at = w.inside[i];
     if (at >= 0) {
-      if (w.sHp[at] * 3 >= map.sMaxHp[at]) continue;
+      if (w.sHp[at] * 3 >= map.sMaxHp[at]) {
+        // In a good house already: a mortar (always) or a missile team (Normal and Hard)
+        // goes up on its roof (I6).
+        if (w.roof[i] === 0 && roofer(ai, w, i, at)) {
+          out.push({ type: CMD_ROOF, units: [i], structure: at });
+        } else if (w.roof[i] !== 0 && lieInWait(ai, w, i)) {
+          // A missile team on a roof with nothing about lies in wait for the armour.
+          out.push({ type: CMD_AMBUSH, units: [i], x: w.posX[i], y: w.posY[i], radius: WAIT_R });
+        }
+        continue;
+      }
     } else if ((w.flags[i] & FLAG_GARRISON) !== 0) continue;
     let best = -1;
     for (let pass = 0; pass < 2 && best < 0; pass++) {
@@ -2115,7 +2175,12 @@ export function billet(
     if (list) list.push(i);
     else batches.set(best, [i]);
   }
-  for (const [structure, list] of batches) out.push({ type: CMD_GARRISON, units: list, structure });
+  for (const [structure, list] of batches) {
+    const up = list.filter((i) => roofer(ai, w, i, structure));
+    const down = up.length === 0 ? list : list.filter((i) => !up.includes(i));
+    if (up.length > 0) out.push({ type: CMD_ROOF, units: up, structure });
+    if (down.length > 0) out.push({ type: CMD_GARRISON, units: down, structure });
+  }
   // No house left to hold: the rubble of the town is cover too. A ruin halves what reaches
   // the men lying in it, and a ruin that has been dug in does better than that.
   if (loose.length > 0) {
@@ -2937,7 +3002,7 @@ export function follow(
   order(out, CMD_MOVE, rear, bx, by);
   escort(ai, w, out, gunships, cx, cy, led);
   if (strikes.length === 0) return;
-  const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2, 0, 0, 0, 0, 0];
+  const worth = [3, 0, 0, 1, 5, 0, 0, 0, 4, 4, 2, 0, 0, 0, 0, 0, 0];
   let best = -1;
   let bestKey = 0;
   for (const e of ai.seen) {

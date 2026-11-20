@@ -641,6 +641,33 @@ export const TEAM_OFFSETS: readonly [number, number][] = [
 ];
 
 /** An anti-tank missile launcher on its tripod: a fat tube, a sight, three legs. */
+/**
+ * The mortar team's weapon (I6): a tube on a bipod, its base plate on the ground, a few
+ * bombs in their cases beside it. The crew are the team's own men (TEAM_OFFSETS).
+ */
+export function buildMortar(): { tube: THREE.BufferGeometry; far: THREE.BufferGeometry } {
+  const g: THREE.BufferGeometry[] = [];
+  // Base plate, then the tube leaning forward at about 50 degrees from the ground.
+  g.push(cyl(0.2, 0.04, 'y', { at: [0, 0.02, -0.18], color: STEEL }, 10));
+  g.push(cyl(0.055, 0.95, 'z', { at: [0, 0.37, 0.1], rot: [-0.87, 0, 0], color: 0x3a3e30 }, 8));
+  g.push(cyl(0.07, 0.08, 'z', { at: [0, 0.69, 0.4], rot: [-0.87, 0, 0], color: STEEL }, 8));
+  // The bipod's two legs and the sight.
+  for (const x of [-0.16, 0.16]) {
+    g.push(box(0.03, 0.5, 0.03, { at: [x, 0.24, 0.32], rot: [0.2, 0, x * 1.6], color: STEEL }));
+  }
+  g.push(box(0.07, 0.07, 0.1, { at: [-0.08, 0.5, 0.22], team: 1 }));
+  // Bomb cases, olive with a stencil of team colour.
+  g.push(box(0.16, 0.1, 0.34, { at: [0.36, 0.05, -0.12], color: 0x4a4b36 }));
+  g.push(box(0.17, 0.02, 0.06, { at: [0.36, 0.1, -0.12], team: 0.6 }));
+  const far = merge([
+    ...TEAM_OFFSETS.map(([x, z]) =>
+      box(0.3, 0.6, 0.3, { at: [x, 0.3, z], color: 0x3a3d2e, team: 0.7 }),
+    ),
+    box(0.16, 0.16, 0.8, { at: [0, 0.35, 0.1], rot: [-0.87, 0, 0], color: 0x2c2f25, team: 0.5 }),
+  ]);
+  return { tube: merge(g), far };
+}
+
 export function buildLauncher(): { launcher: THREE.BufferGeometry; far: THREE.BufferGeometry } {
   const g: THREE.BufferGeometry[] = [];
   g.push(cyl(0.075, 0.95, 'z', { at: [0, 0.4, 0.1], rot: [-0.06, 0, 0], color: 0x3c4030 }, 8));

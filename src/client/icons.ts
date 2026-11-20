@@ -13,6 +13,7 @@ import {
   KIND_HELI,
   KIND_LIFT,
   KIND_PARA,
+  KIND_MORTAR,
   KIND_PLANE,
   KIND_EW,
   KIND_IFV,
@@ -115,6 +116,12 @@ function glyphs(): Draw[] {
     c.beginPath();
     c.arc(32, 26, 15, Math.PI, 0);
     c.stroke();
+  };
+  // The mortar: a tube pointing up out of a base plate.
+  g[KIND_MORTAR] = (c) => {
+    line(c, [32, 44, 32, 18]);
+    line(c, [25, 25, 32, 17, 39, 25]);
+    line(c, [22, 46, 42, 46]);
   };
   // The transport plane: wings and a tail.
   g[KIND_PLANE] = (c) => {

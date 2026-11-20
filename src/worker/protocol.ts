@@ -10,6 +10,10 @@ export const TASK_HOLD_FIRE = 8;
 export const TASK_MOVING = 16;
 /** Out of rations: beyond supply for too long (see the logistics). */
 export const TASK_HUNGRY = 32;
+/** Lying in wait (I6, STANCE_AMBUSH): fire held until a vehicle enters its circle. */
+export const TASK_AMBUSH = 64;
+/** Up on the roof of the building it is in (I6). */
+export const TASK_ROOF = 128;
 export const COMMANDER_STRIDE = 10;
 /** Its losses are replaced by themselves; it is asking for reinforcements; it is in a fight. */
 export const COMMANDER_AUTO = 1;

@@ -461,7 +461,7 @@ async function start(): Promise<void> {
     if (e.code === 'KeyM') board.toggle();
     else if (e.code === 'KeyN') board.newFromSelection();
     else if (e.code === 'KeyT' && !e.repeat) board.quickMove();
-    else if (e.code === 'KeyR' && !e.repeat) board.quickMove(M_FOCUS);
+    else if (e.code === 'KeyR' && !e.repeat && !e.shiftKey) board.quickMove(M_FOCUS);
   });
   // `?demo=1`: the computer plays our army as well, to watch it at work.
   const demo = match.armies[myTeam].controller !== 'human';

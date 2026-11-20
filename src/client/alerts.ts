@@ -13,6 +13,7 @@ import {
   EV_STRIKE,
   EV_PLANE,
   EV_PARADROP,
+  EV_AMBUSH,
   unpackX,
   unpackY,
   MAX_UNITS,
@@ -245,6 +246,16 @@ export class Alerts {
         if ((b & 255) === me) {
           this.show(this.book.raise(ALERT_NOTE, x, z, 'Paratroops on the ground', now));
         } else this.attack(ALERT_ARMY, x, z, 'Enemy paratroops landing', now);
+      } else if (type === EV_AMBUSH) {
+        // An ambush opens fire (I6): ours springs, or we have walked into theirs.
+        const x = s.positions[2 * a];
+        const z = s.positions[2 * a + 1];
+        if (u.teamOf(a) === me) {
+          const text = b >= 0 ? 'Ambush sprung' : 'Ambush found out, opening fire';
+          this.show(this.book.raise(ALERT_NOTE, x, z, text, now));
+        } else if (b >= 0 && b < s.count && u.teamOf(b) === me) {
+          this.attack(ALERT_ARMY, x, z, 'Ambush!', now);
+        }
       } else if (type === EV_DEATH) {
         if (u.teamOf(a) === me && b >= 0 && b < s.count && u.teamOf(b) !== me) this.struck(a, now);
       } else if (type === EV_STORM) {

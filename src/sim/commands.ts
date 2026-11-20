@@ -427,6 +427,33 @@ export interface MarchCommand {
 }
 
 /** The battle is fought at night (or, off, by day). Given once, when the game is set up. */
+/**
+ * I6. Squads go up on the roof of a building (`structure`): those inside it climb up, those
+ * outside walk to it, go in and climb up. With `off` those inside come back down. From the
+ * roof they reach further and hit vehicles on the top, but have no walls round them.
+ */
+export const CMD_ROOF = 47;
+export interface RoofCommand {
+  type: typeof CMD_ROOF;
+  units: number[];
+  structure: number;
+  off?: boolean;
+}
+
+/**
+ * I6. Units stop where they are and lie in wait for a vehicle to enter the circle round
+ * (x, y) of `radius`: fire held, men hard to see, until it does (STANCE_AMBUSH). Any other
+ * order calls the ambush off.
+ */
+export const CMD_AMBUSH = 48;
+export interface AmbushCommand {
+  type: typeof CMD_AMBUSH;
+  units: number[];
+  x: number;
+  y: number;
+  radius: number;
+}
+
 export const CMD_NIGHT = 37;
 export interface NightCommand {
   type: typeof CMD_NIGHT;
@@ -507,6 +534,8 @@ export interface Sender {
 }
 
 export type Command = (
+  | RoofCommand
+  | AmbushCommand
   | ShapeCommand
   | MarchCommand
   | GiveCommand

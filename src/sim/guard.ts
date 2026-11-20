@@ -53,6 +53,8 @@ import {
   CMD_REPEAT,
   CMD_RESEARCH,
   CMD_SHAPE,
+  CMD_ROOF,
+  CMD_AMBUSH,
   CMD_SPAWN,
   CMD_STANCE,
   CMD_STOP,
@@ -110,6 +112,8 @@ const LISTS: Record<number, readonly string[]> = {
   [CMD_DUTY]: [],
   [CMD_SHAPE]: ['units'],
   [CMD_MARCH]: [],
+  [CMD_ROOF]: ['units'],
+  [CMD_AMBUSH]: ['units'],
 };
 
 /** Fields that, when present, must be numbers; and those that must be true or false. */
@@ -142,7 +146,7 @@ const NUMBERS = [
   'army',
   'seen',
 ] as const;
-const FLAGS = ['queue', 'smoke', 'flare', 'on', 'wander'] as const;
+const FLAGS = ['queue', 'smoke', 'flare', 'on', 'wander', 'off'] as const;
 
 /** No list in an order is longer: there are never more units than this. */
 export const MAX_LIST = 16384;

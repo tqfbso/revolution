@@ -8,7 +8,9 @@ import type { Command } from '../src/sim/commands';
 import { S_BUILDING, generateMap, type Layout } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { stageOf, step } from '../src/sim/sim';
-import { STATE_ALIVE, createWorld } from '../src/sim/world';
+import { onRoof } from '../src/sim/ambush';
+import { KIND_MORTAR } from '../src/sim/units';
+import { EV_AMBUSH, EV_LAUNCH, STANCE_AMBUSH, STATE_ALIVE, createWorld } from '../src/sim/world';
 
 const seed = Number(process.argv[2] ?? 1);
 const minutes = Number(process.argv[3] ?? 30);
@@ -20,6 +22,9 @@ let cmds: Command[] = skirmishCommands(w.map);
 let stepTotal = 0;
 let stepWorst = 0;
 let houses = 0;
+// I6: mortar bombs fired and ambushes sprung so far.
+let bombs = 0;
+let sprung = 0;
 for (let s = 0; s < w.map.structCount; s++) if (w.map.sKind[s] === S_BUILDING) houses++;
 console.log(`${layout} seed ${seed}: ${houses} buildings, ${w.civCount} civilians`);
 for (let tick = 0; tick < minutes * 1200; tick++) {
@@ -30,6 +35,10 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
   stepTotal += sm;
   if (sm > stepWorst) stepWorst = sm;
   cmds = [];
+  for (let e = 0; e < w.events.length; e += 3) {
+    if (w.events[e] === EV_AMBUSH) sprung++;
+    else if (w.events[e] === EV_LAUNCH && w.kind[w.events[e + 1]] === KIND_MORTAR) bombs++;
+  }
   w.events.length = 0;
   if (tick % 6000 === 5999) {
     const stages = [0, 0, 0, 0, 0];
@@ -44,9 +53,18 @@ for (let tick = 0; tick < minutes * 1200; tick++) {
     const civ = [0, 0, 0, 0, 0];
     for (let k = 0; k < w.civCount; k++) civ[w.civState[k]]++;
     let units = 0;
-    for (let i = 0; i < w.count; i++) if (w.state[i] === STATE_ALIVE) units++;
+    let mortars = 0;
+    let roofs = 0;
+    let waiting = 0;
+    for (let i = 0; i < w.count; i++) {
+      if (w.state[i] !== STATE_ALIVE) continue;
+      units++;
+      if (w.kind[i] === KIND_MORTAR) mortars++;
+      if (onRoof(w, i)) roofs++;
+      if (w.stance[i] === STANCE_AMBUSH) waiting++;
+    }
     console.log(
-      `min ${(tick + 1) / 1200}: stages ${stages.join('/')} (pancaked ${flat}, caught fire ${burnt})  civ home ${civ[CIV_HOME]} run ${civ[CIV_FLEEING]} out ${civ[CIV_GONE]} dead ${civ[CIV_DEAD]} (by ${w.civKilled[0]}, ${w.civKilled[1]})  units ${units}  step ${(stepTotal / (tick + 1)).toFixed(2)} ms worst ${stepWorst.toFixed(0)}`,
+      `min ${(tick + 1) / 1200}: stages ${stages.join('/')} (pancaked ${flat}, caught fire ${burnt})  civ home ${civ[CIV_HOME]} run ${civ[CIV_FLEEING]} out ${civ[CIV_GONE]} dead ${civ[CIV_DEAD]} (by ${w.civKilled[0]}, ${w.civKilled[1]})  units ${units}  step ${(stepTotal / (tick + 1)).toFixed(2)} ms worst ${stepWorst.toFixed(0)}  I6: mortars ${mortars} bombs ${bombs} on roofs ${roofs} waiting ${waiting} sprung ${sprung}`,
     );
   }
 }

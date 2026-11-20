@@ -29,6 +29,11 @@ import {
   type SpawnCommand,
   CMD_DUTY,
   CMD_GIVE,
+  CMD_AMBUSH,
+  CMD_ROOF,
+  CMD_SHAPE,
+  CMD_STANCE,
+  type RoofCommand,
 } from './commands';
 import { applyEconomyCommand, dropBuilds, updateEconomy } from './economy';
 import { applyCommanderCommand } from './commanders';
@@ -195,7 +200,14 @@ import {
   HUNT_PERIOD,
   KIND_AD,
   KIND_HELI,
+  KIND_MORTAR,
+  ROOF_EXPOSED_PCT,
+  ROOF_RANGE_BONUS,
+  ROOF_SIGHT_PCT,
+  ROOF_TOP_PCT,
+  ROOF_DEAD,
 } from './units';
+import { applyAmbushCommand, callOff, lurking, onRoof, updateAmbush } from './ambush';
 import {
   CHASE_FIELDS,
   EV_BREACH,
@@ -255,7 +267,7 @@ import {
   MAX_UNITS,
   NO_TARGET,
   NO_TEAM,
-  STANCE_HOLD_FIRE,
+  STANCE_FREE,
   STATE_ALIVE,
   STATE_FREE,
   STATE_WRECK,
@@ -458,6 +470,7 @@ export function step(w: World, commands: readonly Command[]): void {
   bucket(w, COARSE_SHIFT, COARSE_DIM, coarseStart, coarseSorted);
   updateChaseFields(w);
   updateStructureOrders(w);
+  updateAmbush(w);
   updateTransport(w);
   updateEconomy(w);
   updateLogistics(w);
@@ -579,6 +592,18 @@ function applyCommand(w: World, cmd: Command): void {
   ) {
     for (const id of cmd.units) if (id >= 0 && id < w.count) w.routeOf[id] = 0;
   }
+  // Any order that changes what they do calls an ambush off (I6).
+  if (
+    'units' in cmd &&
+    cmd.type !== CMD_CAMERA &&
+    cmd.type !== CMD_AMBUSH &&
+    cmd.type !== CMD_ROOF &&
+    cmd.type !== CMD_GIVE &&
+    cmd.type !== CMD_SHAPE &&
+    cmd.type !== CMD_STANCE
+  ) {
+    callOff(w, cmd.units);
+  }
   // Who gave it: the units a player orders himself fight on his account (decision 103).
   // Orders from a staff or from the computer carry no name and change nothing.
   if (cmd.by !== undefined && cmd.by >= 0 && cmd.by < STAT_SEATS && 'units' in cmd) {
@@ -598,6 +623,11 @@ function applyCommand(w: World, cmd: Command): void {
   if (applyUrbanCommand(w, cmd)) return;
   if (applyDemolishCommand(w, cmd)) return;
   if (applyAirCommand(w, cmd)) return;
+  if (applyAmbushCommand(w, cmd)) return;
+  if (cmd.type === CMD_ROOF) {
+    roofOrder(w, cmd);
+    return;
+  }
   if (applyCommanderCommand(w, cmd)) return;
   // Any other order takes a truck off its job.
   if ('units' in cmd) {
@@ -648,6 +678,7 @@ function applyCommand(w: World, cmd: Command): void {
       for (let k = 0; k < units.length; k++) {
         const id = units[k];
         leaveBuilding(w, id);
+        w.roof[id] = 0;
         w.targetX[id] = gx;
         w.targetY[id] = gy;
         w.orderSpeed[id] = w.speed[id];
@@ -748,6 +779,28 @@ function applyCommand(w: World, cmd: Command): void {
       spawn(w, cmd);
       break;
   }
+}
+
+/**
+ * The Roof order (I6). Squads already in the building climb up (or, `off`, come down);
+ * squads outside walk to it, go in and climb up when they get there. Only buildings, and
+ * only one that still has a roof.
+ */
+function roofOrder(w: World, cmd: RoofCommand): void {
+  const st = cmd.structure;
+  const map = w.map;
+  if (!Number.isInteger(st) || st < 0 || st >= map.structCount || w.sHp[st] <= 0) return;
+  if (map.sKind[st] !== S_BUILDING) return;
+  const off = cmd.off === true;
+  const outside: number[] = [];
+  for (const id of validUnits(w, cmd.units)) {
+    if (!kindOf(w, id).garrison) continue;
+    if (w.inside[id] === st) w.roof[id] = off ? 0 : 1;
+    else if (!off) outside.push(id);
+  }
+  if (outside.length === 0 || stageOf(w, st) >= STAGE_GUTTED) return;
+  applyCommand(w, { type: CMD_GARRISON, units: outside, structure: st });
+  for (const id of outside) if ((w.flags[id] & FLAG_GARRISON) !== 0) w.roof[id] = 1;
 }
 
 /** What a move order does: out of the houses, into formation, off whatever they were at. */
@@ -1040,6 +1093,8 @@ function eyeHeight(w: World, i: number): number {
   const s = w.inside[i];
   // A gutted building has no upper floors left to look out from.
   if (s >= 0) {
+    // Up on the roof: a man's height above the top floor.
+    if (onRoof(w, i)) return map.sBase[s] + map.sFloors[s] * FLOOR_HEIGHT + EYE_HEIGHT;
     return map.sBase[s] + (stageOf(w, s) >= STAGE_GUTTED ? 1 : map.sFloors[s]) * FLOOR_HEIGHT;
   }
   const x = w.posX[i];
@@ -1059,6 +1114,7 @@ function rangeTo(w: World, i: number, t: number): number {
   if (w.inside[i] >= 0 && bonus < GARRISON_RANGE_BONUS && stageOf(w, w.inside[i]) < STAGE_GUTTED) {
     bonus = GARRISON_RANGE_BONUS;
   }
+  if (bonus < ROOF_RANGE_BONUS && onRoof(w, i)) bonus = ROOF_RANGE_BONUS;
   return kindOf(w, i).range + bonus;
 }
 
@@ -1270,6 +1326,7 @@ function leaveBuilding(w: World, i: number): void {
   const s = w.inside[i];
   if (s < 0) return;
   w.inside[i] = -1;
+  w.roof[i] = 0;
   w.sOcc[s]--;
   const layer = layerOf(w.team[i], KIND_CLASS[w.kind[i]]);
   const to = w.map.snap[layer][cellOfPos(w.posX[i], w.posY[i])];
@@ -1715,6 +1772,7 @@ function initUnit(w: World, id: number, kindId: number, teamId: number): void {
   w.lead[id] = -1;
   w.ration[id] = RATION_MAX;
   w.pinned[id] = 0;
+  w.roof[id] = 0;
   w.cmdr[id] = -1;
 }
 
@@ -1911,7 +1969,7 @@ function acquireTargets(w: World): void {
   for (let i = 0; i < n; i++) {
     if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const ki = w.kind[i];
-    if (w.stance[i] === STANCE_HOLD_FIRE) {
+    if (w.stance[i] !== STANCE_FREE) {
       w.attack[i] = NO_TARGET;
       w.los[i] = 0;
       continue;
@@ -1941,6 +1999,11 @@ function acquireTargets(w: World): void {
       day2 = Math.trunc((day2 * murk) / 10000);
       sight2 = Math.trunc((sight2 * murk) / 10000);
     }
+    if (w.roof[i] !== 0 && onRoof(w, i)) {
+      // From the roof (I6) they see further.
+      day2 = Math.trunc((day2 * ROOF_SIGHT_PCT) / 100);
+      sight2 = Math.trunc((sight2 * ROOF_SIGHT_PCT) / 100);
+    }
     const air = IS_AIR[ki];
     const z = eyeZ[i];
     const own = w.inside[i];
@@ -1960,7 +2023,10 @@ function acquireTargets(w: World): void {
       const mine =
         d2 <= (night && w.lit[t] !== 0 ? day2 : sight2) &&
         (d2 <= CONCEAL_RANGE_SQ || !concealed(w, t));
-      valid = d2 <= (focus ? FOCUS_RANGE_SQ : ACQUIRE_RANGE_SQ) && (mine || w.spotted[t] > tick);
+      valid =
+        d2 <= (focus ? FOCUS_RANGE_SQ : ACQUIRE_RANGE_SQ) &&
+        (mine || w.spotted[t] > tick) &&
+        !underEaves(w, i, t, d2);
       if (valid && (phase & SIGHT_RECHECK_MASK) === 0) {
         const tz = eyeZ[t];
         w.los[i] =
@@ -2017,8 +2083,8 @@ function acquireTargets(w: World): void {
         // Most candidates are simply further away than the best so far: reject them first.
         if (d2 > bestKey || d2 > ACQUIRE_RANGE_SQ) continue;
         const kj = w.kind[j];
-        // Nothing this unit carries can hurt it.
-        if (dmgTable[kj] === 0) continue;
+        // Nothing this unit carries can hurt it, or (a tank) it cannot be reached (I6).
+        if (dmgTable[kj] === 0 || underEaves(w, i, j, d2)) continue;
         const key = d2 + PRIORITY[ki * KIND_COUNT + kj];
         if (key >= bestKey && (key > bestKey || j >= best)) continue;
         // Beyond its own sight, or concealed (forest, rubble, a building, a recon team) and
@@ -2078,7 +2144,7 @@ function huntHelis(w: World): void {
   for (let i = 0; i < n; i++) {
     if (w.kind[i] !== KIND_HELI || w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     if ((tick + i) % HUNT_PERIOD !== 0) continue;
-    if (w.stance[i] === STANCE_HOLD_FIRE || w.attack[i] !== NO_TARGET) continue;
+    if (w.stance[i] !== STANCE_FREE || w.attack[i] !== NO_TARGET) continue;
     const flags = w.flags[i];
     const hunting = (flags & FLAG_HUNT) !== 0;
     // Under orders of any kind (moving, holding, told to shoot something): not its business.
@@ -2395,8 +2461,10 @@ function acquireIndirect(w: World, i: number): void {
       const dy = w.posY[j] - y;
       const d2 = dx * dx + dy * dy;
       if (d2 > max2 || d2 < min2) continue;
-      const key =
-        d2 + (kindOf(w, j).indirect ? 0 : 2 * max2) + ((w.flags[j] & FLAG_MOVING) !== 0 ? max2 : 0);
+      // Other guns first (counter-battery), but not a mortar team (I6): three men and a
+      // tube are not worth what a gun is there for, the enemy's houses and garrisons.
+      const gun = kindOf(w, j).indirect && w.kind[j] !== KIND_MORTAR;
+      const key = d2 + (gun ? 0 : 2 * max2) + ((w.flags[j] & FLAG_MOVING) !== 0 ? max2 : 0);
       if (key >= bestKey && (key > bestKey || j >= best)) continue;
       if (checks-- <= 0 || dangerClose(w, w.posX[j], w.posY[j], team)) continue;
       bestKey = key;
@@ -2405,6 +2473,13 @@ function acquireIndirect(w: World, i: number): void {
   }
   w.attack[i] = best;
   w.los[i] = best === NO_TARGET ? 0 : 1;
+}
+
+const ROOF_DEAD_SQ = ROOF_DEAD * ROOF_DEAD;
+
+/** A tank `i` cannot raise its gun to men on the roof `t` that close (I6). */
+function underEaves(w: World, i: number, t: number, d2: number): boolean {
+  return d2 < ROOF_DEAD_SQ && w.kind[i] === KIND_TANK && w.roof[t] !== 0 && onRoof(w, t);
 }
 
 /** Are troops of `team` within DANGER_CLOSE of a point? */
@@ -2445,9 +2520,18 @@ function launch(w: World, i: number, tx: number, ty: number, dist: number, load:
   w.shTick[k] = w.tick + SHELL_BASE_TICKS + (dist >> SHELL_TICKS_SHIFT);
   w.shOwner[k] = i;
   // The shell remembers whose gun it left: the faction rides in the high bits.
-  w.shKind[k] = w.kind[i] | (w.faction[w.team[i]] << 4);
+  w.shKind[k] = shellKind(w.kind[i], w.faction[w.team[i]]);
   w.shSmoke[k] = load;
   w.events.push(EV_LAUNCH, i, packPoint(x, y));
+}
+
+/**
+ * What World.shKind holds: the gun's kind and faction. The low four bits of the kind, the
+ * faction (two bits), then the rest of the kind (the mortar, I6, is the first past 15), so
+ * that every shell fired before there were more than sixteen kinds reads as it did.
+ */
+function shellKind(kind: number, faction: number): number {
+  return (kind & 15) | (faction << 4) | ((kind >> 4) << 6);
 }
 
 /** What a shell carries besides high explosive (World.shSmoke). */
@@ -2576,7 +2660,9 @@ function resolveShells(w: World): void {
     }
     const x = w.shX[k];
     const y = w.shY[k];
-    const kind = FACTIONS[w.shKind[k] >> 4].kinds[w.shKind[k] & 15];
+    const sk = w.shKind[k];
+    const kind = FACTIONS[(sk >> 4) & 3].kinds[(sk & 15) | ((sk >> 6) << 4)];
+    const mortar = ((sk & 15) | ((sk >> 6) << 4)) === KIND_MORTAR;
     const owner = w.shOwner[k];
     const last = --w.shellCount;
     w.shX[k] = w.shX[last];
@@ -2618,12 +2704,20 @@ function resolveShells(w: World): void {
         const reach = kindOf(w, j).armour === null ? R : ARMOUR_BLAST(R);
         if (d2 >= reach * reach) continue;
         let dmg = Math.trunc((kind.damage[w.kind[j]] * (2 * reach - isqrt(d2))) / (2 * reach));
-        if (w.inside[j] >= 0) dmg = Math.trunc((dmg * THROUGH[stageOf(w, w.inside[j])]) / 100);
-        else if (KIND_CLASS[w.kind[j]] === CLASS_FOOT) {
+        if (w.inside[j] >= 0 && w.roof[j] !== 0 && onRoof(w, j)) {
+          // On a roof (I6): a parapet, no ceiling.
+          dmg = Math.trunc((dmg * ROOF_EXPOSED_PCT) / 100);
+        } else if (w.inside[j] >= 0) {
+          dmg = Math.trunc((dmg * THROUGH[stageOf(w, w.inside[j])]) / 100);
+        } else if (KIND_CLASS[w.kind[j]] === CLASS_FOOT) {
           // Rubble and sandbags stop half the splinters, a trench three quarters.
           const under = map.type[cellOfPos(w.posX[j], w.posY[j])];
           if (under === T_RUBBLE || under === T_SANDBAG) dmg >>= 1;
           else if (under === T_TRENCH) dmg >>= 2;
+          // A mortar bomb among men in the open puts them on their faces (I6).
+          else if (mortar && !isCover(under) && w.team[j] !== w.team[owner]) {
+            w.pinned[j] = w.tick + PIN_TICKS;
+          }
         }
         damage[j] += dmg || 1;
         killer[j] = owner;
@@ -2637,7 +2731,10 @@ function resolveShells(w: World): void {
  */
 /** Hidden from anyone not close by: in a house, in forest or rubble, in smoke, or a recon team. */
 export function concealed(w: World, j: number): boolean {
-  if (w.inside[j] >= 0) return w.reveal[j] <= w.tick;
+  // Lying in wait (I6): hard to see wherever they are, until they open fire.
+  if (lurking(w, j)) return true;
+  // On a roof there is nothing round the men to hide them.
+  if (w.inside[j] >= 0) return !onRoof(w, j) && w.reveal[j] <= w.tick;
   if (IS_AIR[w.kind[j]]) return false;
   if (kindOf(w, j).stealth) return true;
   if (w.map.smoke[cellOfPos(w.posX[j], w.posY[j])] > w.tick) return true;
@@ -2697,15 +2794,19 @@ function burstMen(w: World, i: number, t: number, kind: UnitKind): void {
     const to = cellStart[gy * GRID_DIM + x1 + 1];
     for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
       const j = sorted[s];
-      if (j === t || w.team[j] === team || w.inside[j] >= 0) continue;
+      if (j === t || w.team[j] === team) continue;
       if (KIND_CLASS[w.kind[j]] !== CLASS_FOOT) continue;
+      // Behind walls nothing reaches them; on a roof (I6) the parapet takes a little off.
+      const up = w.inside[j] >= 0;
+      if (up && (w.roof[j] === 0 || !onRoof(w, j))) continue;
       const dx = w.posX[j] - x;
       const dy = w.posY[j] - y;
       const d2 = dx * dx + dy * dy;
       if (d2 >= R * R) continue;
       let dmg = Math.trunc((kind.burstDamage * (2 * R - isqrt(d2))) / (2 * R));
       const under = map.type[cellOfPos(w.posX[j], w.posY[j])];
-      if (under === T_RUBBLE || under === T_SANDBAG) dmg >>= 1;
+      if (up) dmg = Math.trunc((dmg * ROOF_EXPOSED_PCT) / 100);
+      else if (under === T_RUBBLE || under === T_SANDBAG) dmg >>= 1;
       else if (under === T_TRENCH) dmg >>= 2;
       damage[j] += dmg || 1;
       killer[j] = i;
@@ -2726,6 +2827,8 @@ function fire(w: World): void {
       // A gun fires standing still: at the point it was given, or at its spotted target.
       const flags = w.flags[i];
       if ((flags & FLAG_MOVING) !== 0) continue;
+      // A mortar in a house fires only from its roof (I6): not through the ceiling.
+      if (w.inside[i] >= 0 && !onRoof(w, i)) continue;
       let tx = w.aimX[i];
       let ty = w.aimY[i];
       if ((flags & FLAG_BOMBARD) === 0) {
@@ -2784,7 +2887,7 @@ function fire(w: World): void {
     }
     if (t === NO_TARGET || w.los[i] === 0) {
       // Nothing to shoot at: an enemy base building in range will do (see decision 048).
-      if (kind.siege > 0 && ((w.tick + i) & 7) === 0 && w.stance[i] !== STANCE_HOLD_FIRE) {
+      if (kind.siege > 0 && ((w.tick + i) & 7) === 0 && w.stance[i] === STANCE_FREE) {
         const s = baseInRange(w, i, siegeReach(kind));
         if (s >= 0) {
           structDamage[s] += kind.siege;
@@ -2798,7 +2901,7 @@ function fire(w: World): void {
     const dy = w.posY[t] - w.posY[i];
     const range = rangeTo(w, i, t);
     const d2 = dx * dx + dy * dy;
-    if (d2 > range * range) continue;
+    if (d2 > range * range || underEaves(w, i, t, d2)) continue;
     // A strike drone hits only in its turn.
     if (kind.kamikaze && (w.tick - w.strikeAt[t]) >>> 0 >= STRIKE_WINDOW_TICKS) continue;
     let dmg = kind.damage[w.kind[t]];
@@ -2819,13 +2922,25 @@ function fire(w: World): void {
       }
     }
     const armour = kindOf(w, t).armour;
+    const fromRoof = w.roof[i] !== 0 && onRoof(w, i);
     if (armour !== null && d2 > 0 && !kind.kamikaze) {
       // Which plate the shot meets: the angle between the target's nose and the shooter.
       const cos = Math.trunc((-dx * w.faceX[t] - dy * w.faceY[t]) / isqrt(d2));
-      dmg =
-        Math.trunc((dmg * armour[cos >= FACING_COS ? 0 : cos <= -FACING_COS ? 2 : 1]) / 100) || 1;
+      let plate = armour[cos >= FACING_COS ? 0 : cos <= -FACING_COS ? 2 : 1];
+      // From a roof, onto a vehicle in the street: the top (I6).
+      if (fromRoof && KIND_CLASS[w.kind[t]] === CLASS_VEHICLE && plate < ROOF_TOP_PCT) {
+        plate = ROOF_TOP_PCT;
+      }
+      dmg = Math.trunc((dmg * plate) / 100) || 1;
     }
-    if (cover >= 0) {
+    const exposed = cover >= 0 && w.roof[t] !== 0 && onRoof(w, t);
+    if (exposed) {
+      // Men on a roof (I6) have a parapet, not walls, and machine guns pin them there.
+      // What a gun does not do to them it does to the top of the house, as at a window.
+      dmg = Math.trunc((dmg * ROOF_EXPOSED_PCT) / 100) || 1;
+      if (kind.gunner) w.pinned[t] = w.tick + PIN_TICKS;
+      if (!kind.engineer && kind.siege > 0) shootStructure(w, cover, i, kind.siege);
+    } else if (cover >= 0) {
       // Walls stop most of it, less as the house comes apart, and a breached wall is one
       // step worse for fire from its side. What a gun does not do to the men it does to
       // the house.
@@ -2848,7 +2963,7 @@ function fire(w: World): void {
       } else if (isCover(under)) dmg = Math.trunc((dmg + 2) / 3);
     }
     if (cover < 0) strayFire(w, i, t, dx, dy, d2);
-    if (cover < 0 && kind.burst > 0 && !IS_AIR[w.kind[t]]) burstMen(w, i, t, kind);
+    if ((cover < 0 || exposed) && kind.burst > 0 && !IS_AIR[w.kind[t]]) burstMen(w, i, t, kind);
     damage[t] += dmg;
     killer[t] = i;
     w.cooldown[i] = reloadOf(w, i, kind);
@@ -3351,7 +3466,7 @@ function steer(w: World): void {
               } else if (
                 canBreach(kindOf(w, i), w.wKind[next]) &&
                 !kindOf(w, i).indirect &&
-                w.stance[i] !== STANCE_HOLD_FIRE
+                w.stance[i] === STANCE_FREE
               ) {
                 w.aimX[i] = ((next & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
                 w.aimY[i] = ((next >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
