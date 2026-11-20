@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type * as THREE from 'three/webgpu';
 import { prism } from '../src/client/kit';
+import { buildWrecks } from '../src/client/aircraft';
 import { buildArsenal, type VehicleModel } from '../src/client/models';
 import { KIND_COUNT } from '../src/sim/units';
 
@@ -96,6 +97,67 @@ describe('unit models', () => {
     // The alliance's tank stands tallest, Russia's lowest.
     const tall = (f: number) => outline(arsenals[f].vehicles[0]!)[1];
     expect(tall(1)).toBeGreaterThan(tall(2));
+  });
+
+  it("gives each army's aircraft their own outline, rotors that fit and wrecks to leave", () => {
+    const AIR = [6, 7, 12, 13, 15];
+    const outline = (m: VehicleModel) => {
+      m.hull[1].computeBoundingBox();
+      const b = m.hull[1].boundingBox!;
+      return [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z];
+    };
+    for (const a of arsenals.slice(1)) {
+      for (const m of [...AIR.map((k) => a.vehicles[k]!), a.jet]) {
+        expect(m.turret.length).toBe(0);
+        expect(m.lift).toBeGreaterThan(0);
+        // Stored clear of the band the paint throws mud over.
+        m.hull[0].computeBoundingBox();
+        expect(m.hull[0].boundingBox!.min.y).toBeGreaterThan(0.3);
+        const shapes = m.rotorShapes ?? [];
+        for (const pair of shapes) {
+          expect(pair.length).toBe(2);
+          for (const g of pair) sound(g);
+          expect(tris(pair[1])).toBeLessThanOrEqual(tris(pair[0]));
+        }
+        for (const r of m.rotors ?? []) {
+          expect(r.shape).toBeLessThan(shapes.length);
+          expect(r.r).toBeGreaterThan(0);
+          expect(Number.isFinite(r.rate) && r.rate !== 0).toBe(true);
+        }
+      }
+      // Helicopters turn something and leave a wreck in three poses that lies on the ground.
+      for (const kind of [12, 13]) {
+        const m = a.vehicles[kind]!;
+        expect(m.rotors!.length).toBeGreaterThanOrEqual(2);
+        const wrecks = buildWrecks(m);
+        expect(wrecks.length).toBe(3);
+        for (const g of wrecks) {
+          sound(g);
+          g.computeBoundingBox();
+          expect(g.boundingBox!.min.y).toBeCloseTo(0.03, 2);
+          expect(tris(g)).toBeLessThan(2400);
+        }
+      }
+    }
+    for (const kind of AIR) {
+      for (const [p, q] of [
+        [1, 2],
+        [1, 3],
+        [2, 3],
+      ]) {
+        const a = outline(arsenals[p].vehicles[kind]!);
+        const b = outline(arsenals[q].vehicles[kind]!);
+        const apart = Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+        expect(apart, `kind ${kind}, armies ${p} and ${q}`).toBeGreaterThan(0.08);
+      }
+    }
+    // Russia's gunship has two main rotors and no tail rotor; the alliance's lifter two as well.
+    const mains = (f: number, kind: number) =>
+      arsenals[f].vehicles[kind]!.rotors!.filter((r) => r.axis === 'y').length;
+    expect(mains(2, 12)).toBe(2);
+    expect(mains(1, 12)).toBe(1);
+    expect(mains(1, 13)).toBe(2);
+    expect(arsenals[2].vehicles[12]!.rotors!.some((r) => r.axis === 'x')).toBe(false);
   });
 
   it('turns every plate of a prism outward whichever way round it is drawn', () => {

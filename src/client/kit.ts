@@ -249,7 +249,10 @@ export function fuselage(
   o: { seg?: number; square?: number; color?: number; team?: number; cap?: 'both' | 'none' } = {},
 ): THREE.BufferGeometry {
   // The loft runs up y; laid over on its back it runs along z, its front (rz) pointing up.
-  const rings: Ring[] = stations.map((s) => ({
+  // Stations may be given nose first or tail first: the skin is wound from the back forward.
+  const ordered =
+    stations[0].z > stations[stations.length - 1].z ? [...stations].reverse() : stations;
+  const rings: Ring[] = ordered.map((s) => ({
     y: s.z,
     rx: s.w,
     rz: s.h,
@@ -379,9 +382,9 @@ export class Parts {
   }
 }
 
-/** Build one model at each of the three levels, with the vehicles' wear width. */
-export function atLevels<T>(build: (lod: number) => T): [T, T, T] {
-  setWear(VEHICLE_WEAR);
+/** Build one model at each of the three levels, with the vehicles' wear width (or `wear`, metres). */
+export function atLevels<T>(build: (lod: number) => T, wear = VEHICLE_WEAR): [T, T, T] {
+  setWear(wear);
   const out: [T, T, T] = [build(0), build(1), build(2)];
   setWear(0.045);
   return out;
