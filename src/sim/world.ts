@@ -195,6 +195,16 @@ export const EV_PLANE = 28;
 export const EV_PARADROP = 29;
 /** A flare has burst over a point: (packed point, ticks it burns). */
 export const EV_FLARE = 30;
+/**
+ * a = the jet, b = strike | team << 4: an air strike (I7, see src/sim/air.ts) has come over
+ * the edge of the map. Strike is one of AIR_GUIDED, AIR_STICK, AIR_SWARM.
+ */
+export const EV_AIRSTRIKE = 36;
+/**
+ * A bomb or a diving munition is on its way down: a = where it lands (see packPoint),
+ * b = strike | ticks until it lands << 4 | the jet that let it go << 12.
+ */
+export const EV_BOMB = 37;
 /** a = cell, b = team: engineers felled the trees on a cell (decision 118). */
 export const EV_FELL = 31;
 /** a = building, b = 0 its ground floor has caught fire, 1 the fire has burnt out. */
@@ -344,6 +354,8 @@ export interface World {
    * flying and what its helipads hold (both counted once a second, like `pop`).
    */
   paraReserve: Int32Array;
+  /** Per team: the tick its next air strike can be called (I7). */
+  airStrikeAt: Int32Array;
   helis: Int32Array;
   heliCap: Int32Array;
   /** What is left at each resource site. */
@@ -621,6 +633,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     pop: new Int32Array(MAX_TEAMS),
     popCap: new Int32Array(MAX_TEAMS),
     paraReserve: new Int32Array(MAX_TEAMS),
+    airStrikeAt: new Int32Array(MAX_TEAMS),
     helis: new Int32Array(MAX_TEAMS),
     heliCap: new Int32Array(MAX_TEAMS),
     siteStock: map.siteStock.slice(),
@@ -836,6 +849,9 @@ export function hashWorld(w: World): number {
   }
   // Only a game with factions has this, so the hash of one without is what it always was.
   for (let t = 0; t < MAX_TEAMS; t++) if (w.faction[t] !== 0) mix(0xfac0 ^ (t << 8) ^ w.faction[t]);
+  // Only once an army has called an air strike (I7), so a game without one hashes as before.
+  for (let t = 0; t < MAX_TEAMS; t++)
+    if (w.airStrikeAt[t] !== 0) mix(0xa1f0 ^ (t << 8) ^ w.airStrikeAt[t]);
   // Only a battle in weather has this.
   if (w.weather !== 0) mix(0x3ea7 ^ (w.weather << 16));
   // Only a night battle has any of this, so a day's hash is what it always was.

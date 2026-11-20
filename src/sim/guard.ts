@@ -16,6 +16,8 @@
 // it came from (never the sender's own word for it) and turns it away there and then if
 // `admit` would refuse it.
 import {
+  CMD_AIRSTRIKE,
+  CMD_GRANT,
   CMD_ASSIGN,
   CMD_ATTACK,
   CMD_ATTACK_MOVE,
@@ -101,6 +103,8 @@ const LISTS: Record<number, readonly string[]> = {
   [CMD_REINFORCE]: [],
   [CMD_ENTRENCH]: ['units'],
   [CMD_PARADROP]: [],
+  [CMD_AIRSTRIKE]: [],
+  [CMD_GRANT]: [],
   [CMD_STYLE]: [],
   [CMD_NIGHT]: [],
   [CMD_FACTION]: [],
@@ -175,7 +179,15 @@ export function validCommand(c: unknown): c is Command {
 }
 
 /** Orders only the game's own setup gives: never accepted from another player. */
-const SETUP = new Set([CMD_SPAWN, CMD_FOUND, CMD_FIELDWORK, CMD_NIGHT, CMD_WEATHER, CMD_FACTION]);
+const SETUP = new Set([
+  CMD_SPAWN,
+  CMD_FOUND,
+  CMD_FIELDWORK,
+  CMD_NIGHT,
+  CMD_WEATHER,
+  CMD_FACTION,
+  CMD_GRANT,
+]);
 /** Orders to a whole army, which name it. */
 const ARMY = new Set([
   CMD_ORDER,
@@ -186,6 +198,7 @@ const ARMY = new Set([
   CMD_MARCH,
   CMD_REINFORCE,
   CMD_PARADROP,
+  CMD_AIRSTRIKE,
   CMD_DEMOLISH,
 ]);
 /** Orders to one of the army's own buildings. */

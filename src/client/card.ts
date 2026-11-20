@@ -34,6 +34,20 @@ import {
   TIER_PRICE,
   type Price,
 } from '../sim/economy';
+import {
+  AIR_GUIDED,
+  AIR_NONE,
+  AIR_STICK,
+  AIR_STRIKE_COOLDOWN,
+  AIR_STRIKE_PRICE,
+  AIR_STRIKE_TIER,
+  STRIKE_COOLING,
+  STRIKE_NAMES,
+  STRIKE_NO_PLANES,
+  STRIKE_POOR,
+  STRIKE_READY,
+  STRIKE_TIER_LOW,
+} from '../sim/air';
 import { fx } from '../sim/fixed';
 import { FELL_CELLS } from '../sim/demolish';
 import { MAP_CELLS, MAP_SIZE, S_BUILDING, T_FOREST, canPlace, type GameMap } from '../sim/map';
@@ -150,6 +164,12 @@ export class CommandCard {
   private heliCap = 0;
   /** Set by the client: asks for the place of a paratroop drop. */
   paradrop: () => void = () => {};
+  /** The army's air strike (I7): which (AIR_*), whether it can go (STRIKE_*), seconds to go. */
+  private strikeType = AIR_NONE;
+  private strikeStatus = STRIKE_NO_PLANES;
+  private strikeIn = 0;
+  /** Set by the client: asks for the point of an air strike. */
+  airStrike: () => void = () => {};
   /** Flags the player holds: each pays supplies, fuel and credits every second. */
   private flags = 0;
   /** The player's units that are out of supply (set by whoever knows: the supply view). */
@@ -213,9 +233,41 @@ export class CommandCard {
       if (!button) return;
       if (button.dataset.act === 'hungry') this.selectHungry();
       else if (button.dataset.act === 'paradrop') this.paradrop();
+      else if (button.dataset.act === 'strike') this.callStrike();
       else this.selectIdle();
     });
     setInterval(() => this.render(), 200);
+  }
+
+  /** Shift + J or the button: ask for the point, if the strike can go. */
+  callStrike(): void {
+    if (this.strikeType !== AIR_NONE && this.strikeStatus === STRIKE_READY) this.airStrike();
+  }
+
+  /** The air strike's button in the resource bar, from tier 2 on, for the armies that have one. */
+  private strikeButton(): string {
+    if (this.strikeType === AIR_NONE || this.tier < AIR_STRIKE_TIER - 1) return '';
+    const name = STRIKE_NAMES[this.strikeType];
+    const p = AIR_STRIKE_PRICE;
+    const what =
+      this.strikeType === AIR_GUIDED
+        ? 'one guided bomb, exactly where you click: it kills a tank and takes most of a building'
+        : this.strikeType === AIR_STICK
+          ? 'a stick of six bombs along its run: it clears a street of men in the open'
+          : 'a swarm of eight drones that dive on the vehicles round the point, two to a tank, then on men in the open. A jammer sends them astray';
+    const title = `Air strike: a jet brings ${what}. Costs ${p.supplies} supplies, ${p.fuel} fuel and ${p.credits} credits, needs tier ${AIR_STRIKE_TIER} and your headquarters, then ${AIR_STRIKE_COOLDOWN / 1200} minutes before the next. Air defence can shoot the jet down on the way in. Bombs hurt your own men too`;
+    const st = this.strikeStatus;
+    const note =
+      st === STRIKE_READY
+        ? '<kbd>⇧J</kbd>'
+        : st === STRIKE_TIER_LOW
+          ? `tier ${AIR_STRIKE_TIER}`
+          : st === STRIKE_COOLING
+            ? `${Math.floor(this.strikeIn / 60)}:${String(this.strikeIn % 60).padStart(2, '0')}`
+            : st === STRIKE_POOR
+              ? 'funds'
+              : 'no HQ';
+    return `<button data-act="strike" class="air${st === STRIKE_READY ? '' : ' off'}" title="${title}">${name} ${note}</button>`;
   }
 
   applySnapshot(s: Snapshot): void {
@@ -226,6 +278,9 @@ export class CommandCard {
     this.pop = s.pop[ME] ?? 0;
     this.popCap = s.popCap[ME] ?? 0;
     this.reserve = s.reserve[ME] ?? 0;
+    this.strikeType = s.strikeType?.[ME] ?? AIR_NONE;
+    this.strikeStatus = s.strikeStatus?.[ME] ?? STRIKE_NO_PLANES;
+    this.strikeIn = s.strikeIn?.[ME] ?? 0;
     this.helis = s.helis[ME] ?? 0;
     this.heliCap = s.heliCap[ME] ?? 0;
     this.upkeep = s.upkeep[ME] ?? 0;
@@ -748,6 +803,7 @@ export class CommandCard {
       res += `<button data-act="hungry" class="warn" title="These units have been beyond your supply for two minutes: they fire at half rate and their vehicles crawl. Bring a truck, build a depot nearby, or take the town. Click to select them">${hungry} out of supply</button>`;
     if (this.reserve > 0)
       res += `<button data-act="paradrop" class="air" title="Paratroop squads waiting in reserve. Click (or press J), then click the map: a transport plane drops up to ${PARA_PLANE_LOAD} of them there. Enemy air defence can shoot the plane down">${this.reserve} paratroops <kbd>J</kbd></button>`;
+    res += this.strikeButton();
     if (res !== this.resHtml) this.resEl.innerHTML = this.resHtml = res;
 
     let html = '';

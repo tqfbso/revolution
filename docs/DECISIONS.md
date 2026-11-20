@@ -3451,3 +3451,86 @@ game's own steep camera: mostly grass, the fight a small patch in the middle.
   make the menu as heavy as a battle. Stills weigh 0.9 MB together.
 
 The other screens (new battle, settings, lobby, end of game) keep one dimmed picture.
+
+## 153. Kowloon: a harbour city of towers round a park (2026-11-20)
+
+Fabio asked for an urban map after Hong Kong, Tsim Sha Tsui and Jordan, with Kowloon Park
+as the centre. `?map=kowloon`, Menu > Map: Kowloon (`src/sim/kowloon.ts`).
+
+- The real place is nearly symmetric about the line from the Star Ferry through Kowloon
+  Park to Gun Club Hill (harbour west and south, Nathan Road and Austin Road meeting at
+  the park's far corner), so it is laid on the map's usual diagonal mirror turned a
+  quarter: harbour along the north and west edges, the Star Ferry in the north-west
+  corner, the armies at the two inland ends of the waterfront. Each road in one half has
+  a twin in the other: Salisbury/Canton, Nathan/Austin, Chatham/Jordan.
+- Fifteen flags: six pairs (Granville Road/Jordan, Chungking Mansions/Xiqu Centre, Cultural
+  Centre/Harbour City, Signal Hill/West Kowloon, Tsim Sha Tsui East/Yau Ma Tei, Haiphong
+  Road/Canton Road) and three shared on the diagonal (Star Ferry, Kowloon Park, Gun Club
+  Hill). MAX_TOWNS is 16.
+- A street every 12 cells both ways, no bridges, no compound walls across the map: the
+  diagonal is open to vehicles in ten separate places and an armoured column still gets
+  across with the park, the waterfront and Gun Club Hill all shut (test). Tanks own Nathan
+  Road and the waterfront; the side streets between towers belong to infantry upstairs.
+- 716 buildings (city 444, European city 684), blocks of Hong Kong kinds: tenements wall to
+  wall with a back lane, slab towers, a mall podium with a tower, public housing round a
+  playground, a market, a sitting-out garden. Landmarks placed by hand: Star Ferry pier and
+  clock tower, the old marine police knoll, Cultural Centre and planetarium, the Peninsula,
+  Chungking Mansions, K11, The ONE, Signal Hill and its tower, the park's barracks, sports
+  centre and ponds, Gun Club Hill barracks. Names and shapes after the real place; a game
+  map, not a survey. Up to 18 floors.
+- Drawn the Hong Kong way only on this map (`hk` in structures.ts): flat concrete roofs with
+  lift houses and huts, pale tiled walls, windows in bands between the frame's columns (a
+  20-floor tower costs what two floors did window by window), air conditioners, and boards
+  hung out over the street read top to bottom (sign sheet rows 16 to 19, `SIGN_TALL`).
+  Painted, no light of their own. Street plates carry the real street names in English and
+  Chinese; every shop is made up.
+- Measured in the cloud (software WebGL, so counts not frame rates): whole map 1.57M
+  triangles, 341 draw calls (city 1.26M/230, European city 2.26M/481). Sim mean 0.57 ms a
+  tick over 30 minutes (city 0.53, European 0.62). Six hard-vs-hard games, 25 minutes
+  each: flags held at the end 44 to 46, losses even, no corner advantage.
+
+Not done: footbridges over Nathan Road, double-decker buses and trams, quay walls (the
+harbour edge is a bank), lit signs at night (by choice: no glow).
+
+## 154. Air strikes for the three big armies (I7) (2026-11-20)
+
+Fabio's answer in the inspiration review: air strikes for the Western alliance, Russia and
+China only (the guerrilla army will have none), on a long cooldown, the civilian fine as
+today the only penalty. The army mix pillar puts aircraft in the slowest, dearest tier, and
+they must not take over from the infantry fight.
+
+- Who and when: tier 3 and a finished headquarters standing. 200 supplies, 150 fuel and 250
+  credits a strike (more credits than a tank, about a tank in all), then four minutes before
+  the next. The plain table (faction 0) has none, so the golden hash and every faction-0 test
+  are untouched; the world hash takes in an army's strike clock only once it has called one.
+- The jet: the transport plane's airframe (kind 15) at 1.7 times its speed, in over the
+  army's own edge of the map. Air defence on the way gets a few seconds at it; shot down
+  before the point it lets nothing go. Nobody can give it orders.
+- The alliance, a guided bomb: one bomb, laser-guided. Called on or near a vehicle or squad
+  (8 m) it follows it in, and lands where it will be: it kills a tank and takes 1,500 off a
+  building (a house, or most of a block). Called on ground, it lands on the point.
+- Russia, a stick of bombs: six along the run, 6 m apart, each a little off; each kills men
+  in the open within a few metres and cracks 420 off the buildings it reaches. Armour only
+  if one lands within 2 m.
+- China, a drone swarm: eight munitions, each on the best thing round the point (32 m):
+  armour first, two to a tank, then other vehicles, then men in the open; nothing in a house
+  or hidden. Each leads its target. A jammer over the target sends a munition astray. This
+  is the answer to massed armour the pillar asks for, and a jammer is the answer to it.
+- Damage is a share of the target's full health (so every army's version of a kind takes the
+  same), friend or foe alike under a bomb, cover and walls as for shells. Bombs are shells to
+  the rest of the rules (they land in resolveShells), so buildings, works and civilians take
+  them exactly as shells; destruction tuning is unchanged.
+- The computer, on Normal (from minute 12) and Hard (from minute 9) only: every five seconds
+  while its strike is ready it looks over what it sees for the point worth most, away from
+  air defence it knows of and its own men, and calls it there if it is worth more than a
+  tank or so. Free-fall bombs only go on what stands still. Easy and Recruit never call one.
+- Measured (`tools/airstrikes.ts`, six faction pairings, 30 minutes on the city map): Normal
+  calls 3 to 5 a side, killing 2% of everything lost on average (at most 6%); Hard 3 to 6,
+  at most 3.5%. A strike kills about its own price. That is a tool, not a winner.
+- Screen: a fighter-bomber model, bombs falling and drones diving, bigger blasts and
+  craters, a jet's roar, the button in the top bar with its countdown, "Air strike inbound"
+  for the caller and "Enemy jet inbound: air defence!" for everyone else. Commands 47 (call)
+  and 48 (a setup order that sets an army's tier and funds, for tests and the screenshots).
+
+Not done: the computer does not plan its air defence against strikes, there is no target
+marker for the defender, and the jet does not avoid air defence on its own.

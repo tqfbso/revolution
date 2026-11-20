@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu';
 
 /** Cells across and down the sheet; each is four times as wide as it is high. */
 export const SIGN_COLS = 4;
-export const SIGN_ROWS = 16;
+export const SIGN_ROWS = 20;
 const CW = 256;
 const CH = 64;
 
@@ -14,6 +14,8 @@ const CH = 64;
 export const SIGN_SHOPS = { from: 0, count: 40 };
 export const SIGN_STREETS = { from: 40, count: 12 };
 export const SIGN_HOARDINGS = { from: 52, count: 12 };
+/** Boards hung out over a Hong Kong street, read top to bottom (the Kowloon map only). */
+export const SIGN_TALL = { from: 64, count: 16 };
 
 const TRADES = [
   'BAKERY', 'PHARMACY', 'CAFE', 'GROCER', 'BOOKS', 'HOTEL', 'BANK', 'BUTCHER', 'FLORIST',
@@ -34,6 +36,43 @@ const SLOGANS = [
   'RIDE THE TRAM', 'NOVAK PAINTS', 'VISIT THE COAST', 'FRESH BREAD DAILY', 'RADIO AURORA 98',
   'VOTE SUNDAY', 'CIRCUS IN TOWN',
 ]; // prettier-ignore
+// Kowloon (made-up shops; the street names are the real ones of Tsim Sha Tsui and Jordan).
+const HK_TRADES = [
+  'NOODLES 麵家', 'PAWN 押', 'TAILOR 洋服', 'GOLD 金行', 'PHARMACY 藥房', 'HERBAL TEA 涼茶',
+  'MONEY EXCHANGE 找換', 'CAFE 茶餐廳', 'ROAST MEAT 燒臘', 'ELECTRICAL 電器', 'JEWELLERY 珠寶',
+  'OPTICAL 眼鏡', 'MAHJONG 麻雀', 'GUEST HOUSE 賓館', 'DIM SUM 點心', 'CONGEE 粥麵',
+  'BAKERY 餅家', 'SEAFOOD 海鮮', 'BANK 銀行', 'CLINIC 診所', 'TRAVEL 旅行社', 'SHOES 鞋',
+  'WATCHES 鐘錶', 'DRIED SEAFOOD 海味', 'HARDWARE 五金', 'KARAOKE 卡拉OK', 'TEA 茶莊',
+  'MOBILE PHONES 手機',
+]; // prettier-ignore
+const HK_NAMES = [
+  'GOLDEN DRAGON 金龍', 'LUCKY 好運', 'MAN KEE 文記', 'LEE KEE 李記', 'SUN WAH 新華', 'TAK SHING 德成',
+  'FOOK LAM 福林', 'HOP SING 合成', 'KAM FUNG 金鳳', 'WING LEE 永利', 'TAI PING 太平', 'CHEUNG KEE 祥記',
+  'NEW ASIA 新亞', 'GREAT CHINA 大中華', 'OCEAN 海洋', 'PRECIOUS 珍寶',
+]; // prettier-ignore
+const HK_STREETS = [
+  'NATHAN ROAD 彌敦道', 'CANTON ROAD 廣東道', 'HAIPHONG ROAD 海防道', 'PEKING ROAD 北京道',
+  'MODY ROAD 麼地道', 'GRANVILLE ROAD 加連威老道', 'KIMBERLEY ROAD 金巴利道', 'AUSTIN ROAD 柯士甸道',
+  'SALISBURY ROAD 梳士巴利道', 'CHATHAM ROAD 漆咸道', 'HANKOW ROAD 漢口道', 'ASHLEY ROAD 亞士厘道',
+]; // prettier-ignore
+const HK_SLOGANS = [
+  'KAM FUNG MILK TEA', 'HARBOUR BANK 海港銀行', 'JADE MOBILE', 'DOUBLE HAPPINESS 囍', 'STAR LAGER',
+  'DRAGON AIRWAYS', 'GOLDEN HARVEST RICE', 'RIDE THE FERRY 渡輪', 'PEARL SOY SAUCE', 'LUCKY JEWELLERY',
+  'SUNRISE PROPERTIES', 'VOTE 投票',
+]; // prettier-ignore
+/** Vertical boards: two to four characters each. */
+const HK_TALL = [
+  '押', '金行', '麵家', '涼茶', '茶餐廳', '大藥房', '找換', '珠寶', '洋服', '賓館', '燒臘',
+  '麻雀', '海鮮', '診所', '鐘錶', '酒家',
+]; // prettier-ignore
+/** Their boards: the reds, yellows and greens of the street, all gone dull. */
+const HK_BOARDS: [string, string][] = [
+  ['#8a2a22', '#e8d9a8'], ['#c9b14a', '#5a1d19'], ['#e2dccb', '#9c2a20'], ['#2f4f3e', '#e9dfb8'],
+  ['#28334a', '#e6d9a6'], ['#6a1f2a', '#e8c86a'], ['#d8cfb8', '#1f2a40'], ['#3a2c24', '#d9b45a'],
+]; // prettier-ignore
+const HK_FONT =
+  '"PingFang HK", "PingFang TC", "Noto Sans CJK TC", "Microsoft JhengHei", "WenQuanYi Zen Hei", sans-serif';
+
 /** Board and lettering, as shopkeepers choose them: mostly sober, now and then loud. */
 const BOARDS: [string, string][] = [
   ['#1f3d33', '#e9dfc4'], ['#6b1f1c', '#f0e6cf'], ['#1d2c47', '#e8e2d0'], ['#d8cfb8', '#2a2623'],
@@ -108,7 +147,7 @@ function distress(
 }
 
 /** The whole sheet, or null where there is no canvas (tests). */
-export function makeSigns(): THREE.Texture | null {
+export function makeSigns(hk = false): THREE.Texture | null {
   if (typeof document === 'undefined') return null;
   const canvas = document.createElement('canvas');
   canvas.width = CW * SIGN_COLS;
@@ -117,15 +156,41 @@ export function makeSigns(): THREE.Texture | null {
   if (!g) return null;
   const r = rng(90210);
   const serif = 'Georgia, "Times New Roman", serif';
-  const sans = '"Helvetica Neue", Arial, sans-serif';
+  const sans = hk ? HK_FONT : '"Helvetica Neue", Arial, sans-serif';
+  const trades = hk ? HK_TRADES : TRADES;
+  const names = hk ? HK_NAMES : NAMES;
+  const boards = hk ? HK_BOARDS : BOARDS;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   for (let k = 0; k < SIGN_COLS * SIGN_ROWS; k++) {
     const x = (k % SIGN_COLS) * CW;
     const y = Math.floor(k / SIGN_COLS) * CH;
-    if (k < SIGN_STREETS.from) {
+    if (k >= SIGN_TALL.from) {
+      // A board for hanging out over the street: characters one under another. The panel
+      // is turned on its side, so each one is drawn turned the other way to stand upright.
+      const [board, ink] = boards[Math.floor(r() * boards.length)];
+      g.fillStyle = board;
+      g.fillRect(x, y, CW, CH);
+      g.strokeStyle = ink;
+      g.lineWidth = 3;
+      g.strokeRect(x + 4, y + 4, CW - 8, CH - 8);
+      const text = hk ? HK_TALL[(k - SIGN_TALL.from) % HK_TALL.length] : 'HOTEL';
+      const chars = [...text];
+      const step = Math.min(CH * 1.05, (CW - 24) / chars.length);
+      g.fillStyle = ink;
+      g.font = `bold ${Math.floor(Math.min(step, CH) * 0.78)}px ${sans}`;
+      chars.forEach((ch, n) => {
+        g.save();
+        // The first character at the top of the board, which is this cell's right-hand end.
+        g.translate(x + CW / 2 + ((chars.length - 1) / 2 - n) * step, y + CH / 2);
+        g.rotate(Math.PI / 2);
+        g.fillText(ch, 0, 2);
+        g.restore();
+      });
+      distress(g, x, y, r, 0.8 + r() * 0.5);
+    } else if (k < SIGN_STREETS.from) {
       // A shop fascia: the trade, or a name and the trade, on a painted board.
-      const [board, ink] = BOARDS[Math.floor(r() * BOARDS.length)];
+      const [board, ink] = boards[Math.floor(r() * boards.length)];
       g.fillStyle = board;
       g.fillRect(x, y, CW, CH);
       g.strokeStyle = ink;
@@ -133,23 +198,24 @@ export function makeSigns(): THREE.Texture | null {
       g.lineWidth = 2;
       g.strokeRect(x + 5, y + 5, CW - 10, CH - 10);
       g.globalAlpha = 1;
-      const trade = TRADES[k % TRADES.length];
-      const text = r() < 0.55 ? trade : `${NAMES[Math.floor(r() * NAMES.length)]} ${trade}`;
+      const trade = trades[k % trades.length];
+      const text = r() < 0.55 ? trade : `${names[Math.floor(r() * names.length)]} ${trade}`;
       g.fillStyle = ink;
       fit(g, text, r() < 0.5 ? 'bold' : '600', r() < 0.5 ? serif : sans, CW - 30, 38);
       g.fillText(text, x + CW / 2, y + CH / 2 + 2);
       distress(g, x, y, r, 0.7 + r() * 0.6);
     } else if (k < SIGN_HOARDINGS.from) {
-      // An enamel street plate: white on deep blue, a rim, a bolt at each end.
+      // An enamel street plate: white on deep blue, a rim, a bolt at each end (in Kowloon
+      // black on white, the English over the Chinese).
       g.fillStyle = '#b9b5a8';
       g.fillRect(x, y, CW, CH);
-      g.fillStyle = '#17305c';
+      g.fillStyle = hk ? '#dedbd0' : '#17305c';
       g.fillRect(x + 4, y + 4, CW - 8, CH - 8);
-      g.strokeStyle = '#e6e2d6';
+      g.strokeStyle = hk ? '#1d1d1b' : '#e6e2d6';
       g.lineWidth = 3;
       g.strokeRect(x + 9, y + 9, CW - 18, CH - 18);
-      g.fillStyle = '#ece8dc';
-      const text = STREETS[(k - SIGN_STREETS.from) % STREETS.length];
+      g.fillStyle = hk ? '#1d1d1b' : '#ece8dc';
+      const text = (hk ? HK_STREETS : STREETS)[(k - SIGN_STREETS.from) % STREETS.length];
       fit(g, text, 'bold', sans, CW - 44, 30);
       g.fillText(text, x + CW / 2, y + CH / 2 + 1);
       g.fillStyle = '#8d8a80';
@@ -170,7 +236,7 @@ export function makeSigns(): THREE.Texture | null {
       g.arc(x + 34 + r() * 20, y + CH / 2, 20 + r() * 8, 0, Math.PI * 2);
       g.fill();
       g.fillRect(x + CW - 30, y, 30, CH);
-      const text = SLOGANS[(k - SIGN_HOARDINGS.from) % SLOGANS.length];
+      const text = (hk ? HK_SLOGANS : SLOGANS)[(k - SIGN_HOARDINGS.from) % SLOGANS.length];
       fit(g, text, '900', sans, CW - 120, 34);
       g.fillText(text, x + CW / 2 + 16, y + CH / 2 + 1);
       // The seams between the pasted sheets, and a corner torn away.

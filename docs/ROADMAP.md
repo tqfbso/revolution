@@ -406,6 +406,9 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
 7. European city map: BUILT (decision 107). `?map=euro` or Menu > Map: European city. One
    dense city on both banks of a river: four bridges that can be cut, three covered
    crossings that cannot, two parks, a motorway on an embankment, a station.
+   Kowloon map (Fabio, 2026-11-20, asked for directly, outside this list): BUILT
+   (decision 153). `?map=kowloon` or Menu > Map: Kowloon. Tsim Sha Tsui and Jordan round
+   Kowloon Park: towers and tenements on a 48 m grid, the harbour on two sides, no bridges.
 8. The computer fighting in cities (U5): BUILT (decision 110). Its sappers fortify the
    houses its garrisons hold, garrisons without houses lie up in the ruins, and the
    player's commanders do both as well. Garrisoning and storming were already there.
@@ -515,9 +518,11 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
 - [ ] I6 Mortars, rooftops, ambush. A mortar team for every army (the one new kind of
       unit); a Roof order with reach and top attack on tanks, at the price of exposure; an
       ambush stance that holds fire until a vehicle enters a drawn zone.
-- [ ] I7 Air strikes for the three big armies only, on a long cooldown, each with its own
+- [x] I7 Air strikes for the three big armies only, on a long cooldown, each with its own
       flavour (one guided bomb, a stick of bombs, a drone swarm). Today's civilian fine is
-      the only penalty (Fabio: the cost today is fine).
+      the only penalty (Fabio: the cost today is fine). Decision 154: tier 3 and a standing
+      headquarters, 200 supplies / 150 fuel / 250 credits, four minutes between strikes;
+      Shift+J; the computer uses them on Normal and Hard.
 - [ ] I8 The guerrilla. The No faction choice becomes the guerrilla army (which gives the
       game its name; Fabio will share the story later). Faction 0 stays as a hidden base
       table for tests and the golden hash. Technicals, heavy drones, militia raised in held
