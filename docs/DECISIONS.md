@@ -3491,3 +3491,46 @@ as the centre. `?map=kowloon`, Menu > Map: Kowloon (`src/sim/kowloon.ts`).
 
 Not done: footbridges over Nathan Road, double-decker buses and trams, quay walls (the
 harbour edge is a bank), lit signs at night (by choice: no glow).
+
+## 154. Air strikes for the three big armies (I7) (2026-11-20)
+
+Fabio's answer in the inspiration review: air strikes for the Western alliance, Russia and
+China only (the guerrilla army will have none), on a long cooldown, the civilian fine as
+today the only penalty. The army mix pillar puts aircraft in the slowest, dearest tier, and
+they must not take over from the infantry fight.
+
+- Who and when: tier 3 and a finished headquarters standing. 200 supplies, 150 fuel and 250
+  credits a strike (more credits than a tank, about a tank in all), then four minutes before
+  the next. The plain table (faction 0) has none, so the golden hash and every faction-0 test
+  are untouched; the world hash takes in an army's strike clock only once it has called one.
+- The jet: the transport plane's airframe (kind 15) at 1.7 times its speed, in over the
+  army's own edge of the map. Air defence on the way gets a few seconds at it; shot down
+  before the point it lets nothing go. Nobody can give it orders.
+- The alliance, a guided bomb: one bomb, laser-guided. Called on or near a vehicle or squad
+  (8 m) it follows it in, and lands where it will be: it kills a tank and takes 1,500 off a
+  building (a house, or most of a block). Called on ground, it lands on the point.
+- Russia, a stick of bombs: six along the run, 6 m apart, each a little off; each kills men
+  in the open within a few metres and cracks 420 off the buildings it reaches. Armour only
+  if one lands within 2 m.
+- China, a drone swarm: eight munitions, each on the best thing round the point (32 m):
+  armour first, two to a tank, then other vehicles, then men in the open; nothing in a house
+  or hidden. Each leads its target. A jammer over the target sends a munition astray. This
+  is the answer to massed armour the pillar asks for, and a jammer is the answer to it.
+- Damage is a share of the target's full health (so every army's version of a kind takes the
+  same), friend or foe alike under a bomb, cover and walls as for shells. Bombs are shells to
+  the rest of the rules (they land in resolveShells), so buildings, works and civilians take
+  them exactly as shells; destruction tuning is unchanged.
+- The computer, on Normal (from minute 12) and Hard (from minute 9) only: every five seconds
+  while its strike is ready it looks over what it sees for the point worth most, away from
+  air defence it knows of and its own men, and calls it there if it is worth more than a
+  tank or so. Free-fall bombs only go on what stands still. Easy and Recruit never call one.
+- Measured (`tools/airstrikes.ts`, six faction pairings, 30 minutes on the city map): Normal
+  calls 3 to 5 a side, killing 2% of everything lost on average (at most 6%); Hard 3 to 6,
+  at most 3.5%. A strike kills about its own price. That is a tool, not a winner.
+- Screen: a fighter-bomber model, bombs falling and drones diving, bigger blasts and
+  craters, a jet's roar, the button in the top bar with its countdown, "Air strike inbound"
+  for the caller and "Enemy jet inbound: air defence!" for everyone else. Commands 47 (call)
+  and 48 (a setup order that sets an army's tier and funds, for tests and the screenshots).
+
+Not done: the computer does not plan its air defence against strikes, there is no target
+marker for the defender, and the jet does not avoid air defence on its own.

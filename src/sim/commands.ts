@@ -330,6 +330,34 @@ export interface ParadropCommand {
   y: number;
 }
 
+/**
+ * Call the army's air strike on a point (I7, see src/sim/air.ts). Only the three factions
+ * have one, each its own: the alliance a guided bomb, Russia a stick of bombs, China a
+ * drone swarm. It needs the top tier and a standing headquarters, costs AIR_STRIKE_PRICE
+ * and then takes AIR_STRIKE_COOLDOWN to come round again.
+ */
+export const CMD_AIRSTRIKE = 47;
+export interface AirStrikeCommand {
+  type: typeof CMD_AIRSTRIKE;
+  team: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Set an army's tier and funds outright: for tests, scenarios and the automated screenshots
+ * only (one of the setup orders no player may give).
+ */
+export const CMD_GRANT = 48;
+export interface GrantCommand {
+  type: typeof CMD_GRANT;
+  team: number;
+  tier: number;
+  supplies: number;
+  fuel: number;
+  credits: number;
+}
+
 export const CMD_ORDER = 28;
 export const CMD_KEEP = 29;
 export const CMD_DEST = 30;
@@ -514,6 +542,8 @@ export type Command = (
   | FellCommand
   | EntrenchCommand
   | ParadropCommand
+  | AirStrikeCommand
+  | GrantCommand
   | AssignCommand
   | MissionCommand
   | ReinforceCommand
