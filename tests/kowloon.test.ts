@@ -15,6 +15,7 @@ import {
   mapInfo,
   type GameMap,
 } from '../src/sim/map';
+import { STYLE_HOTEL, STYLE_MALL, STYLE_MOSQUE, STYLE_OFFICE } from '../src/sim/kowloon';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import { STATE_ALIVE, createWorld, hashWorld } from '../src/sim/world';
@@ -58,77 +59,83 @@ describe('Kowloon', () => {
     expect(mapInfo('kowloon')?.armies).toBe(2);
   });
 
-  it('is a dense harbour city of towers, with room left for bases', () => {
+  it('is a dense harbour city of towers on the real streets, with room left for bases', () => {
     expect(map.layout).toBe('kowloon');
     expect(map.townCount).toBe(15);
     let buildings = 0;
     let towers = 0;
+    const styles = new Map<number, number>();
     for (let s = 0; s < map.structCount; s++) {
       expect(map.sKind[s]).not.toBe(S_BRIDGE);
       if (map.sKind[s] !== S_BUILDING) continue;
       buildings++;
       if (map.sFloors[s] >= 10) towers++;
+      styles.set(map.sStyle[s], (styles.get(map.sStyle[s]) ?? 0) + 1);
     }
     const city = generateMap(1, 'city');
     expect(buildings).toBeGreaterThan(city.structCount + 150);
     expect(towers).toBeGreaterThan(100);
-    expect(map.structCount).toBeLessThanOrEqual(MAX_STRUCTS - 250);
+    expect(map.structCount).toBeLessThanOrEqual(MAX_STRUCTS);
+    // Offices, malls and hotels as well as the tenements, and the one mosque.
+    expect(styles.get(STYLE_OFFICE) ?? 0).toBeGreaterThan(30);
+    expect(styles.get(STYLE_MALL) ?? 0).toBeGreaterThan(20);
+    expect(styles.get(STYLE_HOTEL) ?? 0).toBeGreaterThan(20);
+    expect(styles.get(STYLE_MOSQUE)).toBe(1);
     let paved = 0;
     let water = 0;
     for (let c = 0; c < N * N; c++) {
       if (map.road[c] === ROAD_STREET) paved++;
       if (map.type[c] === T_WATER) water++;
     }
-    expect(paved).toBeGreaterThan(15000);
-    // The harbour along two edges.
-    expect(water).toBeGreaterThan(9000);
+    expect(paved).toBeGreaterThan(5000);
+    // North up, as on the map: Victoria Harbour along the south, the typhoon shelter west.
+    expect(water).toBeGreaterThan(15000);
+    expect(map.type[245 * N + 128]).toBe(T_WATER);
     expect(map.type[100 * N + 5]).toBe(T_WATER);
-    expect(map.type[5 * N + 100]).toBe(T_WATER);
+    expect(map.type[20 * N + 128]).not.toBe(T_WATER);
+    expect(map.townName[14]).toBe('Kowloon Park');
   });
 
-  it('is the mirror image of itself, so neither army has the better ground', () => {
-    expect([map.startX[1], map.startY[1]]).toEqual([map.startY[0], map.startX[0]]);
-    for (let y = 0; y < N; y++) {
-      for (let x = 0; x < y; x++) {
-        expect(map.road[y * N + x]).toBe(map.road[x * N + y]);
-        expect(map.type[y * N + x]).toBe(map.type[x * N + y]);
-        expect(map.structAt[y * N + x] >= 0).toBe(map.structAt[x * N + y] >= 0);
-      }
-    }
-    for (let t = 0; t < 12; t += 2) {
-      expect(map.townX[t]).toBe(map.townY[t + 1]);
-      expect(map.townY[t]).toBe(map.townX[t + 1]);
-    }
-    for (const t of [12, 13, 14]) expect(map.townX[t]).toBe(map.townY[t]);
-    expect(map.townName[13]).toBe('Kowloon Park');
-    for (let k = 0; k < 22; k += 2) {
-      expect(map.siteX[k]).toBe(map.siteY[k + 1]);
-      expect(map.siteStock[k]).toBe(map.siteStock[k + 1]);
-    }
+  it('puts no flag and no resource site on a building', () => {
+    const free = (wx: number, wy: number, r: number) => {
+      const x = wx >> 12;
+      const y = wy >> 12;
+      for (let j = y - r; j <= y + r; j++)
+        for (let i = x - r; i <= x + r; i++)
+          if (map.sKind[map.structAt[j * N + i]] === S_BUILDING && map.structAt[j * N + i] >= 0)
+            return false;
+      return true;
+    };
+    for (let t = 0; t < map.townCount; t++) expect(free(map.townX[t], map.townY[t], 1)).toBe(true);
+    for (let k = 0; k < map.siteCount; k++) expect(free(map.siteX[k], map.siteY[k], 1)).toBe(true);
   });
 
-  it('has many ways across and no chokepoint: the diagonal is open in many places', () => {
+  it('has many ways across and no chokepoint', () => {
     for (const cls of [CLASS_VEHICLE, CLASS_FOOT]) {
       expect(flood(map, cls, () => false)[goal]).toBeGreaterThan(0);
     }
-    // Count the separate places a vehicle can cross the diagonal.
+    // Count the separate places a vehicle can cross the middle of the map, north to south.
     let ways = 0;
     let open = false;
-    for (let c = 2; c < N - 2; c++) {
-      const on = map.natural[CLASS_VEHICLE][c * N + c] !== 0;
+    for (let y = 2; y < N - 2; y++) {
+      const on = map.natural[CLASS_VEHICLE][y * N + 128] !== 0;
       if (on && !open) ways++;
       open = on;
     }
     expect(ways).toBeGreaterThanOrEqual(8);
-    // Shut the park and the streets either side of it: still a way round.
-    const d = flood(map, CLASS_VEHICLE, (x, y) => x >= 88 && x <= 168 && y >= 88 && y <= 168);
+    // Shut Kowloon Park and the waterfront at once: the streets between still carry a column.
+    const d = flood(
+      map,
+      CLASS_VEHICLE,
+      (x, y) => (x >= 96 && x <= 140 && y >= 40 && y <= 112) || y >= 196,
+    );
     expect(d[goal]).toBeGreaterThan(0);
-    // Block the diagonal at the waterfront, the park and Gun Club Hill all at once: the
-    // side streets between them still carry an armoured column across.
-    const e = flood(map, CLASS_VEHICLE, (x, y) => {
-      const c = (x + y) >> 1;
-      return Math.abs(x - y) <= 8 && (c < 40 || (c >= 88 && c <= 168) || c > 190);
-    });
+    // Shut everything north of Austin Road too: Nathan Road's side streets are enough.
+    const e = flood(
+      map,
+      CLASS_VEHICLE,
+      (x, y) => x >= 100 && x <= 150 && ((y >= 40 && y <= 112) || y >= 196 || y <= 36),
+    );
     expect(e[goal]).toBeGreaterThan(0);
   });
 

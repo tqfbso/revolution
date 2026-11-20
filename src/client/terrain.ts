@@ -32,6 +32,7 @@ import {
 } from '../sim/map';
 import type { Fog } from './fog';
 import { Land } from './land';
+import { HK_POOL, hkCells } from '../sim/kowloon';
 import type { Look } from './look';
 
 // Draws the sim's map (src/sim/map.ts): the ground mesh, a water surface, and instanced
@@ -393,12 +394,30 @@ export class Terrain {
     const foam = float(1)
       .sub(smoothstep(0.02, 0.16, depth))
       .mul(a.b.add(b.b).mul(0.5).add(0.3));
-    m.colorNode = mix(body, color(0xa9ab9c), foam.mul(0.3)).mul(shade);
-    m.opacityNode = smoothstep(-0.02, 0.9, depth).mul(0.5).add(0.42).add(foam.mul(0.2)).min(0.94);
+    const surface = mix(body, color(0xa9ab9c), foam.mul(0.3)).mul(shade);
+    const opacity = smoothstep(-0.02, 0.9, depth).mul(0.5).add(0.42).add(foam.mul(0.2)).min(0.94);
+    m.colorNode = surface;
+    m.opacityNode = opacity;
     m.roughnessNode = float(0.09).add(foam.mul(0.4));
     m.normalNode = cameraViewMatrix.transformDirection(
       vec3(tilt.x.mul(0.33), 1, tilt.y.mul(0.33)).normalize(),
     );
+    if (this.map.layout === 'kowloon') {
+      // Kowloon's swimming pools: clear water over pale tiles, not the harbour's.
+      const cells = hkCells();
+      const px = new Uint8Array(GRID * GRID);
+      for (let c = 0; c < px.length; c++) px[c] = cells[c] === HK_POOL ? 255 : 0;
+      const pools = new THREE.DataTexture(px, GRID, GRID, THREE.RedFormat);
+      pools.magFilter = pools.minFilter = THREE.LinearFilter;
+      pools.needsUpdate = true;
+      const pool = texture(pools, xz.div(MAP_SIZE)).r;
+      m.colorNode = mix(
+        surface,
+        mix(color(0x86cfd6), sky, sheen.mul(0.3)).mul(shade),
+        pool.mul(0.9),
+      );
+      m.opacityNode = mix(opacity, float(0.5), pool);
+    }
     return m;
   }
 
@@ -597,7 +616,10 @@ export class Terrain {
           for (let i = ci; i < ci + TREE_CHUNK; i++) {
             if (this.map.type[j * GRID + i] !== T_FOREST) continue;
             const h = this.heights[j * VERTS + i];
-            const leafy = h + (hash2(i >> 3, j >> 3) - 0.5) * 6 + (hash2(i, j) - 0.5) * 3 < 4.2;
+            // Kowloon's woods are subtropical: banyans and camphors, never a spruce.
+            const leafy =
+              this.map.layout === 'kowloon' ||
+              h + (hash2(i >> 3, j >> 3) - 0.5) * 6 + (hash2(i, j) - 0.5) * 3 < 4.2;
             cells[leafy ? 1 : 0].push(j * GRID + i);
           }
         }

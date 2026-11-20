@@ -49,7 +49,7 @@ export const S_BUILDING = 0;
 export const S_BRIDGE = 1;
 /** A base building put up by an army during the game (see src/sim/economy.ts). */
 export const S_BASE = 2;
-export const MAX_STRUCTS = 1024;
+export const MAX_STRUCTS = 2048;
 /**
  * What a building is made of (decision 074): a house of brick or timber, an apartment or
  * office block of concrete, or a hall (public or industrial: thick walls, wide spans).
@@ -151,6 +151,8 @@ export interface GameMap {
   sFloors: Uint8Array;
   /** Buildings: BUILD_HOUSE, BUILD_BLOCK or BUILD_HALL. */
   sClass: Uint8Array;
+  /** How a building looks, for maps that say (Kowloon: office, mall, hotel...); 0 otherwise. */
+  sStyle: Uint8Array;
   sMaxHp: Int32Array;
   /** Height of the ground floor (building) or of the west end of the deck (bridge). */
   sBase: Int32Array;
@@ -271,7 +273,7 @@ export const MAPS: readonly MapInfo[] = [
     id: 'kowloon',
     name: 'Kowloon',
     blurb:
-      'A harbour city of towers round Kowloon Park: Nathan Road, the Star Ferry, Gun Club Hill.',
+      'Tsim Sha Tsui and Jordan street for street, round Kowloon Park. Map data © OpenStreetMap contributors.',
     armies: 2,
   },
   {
@@ -1086,6 +1088,7 @@ export function newMap(heights: Int32Array, type: Uint8Array): GameMap {
     sTown: new Int8Array(MAX_STRUCTS).fill(-1),
     sFloors: new Uint8Array(MAX_STRUCTS),
     sClass: new Uint8Array(MAX_STRUCTS),
+    sStyle: new Uint8Array(MAX_STRUCTS),
     sMaxHp: new Int32Array(MAX_STRUCTS),
     sBase: new Int32Array(MAX_STRUCTS),
     sEast: new Int32Array(MAX_STRUCTS),
