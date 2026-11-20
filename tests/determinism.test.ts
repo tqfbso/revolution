@@ -13,14 +13,14 @@ describe('golden games', () => {
     const { marks, alive, deaths } = play('city', 2, 8);
     // Hashes at the end of every minute: the first that differs says when the game changed.
     expect(marks).toEqual([
-      '59b28bc3',
-      '670fe21d',
-      '8e25abbd',
-      '3ad304c8',
-      '86831bd3',
-      'fba81675',
-      '3cba0094',
-      '33d9dc75',
+      '978111fb',
+      'af744023',
+      'e07fc409',
+      'a8540dce',
+      '794e0a7f',
+      '4f6a2faa',
+      '2e7c514f',
+      '8a3b7505',
     ]);
     // A pinned game that never reaches the fighting would pin very little.
     expect(alive).toBeGreaterThan(200);
@@ -29,7 +29,7 @@ describe('golden games', () => {
 
   it('four armies on the four corners map play out exactly as pinned', () => {
     const { marks, alive, deaths } = play('four', 4, 6);
-    expect(marks).toEqual(['77824201', '5475c251', 'd2deec7d', '35f2bedc', '2620466c', '6605115a']);
+    expect(marks).toEqual(['638d80f1', 'e36c5e56', 'a863118a', '35db8d37', '1c7f42d0', 'a19ee612']);
     expect(alive).toBeGreaterThan(400);
     expect(deaths).toBeGreaterThan(100);
   });

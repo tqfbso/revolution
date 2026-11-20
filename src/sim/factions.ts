@@ -80,15 +80,15 @@ const SPECS: readonly Spec[] = [
     tweaks: {
       [KIND_TANK]: {
         name: 'Heavy tank',
-        hp: 115,
+        hp: 110,
         range: 2,
         sight: 2,
         cost: 118,
         time: 110,
         share: 85,
       },
-      [KIND_INFANTRY]: { name: 'Rifle squad', hp: 108, sight: 2, cost: 110, time: 100 },
-      [KIND_ATGM]: { name: 'Top-attack missile team', damage: 115, cost: 120, share: 120 },
+      [KIND_INFANTRY]: { name: 'Rifle squad', hp: 104, sight: 2, cost: 110, time: 100 },
+      [KIND_ATGM]: { name: 'Top-attack missile team', damage: 110, cost: 120, share: 120 },
       [KIND_IFV]: { name: 'Heavy carrier', hp: 112, cost: 114, time: 110 },
       [KIND_ARTILLERY]: {
         name: 'Precision gun',
@@ -100,7 +100,7 @@ const SPECS: readonly Spec[] = [
       },
       [KIND_RECON]: { name: 'Pathfinders', sight: 10 },
       [KIND_DRONE]: { name: 'Surveillance drone', sight: 6 },
-      [KIND_STRIKE]: { name: 'Loitering munition', damage: 125, cost: 140, time: 125, share: 70 },
+      [KIND_STRIKE]: { name: 'Loitering munition', damage: 118, cost: 140, time: 125, share: 70 },
       [KIND_AD]: { name: 'Air-defence vehicle', share: 140 },
       // It had none at first (decision 123). Drones are too large a part of the game to
       // leave the army most people play without the one thing that stops them (132).
@@ -146,15 +146,15 @@ const SPECS: readonly Spec[] = [
     line: 'Numbers and drones: the cheapest infantry, swarm drones at half price, fast wheeled carriers that seat three, hardy engineers. No paratroopers.',
     without: [KIND_PARA],
     tweaks: {
-      [KIND_TANK]: { name: 'Medium tank', speed: 112, cost: 92, time: 92 },
-      [KIND_INFANTRY]: { name: 'Infantry squad', cost: 90, time: 85, share: 100 },
+      [KIND_TANK]: { name: 'Medium tank', hp: 105, speed: 112, cost: 92, time: 92 },
+      [KIND_INFANTRY]: { name: 'Infantry squad', hp: 104, cost: 90, time: 85, share: 100 },
       [KIND_ATGM]: { name: 'Missile team', cost: 90, time: 90 },
-      [KIND_IFV]: { name: 'Wheeled carrier', hp: 94, speed: 118, carry: 3, cost: 90, time: 90 },
+      [KIND_IFV]: { name: 'Wheeled carrier', hp: 98, speed: 118, carry: 3, cost: 90, time: 90 },
       [KIND_ARTILLERY]: { name: 'Truck gun', hp: 85, speed: 125, cost: 95, time: 90 },
       [KIND_DRONE]: { name: 'Recon drone', cost: 70, time: 70 },
       [KIND_STRIKE]: {
         name: 'Swarm drone',
-        damage: 90,
+        damage: 95,
         speed: 108,
         cost: 75,
         time: 75,
@@ -162,7 +162,7 @@ const SPECS: readonly Spec[] = [
       },
       [KIND_AD]: { name: 'Air-defence vehicle', cost: 90 },
       [KIND_ENGINEER]: { name: 'Combat engineers', hp: 115, siege: 120, time: 80 },
-      [KIND_HELI]: { name: 'Light gunship', hp: 85, cost: 80, time: 80 },
+      [KIND_HELI]: { name: 'Light gunship', hp: 90, cost: 80, time: 80 },
       [KIND_TRUCK]: { name: 'Logistics truck', speed: 108 },
       [KIND_MORTAR]: { name: 'Mortar team', cost: 85, time: 85 },
     },
