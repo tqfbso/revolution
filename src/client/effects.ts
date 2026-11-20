@@ -488,6 +488,30 @@ export class Effects {
     this.tracer(x, y, z, x + ux * 60, y + 34, z + uz * 60, 0.3, 0.2, 0.8);
   }
 
+  /** A mortar bomb leaving the tube (I6): a small flash, a puff, the bomb climbing steeply. */
+  mortar(x: number, y: number, z: number, ux: number, uz: number): void {
+    this.emit(ADDITIVE, x, y, z, ux, 2, uz, 0.08, 0.9, 1.8, 1, 0.82, 0.5, 1);
+    for (let k = 0; k < 3; k++) {
+      this.emit(
+        SMOKE,
+        x,
+        y,
+        z,
+        ux * (1 + k) + rnd(0.5),
+        2 + k * 0.8 + rnd(0.4),
+        uz * (1 + k) + rnd(0.5),
+        1.6 + Math.random() * 0.6,
+        0.6,
+        2.2,
+        0.6,
+        0.58,
+        0.54,
+        0.36,
+      );
+    }
+    this.tracer(x, y, z, x + ux * 14, y + 40, z + uz * 14, 0.25, 0.12, 0.5);
+  }
+
   /** One billow of a standing smoke screen. Call it a few times a second while it stands. */
   smokeScreen(x: number, y: number, z: number): void {
     const g = 0.5 + Math.random() * 0.12;

@@ -2561,6 +2561,34 @@ export class StructureView {
     return fromFx(m.sBase[s]) + (m.sFloors[s] - lost) * FLOOR + this.crest[s];
   }
 
+  /**
+   * Where a man stands on the roof of building `s` at (x, z) (I6): on a flat roof just behind
+   * the parapet; on a pitched one on the slope, low at the eaves and high at the ridge.
+   */
+  roofAt(s: number, x: number, z: number): number {
+    const m = this.map;
+    const c = this.crest[s];
+    const eaves = this.topOf(s) - c;
+    if (c <= 1) return eaves + 0.05;
+    const x0 = m.sX[s] * CELL;
+    const z0 = m.sY[s] * CELL;
+    const x1 = x0 + m.sW[s] * CELL;
+    const z1 = z0 + m.sH[s] * CELL;
+    const edge = Math.max(0, Math.min(x - x0, x1 - x, z - z0, z1 - z));
+    const half = (Math.min(m.sW[s], m.sH[s]) * CELL) / 2;
+    return eaves + c * Math.min(1, edge / half);
+  }
+
+  /** Keeps a point on the roof of building `s`, half a metre in from its edges. */
+  onRoof(s: number, x: number, z: number): [number, number] {
+    const m = this.map;
+    const x0 = m.sX[s] * CELL + 0.5;
+    const z0 = m.sY[s] * CELL + 0.5;
+    const x1 = (m.sX[s] + m.sW[s]) * CELL - 0.5;
+    const z1 = (m.sY[s] + m.sH[s]) * CELL - 0.5;
+    return [Math.min(x1, Math.max(x0, x)), Math.min(z1, Math.max(z0, z))];
+  }
+
   centreOf(s: number): { x: number; z: number } {
     const m = this.map;
     return { x: (m.sX[s] + m.sW[s] / 2) * CELL, z: (m.sY[s] + m.sH[s] / 2) * CELL };

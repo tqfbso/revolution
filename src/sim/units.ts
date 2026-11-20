@@ -43,7 +43,13 @@ export const KIND_LIFT = 13;
 export const KIND_PARA = 14;
 /** The transport plane that drops them. Nobody orders it about; air defence shoots it down. */
 export const KIND_PLANE = 15;
-export const KIND_COUNT = 16;
+/**
+ * Mortar team (I6): three men and a tube that lobs bombs over the houses at what someone
+ * else has spotted. Short reach next to a gun, but it goes wherever infantry goes, up on a
+ * roof too, and its bombs pin the men they land among in the open (PIN_TICKS).
+ */
+export const KIND_MORTAR = 16;
+export const KIND_COUNT = 17;
 
 /**
  * The kinds of unit each role of a shared army looks after, by role (the names are DUTIES in
@@ -53,7 +59,7 @@ export const KIND_COUNT = 16;
 export const DUTY_KINDS: readonly (readonly number[])[] = [
   [],
   [0, 3, 4, 8, 9],
-  [1, 2, 5, 11],
+  [1, 2, 5, 11, 16],
   [6, 7, 12, 13, 14],
   [10],
 ];
@@ -65,7 +71,7 @@ export const DUTY_KINDS: readonly (readonly number[])[] = [
  * profile is one more number in each `vs` row.
  */
 export const PROFILE_TANK = 0;
-/** Men on foot: rifle squads, recon teams, engineers, paratroops. */
+/** Men on foot: rifle squads, recon teams, engineers, paratroops, mortar teams. */
 export const PROFILE_FOOT = 1;
 export const PROFILE_ATGM = 2;
 export const PROFILE_IFV = 3;
@@ -562,6 +568,31 @@ const SPECS: readonly UnitSpec[] = [
     ...PLAIN,
     sight: fx(20),
   },
+  {
+    // A bomb every five seconds onto men a friend has in sight, up to 65 away and over any
+    // roof. A bomb that lands among men in the open pins them. Too light
+    // to trouble armour or masonry, and helpless if the enemy walks up to it.
+    name: 'Mortar team',
+    cls: CLASS_FOOT,
+    hp: 60,
+    speed: fx(0.15),
+    range: fx(65),
+    reload: 100,
+    profile: PROFILE_FOOT,
+    vs: [10, 40, 40, 12, 40, 0, 0, 40, 0, 0],
+    siege: 8,
+    stray: 0,
+    garrison: true,
+    wreckTicks: 200,
+    armour: null,
+    turn: 0,
+    carry: 0,
+    indirect: true,
+    minRange: fx(12),
+    blast: fx(3.5),
+    ...PLAIN,
+    sight: fx(30),
+  },
 ];
 
 /** The table with every row's damage spread out over the kinds it can be fired at. */
@@ -686,6 +717,7 @@ export const IS_DRONE: readonly boolean[] = [
   false,
   false,
   false,
+  false,
 ];
 /** How high drones fly, for sight and for drawing them. */
 export const AIR_HEIGHT = fx(12);
@@ -763,3 +795,36 @@ export const FLASH_TICKS = 50;
 /** A vehicle burns for this long after it is knocked out, and lights this far round it. */
 export const BURN_TICKS = 45 * 20;
 export const BURN_RADIUS = fx(14);
+
+// I6: mortars, rooftops and ambushes.
+/**
+ * A squad on a roof (the Roof order) reaches at least this much further than its weapon
+ * does on the ground, and sees ROOF_SIGHT_PCT percent as far (squared: of its sight
+ * squared). Its eyes are a man's height above the top floor.
+ */
+export const ROOF_RANGE_BONUS = fx(6);
+export const ROOF_SIGHT_PCT = 144;
+/**
+ * From a roof a rocket meets a vehicle's top, the thinnest plate: percent of the damage that
+ * gets through, whichever way the vehicle faces (unless its rear, from behind, is thinner).
+ */
+export const ROOF_TOP_PCT = 200;
+/**
+ * The price of the roof: no walls round the men, only a parapet. They take this percent of
+ * what a squad in the open would, splinters and bursts included, and can be pinned.
+ */
+export const ROOF_EXPOSED_PCT = 80;
+/**
+ * A tank gun cannot be raised far enough to hit men on a roof this close (horizontally):
+ * the dead ground under the eaves that made rooftops the place to fight tanks from in a
+ * city. Carriers' autocannon, helicopters and everything else can.
+ */
+export const ROOF_DEAD = fx(16);
+/**
+ * An ambush (the Ambush order) is drawn as a circle between these radii. Men waiting in it
+ * hold their fire and, lying still, are as hard to see as in forest; vehicles are not.
+ */
+export const AMBUSH_MIN = fx(6);
+export const AMBUSH_MAX = fx(40);
+/** How often (ticks) a waiting ambush looks at its circle. */
+export const AMBUSH_PERIOD = 4;

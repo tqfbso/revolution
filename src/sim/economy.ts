@@ -51,6 +51,7 @@ import {
   PARA_RESERVE_MAX,
   KIND_INFANTRY,
   KIND_RECON,
+  KIND_MORTAR,
   KIND_STRIKE,
   KIND_TANK,
   KIND_TRUCK,
@@ -229,6 +230,8 @@ export const UNIT_PRICE: readonly UnitPrice[] = (() => {
   t[KIND_RECON] = price(B_BARRACKS, 1, 40, 0, 20, 8);
   t[KIND_ATGM] = price(B_BARRACKS, 1, 70, 0, 10, 8);
   t[KIND_ENGINEER] = price(B_BARRACKS, 1, 50, 0, 0, 7);
+  // Three men and a tube (I6): dearer than a rifle squad, far cheaper than a gun.
+  t[KIND_MORTAR] = price(B_BARRACKS, 1, 60, 0, 20, 9);
   t[KIND_IFV] = price(B_WORKS, 1, 150, 60, 0, 25);
   t[KIND_TANK] = price(B_WORKS, 2, 320, 160, 0, 55);
   t[KIND_AD] = price(B_WORKS, 2, 160, 60, 60, 28);
