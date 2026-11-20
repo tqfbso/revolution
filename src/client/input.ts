@@ -213,7 +213,11 @@ export class Input {
         send({ type: CMD_UNLOAD, units: units.selectedIds().filter((id) => units.load[id] > 0) });
       } else if (e.code === 'KeyL' && units.selectedCount > 0) {
         card.mount();
-      } else if (e.code === 'KeyJ') card.paradrop();
+      } else if (e.code === 'KeyJ') {
+        // J drops the paratroops, Shift + J calls the air strike (I7).
+        if (e.shiftKey) card.callStrike();
+        else card.paradrop();
+      }
     });
   }
 

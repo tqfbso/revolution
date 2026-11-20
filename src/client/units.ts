@@ -50,6 +50,9 @@ import {
   EV_DEATH,
   EV_GUTTED,
   EV_IMPACT,
+  EV_AIRSTRIKE,
+  EV_BOMB,
+  EV_PLANE,
   EV_FLARE,
   EV_SMOKE,
   EV_LAUNCH,
@@ -100,6 +103,8 @@ import {
   buildHelicopter,
   buildHelicopterWrecks,
   buildTransportPlane,
+  buildJet,
+  buildBomb,
   box,
   buildInfantry,
   buildLauncher,
@@ -116,6 +121,7 @@ import {
   SND_EXPLOSION,
   SND_HOWITZER,
   SND_IMPACT,
+  SND_JET,
   SND_MORTAR,
   SND_MISSILE,
   SND_RIFLE,
@@ -351,6 +357,22 @@ export class UnitView {
   private readonly squads: (SquadDraw | null)[] = new Array(KIND_COUNT).fill(null);
   private readonly batches: Batch[] = [];
   private readonly chutes: Batch;
+  /** Planes that are strike jets (I7), drawn as one: set by EV_AIRSTRIKE, cleared by EV_PLANE. */
+  private readonly jets = new Uint8Array(MAX_UNITS);
+  private readonly jetDraw: VehicleDraw;
+  /** Bombs and swarm munitions on their way down (EV_BOMB), drawn until they land. */
+  private readonly falling: {
+    x0: number;
+    y0: number;
+    z0: number;
+    x1: number;
+    z1: number;
+    t0: number;
+    t1: number;
+    swarm: boolean;
+  }[] = [];
+  private readonly bombs: Batch;
+  private readonly munitions: Batch;
   /** When each paratroop squad left the plane. */
   private readonly dropAt = new Float64Array(MAX_UNITS).fill(-1e9);
   private readonly jamRings: Batch;
@@ -434,6 +456,9 @@ export class UnitView {
     this.vehicles[KIND_HELI] = vehicle(buildHelicopter(true), 128);
     this.vehicles[KIND_LIFT] = vehicle(buildHelicopter(false), 128);
     this.vehicles[KIND_PLANE] = vehicle(buildTransportPlane(), 32);
+    this.jetDraw = vehicle(buildJet(), 16);
+    this.bombs = batch(buildBomb(), 64, 1);
+    this.munitions = batch(buildStrikeDrone().hull[1], 64, 1);
     this.chutes = batch(
       box(2.6, 0.9, 2.6, { at: [0, 0, 0], top: [0.45, 0.45], color: 0xa9ab98, team: 0.06 }),
       256,
@@ -952,6 +977,34 @@ export class UnitView {
     }
   }
 
+  /** Bombs fall faster and faster from under the jet; a swarm munition curves over and dives. */
+  private drawFalling(seconds: number): void {
+    const list = this.falling;
+    let keep = 0;
+    for (let k = 0; k < list.length; k++) {
+      const f = list[k];
+      if (seconds >= f.t1) continue;
+      list[keep++] = f;
+      const u = Math.max(0, (seconds - f.t0) / (f.t1 - f.t0));
+      const x = f.x0 + (f.x1 - f.x0) * u;
+      const z = f.z0 + (f.z1 - f.z0) * u;
+      const ground = this.terrain.heightAt(x, z);
+      if (!this.fog.sees(x, z)) continue;
+      const heading = Math.atan2(f.x1 - f.x0, f.z1 - f.z0);
+      const sin = Math.sin(heading);
+      const cos = Math.cos(heading);
+      if (f.swarm) {
+        const lift = Math.sin(u * Math.PI) * 6;
+        const y = f.y0 + (ground + 0.5 - f.y0) * u * u + lift;
+        this.munitions.put(x, y, z, sin, cos, 1, 0.5, 0.5, 0.5, BURN_BASE);
+      } else {
+        const y = f.y0 + (ground + 0.6 - f.y0) * u * u;
+        this.bombs.put(x, y, z, sin, cos, 1, 0.5, 0.5, 0.5, BURN_BASE);
+      }
+    }
+    list.length = keep;
+  }
+
   private playEvents(ev: Int32Array, seconds: number): void {
     const pos = this.renderPos;
     const fx = this.effects;
@@ -1020,6 +1073,67 @@ export class UnitView {
         const y = this.terrain.heightAt(x, z);
         this.flares.push({ x, y, z, from: seconds, until: seconds + b / 20 });
         this.sound?.at(SND_HOWITZER, x, z, false);
+        continue;
+      }
+      if (ev[e] === EV_PLANE) {
+        this.jets[a] = 0;
+        continue;
+      }
+      if (ev[e] === EV_AIRSTRIKE) {
+        // A strike jet over the edge of the map: heard right across it.
+        this.jets[a] = 1;
+        const x = pos[3 * a];
+        const z = pos[3 * a + 2];
+        this.sound?.at(SND_JET, x, z, true);
+        continue;
+      }
+      if (ev[e] === EV_BOMB) {
+        // Let go over the point: from under the jet to where it lands.
+        const jet = b >> 12;
+        const ticks = (b >> 4) & 255;
+        const x1 = unpackX(a);
+        const z1 = unpackY(a);
+        const x0 = jet < this.kind.length ? pos[3 * jet] : x1;
+        const z0 = jet < this.kind.length ? pos[3 * jet + 2] : z1;
+        const y0 = this.terrain.heightAt(x0, z0) + PLANE_ALTITUDE - 0.6;
+        this.falling.push({
+          x0,
+          y0,
+          z0,
+          x1,
+          z1,
+          t0: seconds,
+          t1: seconds + ticks / 20,
+          swarm: (b & 15) === 3,
+        });
+        if ((b & 15) === 3) this.sound?.at(SND_MISSILE, x1, z1, this.fog.sees(x1, z1));
+        continue;
+      }
+      if (ev[e] === EV_IMPACT && b > 0) {
+        // A bomb (1 guided, 2 one of a stick) or a swarm munition (3) lands.
+        const x = unpackX(a);
+        const z = unpackY(a);
+        const big = b === 1 ? 1.6 : b === 2 ? 1.2 : 0.6;
+        this.impacts.push(x, z, seconds, IMPACT_THROW * (b === 3 ? 0.7 : big * 1.4));
+        this.scars.add(x, z, (1.8 + Math.random() * 0.8) * big, false);
+        this.terrain.stamp(x, z, 3.6 * big, 150);
+        const seen = this.fog.sees(x, z);
+        this.sound?.at(b === 3 ? SND_IMPACT : SND_EXPLOSION, x, z, seen);
+        if (b !== 3) this.sound?.at(SND_IMPACT, x, z, seen);
+        if (seen) {
+          const y = this.terrain.heightAt(x, z);
+          fx.thin = 0;
+          if (b === 3) {
+            fx.explosion(x, y, z);
+          } else {
+            fx.explosion(x, y, z);
+            fx.shellImpact(x, y, z);
+            for (let k = 0; k < (b === 1 ? 4 : 2); k++) {
+              const r = big * 2.2;
+              fx.shellImpact(x + (Math.random() - 0.5) * r, y, z + (Math.random() - 0.5) * r);
+            }
+          }
+        }
         continue;
       }
       if (ev[e] === EV_IMPACT) {
@@ -1351,6 +1465,7 @@ export class UnitView {
     // Map symbols: nothing up close, solid when the camera is far out.
     const icons = this.icons;
     icons.batch.n = 0;
+    this.drawFalling(seconds);
     const iconAlpha = Math.min(1, Math.max(0, (this.zoom - ICON_FROM) / (ICON_FULL - ICON_FROM)));
     const right = this.camRight.setFromMatrixColumn(camera.matrixWorld, 0);
     const up = this.camUp.setFromMatrixColumn(camera.matrixWorld, 1);
@@ -1363,7 +1478,10 @@ export class UnitView {
     for (let i = 0; i < n; i++) {
       const state = info[i] & INFO_STATE_MASK;
       if (state === STATE_FREE) continue;
-      const veh = this.vehicles[this.kind[i]];
+      const veh =
+        this.kind[i] === KIND_PLANE && this.jets[i] !== 0
+          ? this.jetDraw
+          : this.vehicles[this.kind[i]];
       const isTank = veh !== null;
       const alive = state === STATE_ALIVE;
       // Fallen squads and shot-down drones leave no wreck.

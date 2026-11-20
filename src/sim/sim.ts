@@ -47,7 +47,7 @@ import {
   shapeFor,
   station,
 } from './formations';
-import { applyAirCommand, updateAir } from './air';
+import { BOMBS, SHELL_BOMB, applyAirCommand, bomberOf, updateAir } from './air';
 import { applyDemolishCommand, updateFelling } from './demolish';
 import {
   FELL_PANCAKE,
@@ -2660,9 +2660,7 @@ function resolveShells(w: World): void {
     }
     const x = w.shX[k];
     const y = w.shY[k];
-    const sk = w.shKind[k];
-    const kind = FACTIONS[(sk >> 4) & 3].kinds[(sk & 15) | ((sk >> 6) << 4)];
-    const mortar = ((sk & 15) | ((sk >> 6) << 4)) === KIND_MORTAR;
+    const packed = w.shKind[k];
     const owner = w.shOwner[k];
     const last = --w.shellCount;
     w.shX[k] = w.shX[last];
@@ -2670,6 +2668,15 @@ function resolveShells(w: World): void {
     w.shTick[k] = w.shTick[last];
     w.shOwner[k] = w.shOwner[last];
     w.shKind[k] = w.shKind[last];
+    if (w.shSmoke[k] >= SHELL_BOMB) {
+      // From the air (I7): the team rides in shKind, not a gun.
+      const type = w.shSmoke[k] - SHELL_BOMB + 1;
+      w.shSmoke[k] = w.shSmoke[last];
+      bombLands(w, x, y, type, packed, bomberOf(w, owner, packed));
+      continue;
+    }
+    const kind = FACTIONS[(packed >> 4) & 3].kinds[(packed & 15) | ((packed >> 6) << 4)];
+    const mortar = ((packed & 15) | ((packed >> 6) << 4)) === KIND_MORTAR;
     if (w.shSmoke[k] !== 0) {
       // (This is the smoke flag of the shell just landed: slot k is only overwritten below.)
       const load = w.shSmoke[k];
@@ -2722,6 +2729,54 @@ function resolveShells(w: World): void {
         damage[j] += dmg || 1;
         killer[j] = owner;
       }
+    }
+  }
+}
+
+/**
+ * A bomb or a swarm munition lands (I7, see src/sim/air.ts). Like a shell, it hurts anyone
+ * under it, friend or foe, less toward the rim; walls keep the same share off a garrison
+ * and cover helps men in the open. What it takes off a unit is a share of that unit's full
+ * health, so a strike does the same to every army's version of a kind. Armour is hurt only
+ * close in. Buildings take it from the roof, like a shell.
+ */
+function bombLands(w: World, x: number, y: number, type: number, team: number, by: number): void {
+  const map = w.map;
+  const bomb = BOMBS[type];
+  w.events.push(EV_IMPACT, packPoint(x, y), type);
+  blastStructures(w, x, y, bomb.siege, bomb.radius, team);
+  blastWorks(w, x, y, bomb.siege, bomb.radius);
+  civiliansShelled(w, x, y, bomb.radius, team);
+  const R = bomb.radius;
+  const r = (R >> CELL_SHIFT) + 1;
+  const cx = x >> CELL_SHIFT;
+  const cy = y >> CELL_SHIFT;
+  const y0 = cy > r ? cy - r : 0;
+  const y1 = cy + r < GRID_DIM ? cy + r : GRID_DIM - 1;
+  const x0 = cx > r ? cx - r : 0;
+  const x1 = cx + r < GRID_DIM ? cx + r : GRID_DIM - 1;
+  for (let gy = y0; gy <= y1; gy++) {
+    const to = cellStart[gy * GRID_DIM + x1 + 1];
+    for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
+      const j = sorted[s];
+      if (IS_AIR[w.kind[j]] || w.state[j] !== STATE_ALIVE || w.carrier[j] >= 0) continue;
+      const kind = kindOf(w, j);
+      const armoured = kind.armour !== null;
+      const reach = armoured ? bomb.armourReach : R;
+      const dx = w.posX[j] - x;
+      const dy = w.posY[j] - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= reach * reach) continue;
+      const pct = armoured ? bomb.armour : bomb.soft;
+      let dmg = Math.trunc((kind.hp * pct * (2 * reach - isqrt(d2))) / (200 * reach));
+      if (w.inside[j] >= 0) dmg = Math.trunc((dmg * THROUGH[stageOf(w, w.inside[j])]) / 100);
+      else if (KIND_CLASS[w.kind[j]] === CLASS_FOOT) {
+        const under = map.type[cellOfPos(w.posX[j], w.posY[j])];
+        if (under === T_RUBBLE || under === T_SANDBAG) dmg >>= 1;
+        else if (under === T_TRENCH) dmg >>= 2;
+      }
+      damage[j] += dmg || 1;
+      killer[j] = by;
     }
   }
 }
@@ -2994,7 +3049,8 @@ function resolveDamage(w: World): void {
       }
       // Fuel and ammunition go up: a vehicle killed in a street takes the house fronts with it.
       if (KIND_CLASS[w.kind[i]] === CLASS_VEHICLE) {
-        blastStructures(w, w.posX[i], w.posY[i], WRECK_SIEGE, WRECK_BLAST, w.team[killer[i]], true);
+        const by = killer[i] >= 0 ? w.team[killer[i]] : -1;
+        blastStructures(w, w.posX[i], w.posY[i], WRECK_SIEGE, WRECK_BLAST, by, true);
       }
       kill(w, i, killer[i]);
     } else if (state === STATE_WRECK && --w.cooldown[i] <= 0) {

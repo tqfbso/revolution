@@ -13,7 +13,9 @@
 //              that picks an objective, picks the crossing to reach it by, and assaults
 import { FACTIONS, kindOf } from './factions';
 import { hungryPoints } from './logistics';
+import { AIR_STICK, AIR_SWARM, STRIKE_READY, strikeOf, strikeStatus } from './air';
 import {
+  CMD_AIRSTRIKE,
   CMD_ASSIST,
   CMD_ATTACK_MOVE,
   CMD_ATTACK_STRUCTURE,
@@ -234,6 +236,12 @@ interface Tuning {
    * houses and ruins, from house to house, spread out where there is neither.
    */
   cover: boolean;
+  /**
+   * Air strikes (I7): the first tick it calls one, and the least it must expect to hit
+   * (in POWER, a tank is 30) before it spends one. 0 = never.
+   */
+  strikeFrom: number;
+  strikeWorth: number;
 }
 
 export const MINUTE = 60 * TICK_RATE;
@@ -281,6 +289,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     dropFrom: 0,
     dropEvery: 0,
     cover: false,
+    strikeFrom: 0,
+    strikeWorth: 0,
   },
   // Decision 070: Fabio found this level too hard. It now keeps a small army, holds only
   // its gate town and one more until it has attacked once, attacks late with what its
@@ -328,6 +338,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     dropFrom: 0,
     dropEvery: 0,
     cover: false,
+    strikeFrom: 0,
+    strikeWorth: 0,
   },
   // Decision 096: Fabio's group found this level far too hard. It had been the computer at
   // full stretch (an army at the 800 point cap by minute 20, seven times easy's), which left
@@ -374,6 +386,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     dropFrom: 15 * MINUTE,
     dropEvery: 6 * MINUTE,
     cover: true,
+    strikeFrom: 12 * MINUTE,
+    strikeWorth: 45,
   },
   hard: {
     period: 20,
@@ -415,6 +429,8 @@ export const AI_TUNING: Readonly<Record<AiLevel, Tuning>> = {
     dropFrom: 9 * MINUTE,
     dropEvery: 4 * MINUTE,
     cover: true,
+    strikeFrom: 9 * MINUTE,
+    strikeWorth: 36,
   },
 };
 
@@ -613,6 +629,8 @@ export interface Ai {
   dropX: number;
   dropY: number;
   lastDrop: number;
+  /** When it last looked for somewhere to call its air strike (I7). */
+  strikeLook: number;
   /** Attacks it has launched over the middle of the map. */
   attacks: number;
   /** One line on what it is up to, for tests and the debug overlay. */
@@ -713,6 +731,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     dropX: 0,
     dropY: 0,
     lastDrop: 0,
+    strikeLook: 0,
     wagons: [],
     garr: [],
     forces: [
@@ -1729,6 +1748,7 @@ function military(ai: Ai, w: World, out: Command[]): void {
   runReserve(ai, w, out);
   for (let which = 0; which < ai.forces.length; which++) runForce(ai, w, out, which);
   airborne(ai, w, out);
+  airStrike(ai, w, out);
   supplyLine(ai, w, out);
   dismount(ai, w, out);
 }
@@ -2614,6 +2634,71 @@ function dropTarget(
     consider(map.siteX[k], map.siteY[k], 0);
   }
   return best;
+}
+
+const IS_AIR_KIND = KINDS.map((k) => k.cls === CLASS_AIR);
+/** How far round a point each strike is reckoned to reach, for choosing where to call it. */
+const STRIKE_FOOTPRINT = [0, fx(6), fx(14), fx(24)];
+/** It keeps its jet away from air defence it knows of within this of the point. */
+const STRIKE_AA_CLEAR = fx(40);
+/** Bombs are not called this close to its own troops (the swarm only dives on the enemy). */
+const STRIKE_OWN_CLEAR = [0, fx(12), fx(20), 0];
+
+/**
+ * The air strike (I7). Once it has the top tier and the strike is ready, every few seconds
+ * it looks over what it can see of the enemy for the point where the strike would hit the
+ * most (by POWER, armour counting most for the swarm), away from known air defence and
+ * from its own men, and calls it there if that is worth `strikeWorth`.
+ */
+function airStrike(ai: Ai, w: World, out: Command[]): void {
+  const tune = ai.tune;
+  const team = ai.team;
+  if (tune.strikeWorth <= 0 || w.tick < tune.strikeFrom) return;
+  if (w.tick - ai.strikeLook < 5 * TICK_RATE) return;
+  ai.strikeLook = w.tick;
+  if (strikeStatus(w, team) !== STRIKE_READY) return;
+  const type = strikeOf(w, team);
+  const R = STRIKE_FOOTPRINT[type];
+  const own = STRIKE_OWN_CLEAR[type];
+  const seen = ai.seen;
+  let best = -1;
+  let bestWorth = tune.strikeWorth - 1;
+  for (let a = 0; a < seen.length; a++) {
+    const i = seen[a];
+    if (IS_AIR_KIND[w.kind[i]]) continue;
+    const x = w.posX[i];
+    const y = w.posY[i];
+    let worth = 0;
+    let shy = false;
+    for (let b = 0; b < seen.length && !shy; b++) {
+      const j = seen[b];
+      const d = dist(x, y, w.posX[j], w.posY[j]);
+      if (w.kind[j] === KIND_AD && d < STRIKE_AA_CLEAR) shy = true;
+      if (d >= R || IS_AIR_KIND[w.kind[j]]) continue;
+      // Free-fall bombs are for what stands still: a column on the move is gone by then.
+      if (type === AIR_STICK && w.inside[j] < 0 && (w.velX[j] !== 0 || w.velY[j] !== 0)) continue;
+      // The swarm wants vehicles, and cannot find what is in a house.
+      if (type === AIR_SWARM && (w.inside[j] >= 0 || FOOT(w.kind[j]))) {
+        worth += w.inside[j] >= 0 ? 0 : POWER[w.kind[j]] >> 1;
+      } else worth += POWER[w.kind[j]];
+    }
+    if (shy || worth <= bestWorth) continue;
+    if (own > 0 && friendNear(w, team, x, y, own)) continue;
+    best = i;
+    bestWorth = worth;
+  }
+  if (best < 0) return;
+  out.push({ type: CMD_AIRSTRIKE, team, x: w.posX[best], y: w.posY[best] });
+  ai.plan = 'air strike';
+}
+
+/** Has `team` anyone on the ground within `r` of (x, y)? */
+function friendNear(w: World, team: number, x: number, y: number, r: number): boolean {
+  for (let j = 0; j < w.count; j++) {
+    if (w.state[j] !== STATE_ALIVE || w.team[j] !== team || IS_AIR_KIND[w.kind[j]]) continue;
+    if (dist(x, y, w.posX[j], w.posY[j]) < r) return true;
+  }
+  return false;
 }
 
 /**

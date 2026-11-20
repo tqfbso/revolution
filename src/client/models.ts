@@ -597,6 +597,79 @@ export function buildTransportPlane(): VehicleModel {
   return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
 }
 
+/**
+ * A strike jet (I7): a single-seat fighter-bomber in grey, swept wings, twin fins, the
+ * load on pylons under the wings, the army's colour only on the fins.
+ */
+export function buildJet(): VehicleModel {
+  const GREY = 0x6a7076;
+  const DARK = 0x4a4f54;
+  const parts = [
+    cyl(0.55, 8.6, 'z', { at: [0, 0, -0.4], color: GREY }, 12),
+    // Nose cone and canopy.
+    box(0.95, 0.9, 2.2, {
+      at: [0, 0, 4.9],
+      rot: [Math.PI / 2, 0, 0],
+      top: [0.18, 0.22],
+      color: GREY,
+    }),
+    box(0.5, 0.4, 1.7, { at: [0, 0.55, 2.6], top: [0.55, 0.6], color: GLASS }),
+    // Intakes either side.
+    box(0.45, 0.6, 2.2, { at: [-0.7, -0.1, 1.0], color: DARK }),
+    box(0.45, 0.6, 2.2, { at: [0.7, -0.1, 1.0], color: DARK }),
+    // Swept wings.
+    box(3.8, 0.12, 2.1, { at: [-2.2, -0.05, -0.9], rot: [0, -0.5, 0], color: GREY }),
+    box(3.8, 0.12, 2.1, { at: [2.2, -0.05, -0.9], rot: [0, 0.5, 0], color: GREY }),
+    // Tailplanes and twin fins with the army's colour.
+    box(1.8, 0.1, 1.2, { at: [-1.1, 0, -4.2], rot: [0, -0.45, 0], color: GREY }),
+    box(1.8, 0.1, 1.2, { at: [1.1, 0, -4.2], rot: [0, 0.45, 0], color: GREY }),
+    box(0.1, 1.5, 1.5, {
+      at: [-0.45, 0.85, -3.9],
+      rot: [0, 0, -0.25],
+      top: [1, 0.5],
+      shear: -0.5,
+      color: GREY,
+    }),
+    box(0.1, 1.5, 1.5, {
+      at: [0.45, 0.85, -3.9],
+      rot: [0, 0, 0.25],
+      top: [1, 0.5],
+      shear: -0.5,
+      color: GREY,
+    }),
+    box(0.11, 0.5, 0.8, { at: [-0.62, 1.4, -4.2], rot: [0, 0, -0.25], team: 1 }),
+    box(0.11, 0.5, 0.8, { at: [0.62, 1.4, -4.2], rot: [0, 0, 0.25], team: 1 }),
+    // Exhausts.
+    cyl(0.32, 0.5, 'z', { at: [-0.3, -0.05, -4.85], color: 0x2a2b2c }, 10),
+    cyl(0.32, 0.5, 'z', { at: [0.3, -0.05, -4.85], color: 0x2a2b2c }, 10),
+    // The load under the wings.
+    cyl(0.2, 2.0, 'z', { at: [-1.9, -0.45, -0.4], color: 0x4b5141 }, 8),
+    cyl(0.2, 2.0, 'z', { at: [1.9, -0.45, -0.4], color: 0x4b5141 }, 8),
+  ];
+  const g = merge(parts);
+  const far = merge([
+    box(1.2, 1.0, 10, { at: [0, 0, 0], color: GREY, team: 0.2 }),
+    box(8, 0.2, 2.4, { at: [0, 0, -0.9], color: GREY, team: 0.4 }),
+    box(1.4, 1.5, 1.4, { at: [0, 0.9, -3.9], color: GREY, team: 0.7 }),
+  ]);
+  return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
+}
+
+/** A free-fall bomb on its way down, nose first: body, the fins at the top. */
+export function buildBomb(): THREE.BufferGeometry {
+  return merge([
+    cyl(0.22, 1.5, 'y', { at: [0, 0, 0], color: 0x4b5141 }, 10),
+    box(0.3, 0.4, 0.3, {
+      at: [0, -0.9, 0],
+      top: [0.2, 0.2],
+      rot: [Math.PI, 0, 0],
+      color: 0x4b5141,
+    }),
+    box(0.7, 0.4, 0.05, { at: [0, 0.85, 0], color: 0x3f4434 }),
+    box(0.05, 0.4, 0.7, { at: [0, 0.85, 0], color: 0x3f4434 }),
+  ]);
+}
+
 /** Eight wheels, a boat-shaped hull, a small turret with a long thin autocannon. */
 export function buildIfv(): VehicleModel {
   return buildVehicle({

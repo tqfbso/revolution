@@ -4,6 +4,7 @@ import { FELL_PANCAKE, FIRE_OUT, floorsAlight } from '../sim/collapse';
 import type { Command } from '../sim/commands';
 import { createGame, type Game } from '../sim/match';
 import { CIV_FLEEING, CIV_HOME } from '../sim/civilians';
+import { strikeOf, strikeStatus } from '../sim/air';
 import { fromFx } from '../sim/fixed';
 import { CELL_SHIFT, S_BUILDING, groundMax } from '../sim/map';
 import { BUILDINGS, TIER_ITEM, TIER_PRICE, unitPrice } from '../sim/economy';
@@ -413,6 +414,9 @@ function postSnapshot(w: World, simMs: number): void {
     pop: Array.from(w.pop),
     popCap: Array.from(w.popCap),
     reserve: Array.from(w.paraReserve),
+    strikeType: Array.from(w.paraReserve, (_, t) => strikeOf(w, t)),
+    strikeStatus: Array.from(w.paraReserve, (_, t) => strikeStatus(w, t)),
+    strikeIn: Array.from(w.airStrikeAt, (at) => Math.max(0, Math.ceil((at - w.tick) / TICK_RATE))),
     helis: Array.from(w.helis),
     heliCap: Array.from(w.heliCap),
     upkeep: Array.from(w.pop, (p) => upkeepPerMinute(p)),

@@ -13,7 +13,7 @@ import { isVersus } from './sim/match';
 import { runTickers, tickHtml, wireTickers } from './client/ticker';
 import { FACTIONS } from './sim/factions';
 import * as THREE from 'three/webgpu';
-import { CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
+import { CMD_AIRSTRIKE, CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
 import { generateMap, MAX_TEAMS } from './sim/map';
 import { MAP_SIZE, M_FOCUS, M_NONE, TICK_RATE } from './sim/world';
@@ -412,6 +412,10 @@ async function start(): Promise<void> {
   card.paradrop = () =>
     input.ask('Click the map: where should the paratroops drop? (Esc cancels)', (x, z) => {
       send({ type: CMD_PARADROP, team: myTeam, x: Math.round(x * 1024), y: Math.round(z * 1024) });
+    });
+  card.airStrike = () =>
+    input.ask('Click the map: where should the air strike go in? (Esc cancels)', (x, z) => {
+      send({ type: CMD_AIRSTRIKE, team: myTeam, x: Math.round(x * 1024), y: Math.round(z * 1024) });
     });
   const input = new Input(
     canvas,

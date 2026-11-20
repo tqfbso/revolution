@@ -154,6 +154,13 @@ export interface Snapshot {
   popCap: number[];
   /** Per team: paratroop squads in reserve, helicopters flying and what the helipads hold. */
   reserve: number[];
+  /**
+   * Per team, the air strike (I7): which it has (AIR_*), whether it can be called now or why
+   * not (STRIKE_*), and seconds until it comes round again.
+   */
+  strikeType: number[];
+  strikeStatus: number[];
+  strikeIn: number[];
   helis: number[];
   heliCap: number[];
   /** Per team: supplies a minute the army costs to keep. */
