@@ -3,7 +3,7 @@
 import { aiReport, aiThink, createAi, type AiLevel } from '../src/sim/ai';
 import { CMD_NIGHT, type Command } from '../src/sim/commands';
 import { B_HQ } from '../src/sim/economy';
-import { generateMap } from '../src/sim/map';
+import { generateMap, mapInfo } from '../src/sim/map';
 import { skirmishCommands } from '../src/sim/scenarios';
 import { step } from '../src/sim/sim';
 import {
@@ -18,14 +18,8 @@ import {
 const seed = Number(process.argv[2] ?? 1);
 const minutes = Number(process.argv[3] ?? 20);
 const levels = [process.argv[4] ?? 'normal', process.argv[5] ?? 'normal'];
-const layout =
-  process.env.MAP === 'river'
-    ? 'river'
-    : process.env.MAP === 'ridge'
-      ? 'ridge'
-      : process.env.MAP === 'euro'
-        ? 'euro'
-        : 'city';
+// MAP=river|ridge|euro|kowloon|four (the city by default).
+const layout = mapInfo(process.env.MAP)?.id ?? 'city';
 const w = createWorld(seed, generateMap(seed, layout));
 // HUMANS=3 gives team 1 (the side the computer plays in a skirmish) its co-op tuning.
 const humans = Number(process.env.HUMANS ?? 1);

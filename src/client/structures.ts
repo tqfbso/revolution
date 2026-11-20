@@ -58,7 +58,7 @@ import type { Effects } from './effects';
 import type { Fog } from './fog';
 import type { Look } from './look';
 import type { Clutter } from './clutter';
-import { SIGN_HOARDINGS, SIGN_SHOPS, SIGN_STREETS, makeSigns, signUV } from './signs';
+import { SIGN_HOARDINGS, SIGN_SHOPS, SIGN_STREETS, SIGN_TALL, makeSigns, signUV } from './signs';
 import { cityFace, masonry } from './surface';
 import {
   SURF_BRICK,
@@ -101,6 +101,17 @@ const GLASS = 0x1b2126;
 const LIT_GLOSS = 0.9;
 const SOOT = 0x0d0c0b;
 const CONCRETE = 0x77756e;
+/**
+ * Hong Kong (the Kowloon map): mosaic tile and painted render gone grey with damp and
+ * traffic, in the pale colours the tower blocks were built in.
+ */
+const HK_WALLS = [
+  0xa9a596, 0x9e9a8a, 0x939b8e, 0xa08f7f, 0x878b8c, 0x9c9580, 0x7c8789, 0xb0a998, 0x8e8577,
+]; // prettier-ignore
+/** Whether the buildings are drawn the Hong Kong way (set by the Structures of the map). */
+let hk = false;
+/** Their roofs: bare concrete and screed, a shade lighter than tarred felt. */
+const HK_ROOFS = [0x66645e, 0x5c5a55, 0x716e66, 0x5f615e];
 const ASPHALT = 0x39393a;
 // Readability colours, as on the minimap: brighter than any paint on purpose.
 const TEAM_UI = [
@@ -601,6 +612,162 @@ function remerge(
   return out;
 }
 
+/**
+ * The windows of a Hong Kong block: a band of glass along each face at every floor and
+ * the columns of the frame standing proud between them. Twenty floors cost what two would
+ * window by window, which is what lets the Kowloon map have its towers.
+ */
+function ribbons(
+  id: number,
+  cx: number,
+  cz: number,
+  w: number,
+  d: number,
+  base: number,
+  floors: number,
+  shopFace: number,
+  damaged: boolean,
+  wall: number,
+  wear: number,
+  wsurf: number,
+): Part[] {
+  const parts: Part[] = [];
+  const h = floors * FLOOR;
+  const faces: [number, number, boolean, number][] = [
+    [FACE_SOUTH, w, true, 1],
+    [FACE_NORTH, w, true, -1],
+    [FACE_EAST, d, false, 1],
+    [FACE_WEST, d, false, -1],
+  ];
+  for (const [face, len, alongX, side] of faces) {
+    const off = side * ((alongX ? d : w) / 2 + 0.02);
+    for (let f = 0; f < floors; f++) {
+      if (f === 0 && face === shopFace) continue;
+      const y = base + f * FLOOR + FLOOR * 0.55;
+      const lit = !damaged && rand(id, 5000 + face * 97 + f) < 0.16;
+      parts.push({
+        size: alongX ? [len - 0.5, FLOOR * 0.44, 0.05] : [0.05, FLOOR * 0.44, len - 0.5],
+        at: alongX ? [cx, y, cz + off] : [cx + off, y, cz],
+        color: GLASS,
+        gloss: lit ? LIT_GLOSS : 1,
+      });
+    }
+    // The frame: a column every two metres or so, the full height of the block.
+    const n = Math.max(2, Math.round(len / 2.3));
+    const out = side * ((alongX ? d : w) / 2 + 0.07);
+    for (let i = 0; i <= n; i++) {
+      const t = (i / n - 0.5) * (len - 0.2);
+      parts.push({
+        size: alongX ? [0.16, h, 0.12] : [0.12, h, 0.16],
+        at: alongX ? [cx + t, base + h / 2, cz + out] : [cx + out, base + h / 2, cz + t],
+        color: wall,
+        shade: wear * (0.86 + rand(id, 5400 + i) * 0.1),
+        surf: wsurf,
+      });
+    }
+    if (damaged) {
+      // Shot-out panes: black gaps in the bands.
+      for (let q = 0; q < 2 + floors / 3; q++) {
+        const f = Math.floor(rand(id, 5600 + face * 31 + q) * floors);
+        const t = (rand(id, 5700 + face * 31 + q) - 0.5) * (len - 2);
+        const y = base + f * FLOOR + FLOOR * 0.55;
+        parts.push({
+          size: alongX ? [1.6, FLOOR * 0.5, 0.08] : [0.08, FLOOR * 0.5, 1.6],
+          at: alongX ? [cx + t, y, cz + off] : [cx + off, y, cz + t],
+          color: SOOT,
+        });
+      }
+    }
+  }
+  return parts;
+}
+
+/**
+ * What hangs off a Hong Kong street front: signboards out over the pavement on steel
+ * frames, read from up and down the street, and air conditioners under the windows.
+ * Painted boards, no light of their own.
+ */
+function streetFront(
+  id: number,
+  cx: number,
+  cz: number,
+  w: number,
+  d: number,
+  base: number,
+  floors: number,
+  shopFace: number,
+  damaged: boolean,
+): Part[] {
+  const parts: Part[] = [];
+  const face = shopFace >= 0 ? shopFace : rand(id, 6000) < 0.5 ? FACE_SOUTH : FACE_EAST;
+  const alongX = face === FACE_NORTH || face === FACE_SOUTH;
+  const side = face === FACE_SOUTH || face === FACE_EAST ? 1 : -1;
+  const len = alongX ? w : d;
+  const half = (alongX ? d : w) / 2;
+  const put = (t: number, y: number, out: number): [number, number, number] =>
+    alongX ? [cx + t, y, cz + side * (half + out)] : [cx + side * (half + out), y, cz + t];
+  // The boards stand edge on to the wall, so they face along the street.
+  const yaw = alongX ? Math.PI / 2 : 0;
+  const count = Math.min(3, Math.max(1, Math.floor(len / 4)));
+  for (let i = 0; i < count; i++) {
+    if (rand(id, 6010 + i) < 0.25) continue;
+    const t = ((i + 0.5) / count - 0.5) * (len - 1.5) + (rand(id, 6020 + i) - 0.5);
+    const tall = 3.4 + rand(id, 6030 + i) * 2.2;
+    const wide = tall / 4;
+    const y = base + FLOOR * (1.15 + rand(id, 6040 + i) * Math.min(2, floors - 2)) + tall / 2;
+    const out = 0.85 + rand(id, 6050 + i) * 0.5;
+    const cell = SIGN_TALL.from + Math.floor(rand(id, 6060 + i) * SIGN_TALL.count);
+    const shade = damaged ? 0.5 : 0.82 + rand(id, 6070 + i) * 0.15;
+    const frame: [number, number, number] = alongX
+      ? [0.06, tall + 0.12, wide + 0.12]
+      : [wide + 0.12, tall + 0.12, 0.06];
+    parts.push({ size: frame, at: put(t, y, out), color: 0x2f302f });
+    for (const back of [0, Math.PI]) {
+      const nudge = (back === 0 ? 1 : -1) * 0.04;
+      const at = put(t, y, out);
+      if (alongX) at[0] += nudge;
+      else at[2] += nudge;
+      parts.push({
+        size: [tall, wide, 0],
+        at,
+        rot: [0, yaw + back + (alongX ? 0 : 0), Math.PI / 2],
+        color: 0xffffff,
+        shade,
+        sign: cell,
+      });
+    }
+    // The bracket that holds it out from the wall.
+    parts.push({
+      size: alongX ? [0.07, 0.07, out] : [out, 0.07, 0.07],
+      at: put(t, y + tall / 2 - 0.1, out / 2),
+      color: 0x3a3d3d,
+    });
+  }
+  // Air conditioners, here and there under the windows of every floor.
+  const faces = [face, alongX ? FACE_EAST : FACE_SOUTH];
+  for (const f of faces) {
+    const ax = f === FACE_NORTH || f === FACE_SOUTH;
+    const sd = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+    const L = ax ? w : d;
+    const hf = (ax ? d : w) / 2;
+    const slots = Math.max(1, Math.floor(L / 2.6));
+    for (let fl = 1; fl < Math.min(floors, 14); fl++) {
+      for (let q = 0; q < slots; q++) {
+        if (rand(id, 6200 + f * 300 + fl * 17 + q) > 0.2) continue;
+        const t = ((q + 0.5) / slots - 0.5) * (L - 1);
+        const y = base + fl * FLOOR + FLOOR * 0.16;
+        parts.push({
+          size: ax ? [0.62, 0.36, 0.34] : [0.34, 0.36, 0.62],
+          at: ax ? [cx + t, y, cz + sd * (hf + 0.2)] : [cx + sd * (hf + 0.2), y, cz + t],
+          color: 0x9a9890,
+          shade: 0.8,
+        });
+      }
+    }
+  }
+  return parts;
+}
+
 /** How far the roof of the building last drawn stands above its counted floors. */
 let crest = 0.9;
 
@@ -626,12 +793,15 @@ export function buildingParts(
   const cz = z0 + d / 2;
   const h = floors * FLOOR;
   // Plaster and brick for houses; precast panels for most blocks and halls.
-  const brick = cls === BUILD_HOUSE && rand(id, 41) < 0.42;
-  const wall = brick
-    ? BRICKS[Math.floor(rand(id, 1) * BRICKS.length)]
-    : cls === BUILD_HOUSE
-      ? WALLS[Math.floor(rand(id, 1) * WALLS.length)]
-      : [0x8a8a84, 0x7c7d78, 0x93908a][Math.floor(rand(id, 1) * 3)];
+  const brick = !hk && cls === BUILD_HOUSE && rand(id, 41) < 0.42;
+  const wall =
+    hk && cls !== BUILD_HALL
+      ? HK_WALLS[Math.floor(rand(id, 1) * HK_WALLS.length)]
+      : brick
+        ? BRICKS[Math.floor(rand(id, 1) * BRICKS.length)]
+        : cls === BUILD_HOUSE
+          ? WALLS[Math.floor(rand(id, 1) * WALLS.length)]
+          : [0x8a8a84, 0x7c7d78, 0x93908a][Math.floor(rand(id, 1) * 3)];
   const wsurf = brick
     ? SURF_BRICK
     : cls !== BUILD_HOUSE && rand(id, 42) < 0.7
@@ -840,7 +1010,7 @@ export function buildingParts(
   }
   // The bigger buildings are drawn as rows of houses (blocks.ts); the rest as one.
   const mass =
-    cls === BUILD_HALL
+    cls === BUILD_HALL || hk
       ? null
       : blockMass({
           id,
@@ -900,8 +1070,9 @@ export function buildingParts(
   // Small houses have pitched roofs of tile; big ones a flat roof, a set-back top storey
   // or a low hipped roof of zinc; halls a row of gables in sheet, or one low one.
   const rr = rand(id, 10);
-  const roof =
-    cls === BUILD_HALL
+  const roof = hk
+    ? 'flat'
+    : cls === BUILD_HALL
       ? rr < 0.55 && L / Math.max(2, Math.round(L / 4)) < S
         ? 'saw'
         : rr < 0.85
@@ -1034,9 +1205,36 @@ export function buildingParts(
     parts.push({
       size: [w + 0.24, 0.12, d + 0.24],
       at: [cx, top + 0.06, cz],
-      color: ROOF,
+      color: hk ? HK_ROOFS[Math.floor(rand(id, 79) * HK_ROOFS.length)] : ROOF,
       surf: SURF_FELT,
     });
+    if (hk && floors >= 6 && S >= 4) {
+      // The lift and stair house, the water tanks on their stand, a hut built on the roof.
+      const hx = cx + (rand(id, 80) - 0.5) * (w - 3.2);
+      const hz = cz + (rand(id, 81) - 0.5) * (d - 3.2);
+      parts.push({
+        size: [2.2, FLOOR * 1.3, 2.6],
+        at: [hx, top + (FLOOR * 1.3) / 2, hz],
+        color: wall,
+        shade: wear * 0.9,
+        surf: wsurf,
+      });
+      parts.push({
+        size: [2.0, 0.9, 1.4],
+        at: [hx, top + FLOOR * 1.3 + 0.45, hz],
+        color: 0x8d9089,
+        shade: 0.85,
+      });
+      if (rand(id, 82) < 0.45) {
+        parts.push({
+          size: [Math.min(3.4, w * 0.4), FLOOR * 0.8, Math.min(2.6, d * 0.35)],
+          at: [cx - (hx - cx) * 0.8, top + FLOOR * 0.4, cz - (hz - cz) * 0.8],
+          color: 0x6a655c,
+          shade: 0.8,
+          surf: SURF_SHEET,
+        });
+      }
+    }
     for (const side of [-1, 1]) {
       parts.push({
         size: [w + 0.24, 0.22, 0.14],
@@ -1285,9 +1483,12 @@ export function buildingParts(
       }
     }
   }
-  // Windows on all four faces: dark glass set just proud of the wall.
+  // Windows on all four faces: dark glass set just proud of the wall. A Hong Kong block
+  // has them in bands, one to a floor, between the columns of its frame.
   let k = 10;
-  for (let f = 0; f < floors; f++) {
+  if (hk && floors >= 5)
+    parts.push(...ribbons(id, cx, cz, w, d, base, floors, shopFace, damaged, wall, wear, wsurf));
+  for (let f = 0; f < (hk && floors >= 5 ? 0 : floors); f++) {
     const y = base + f * FLOOR + FLOOR * 0.56;
     for (const [len, alongX] of [
       [w, true],
@@ -1325,6 +1526,9 @@ export function buildingParts(
         }
       }
     }
+  }
+  if (hk && floors >= 3 && cls !== BUILD_HALL) {
+    parts.push(...streetFront(id, cx, cz, w, d, base, floors, shopFace, damaged));
   }
   if (damaged) {
     // Shell holes: big scorched patches on the walls, and part of the roof gone.
@@ -2259,7 +2463,8 @@ export class StructureView {
       this.material.alphaTest = 0.5;
     }
     // Signs: a panel shows its cell of the sign sheet instead of its own colour.
-    const signs = makeSigns();
+    hk = map.layout === 'kowloon';
+    const signs = makeSigns(hk);
     const tint = attribute('color', 'vec3');
     const sign = attribute('sign', 'float');
     const painted = (plain: THREE.Node<'vec3'>): THREE.Node<'vec3'> =>
