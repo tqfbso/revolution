@@ -31,9 +31,11 @@ export function dress(
   g: THREE.BufferGeometry,
   s: Surface,
   boxP?: Float32Array,
-  boxH?: [number, number, number],
+  /** The part's half size, or one half size a vertex (three numbers each). */
+  boxH?: [number, number, number] | Float32Array,
   cavity?: Float32Array,
 ): THREE.BufferGeometry {
+  const each = boxH instanceof Float32Array;
   const n = g.getAttribute('position').count;
   if (!g.getAttribute('color')) {
     const c = new THREE.Color(s.color ?? 0x565c45);
@@ -47,7 +49,7 @@ export function dress(
   for (let i = 0; i < n; i++) {
     for (let k = 0; k < 3; k++) {
       p[i * 3 + k] = boxP ? boxP[i * 3 + k] / wearUnit : 0;
-      h[i * 4 + k] = boxH ? Math.min(FAR, boxH[k] / wearUnit) : FAR;
+      h[i * 4 + k] = boxH ? Math.min(FAR, boxH[each ? i * 3 + k : k] / wearUnit) : FAR;
     }
     h[i * 4 + 3] = Math.min(0.9, cavity ? cavity[i] : 0) + (s.cloth ? 2 : 0);
   }
@@ -109,6 +111,8 @@ export interface Ring {
   z?: number;
   color?: number;
   team?: number;
+  /** This section's own squareness (see LoftOpts.square). */
+  square?: number;
 }
 
 export interface LoftOpts extends Surface {
@@ -144,14 +148,15 @@ export function loft(rings: Ring[], o: LoftOpts = {}): THREE.BufferGeometry {
     const pinch = Math.max(0, ((size(lo) + size(hi)) / 2 - size(r)) / Math.max(1e-6, size(r)));
     if (r.color !== undefined) c.set(r.color);
     else c.copy(base);
+    const er = r.square ? 2 / r.square : e;
     for (let s = 0; s < seg; s++) {
       const a = (s / seg) * Math.PI * 2;
       const ca = Math.cos(a);
       const sa = Math.sin(a);
       pos.push(
-        (r.x ?? 0) + r.rx * Math.sign(ca) * Math.abs(ca) ** e,
+        (r.x ?? 0) + r.rx * Math.sign(ca) * Math.abs(ca) ** er,
         r.y,
-        (r.z ?? 0) + r.rz * Math.sign(sa) * Math.abs(sa) ** e,
+        (r.z ?? 0) + r.rz * Math.sign(sa) * Math.abs(sa) ** er,
       );
       col.push(c.r, c.g, c.b);
       mask.push(r.team ?? o.team ?? 0);

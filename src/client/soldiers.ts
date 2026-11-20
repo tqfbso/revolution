@@ -12,7 +12,7 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Batch } from './batch';
-import { box, cyl, merge } from './models';
+import { box, cyl, merge, under } from './kit';
 import { loft, setWear, type Ring } from './shape';
 
 /** The colours of one army's kit. Build the rig with another to dress another faction. */
@@ -41,6 +41,51 @@ export const NEUTRAL: Uniform = {
 
 /** Map units per metre of soldier: 1.8 m of man stands 0.62 units tall. */
 const S = 0.62 / 1.8;
+/** The same, for whoever sets a weapon down beside the men (models.ts, drills.ts). */
+export const MAN_SCALE = S;
+
+/**
+ * What each army's men wear, as it should look once the army's coat is over it
+ * (kit.ts COATS): the alliance in worn tan and olive, Russia in dark green, China in
+ * sand khaki with olive webbing.
+ */
+const WORN: Uniform[] = [
+  NEUTRAL,
+  NEUTRAL,
+  {
+    cloth: 0x5d6a48,
+    vest: 0x454d38,
+    pack: 0x4f573c,
+    helmet: 0x4a5340,
+    boots: 0x1b1a18,
+    gloves: 0x2a2b26,
+    skin: 0x9a7a62,
+    weapon: 0x17181a,
+  },
+  {
+    cloth: 0x9c9675,
+    vest: 0x6c6d4b,
+    pack: 0x77754f,
+    helmet: 0x858263,
+    boots: 0x1b1a18,
+    gloves: 0x2a2b26,
+    skin: 0x9a7a62,
+    weapon: 0x17181a,
+  },
+];
+
+/** The vertex colours that come out as `WORN[faction]` under that faction's coat. */
+function uniformOf(faction: number): Uniform {
+  const w = WORN[faction] ?? NEUTRAL;
+  const u = {} as Uniform;
+  for (const k of Object.keys(w) as (keyof Uniform)[]) u[k] = under(w[k], faction);
+  return u;
+}
+
+/** What a man carries: a rifle, the squad's machine gun, or a rifle and a rocket tube on his back. */
+export const ARM_RIFLE = 0;
+export const ARM_MG = 1;
+export const ARM_TUBE = 2;
 const THIGH = 0.44;
 const SHIN = 0.48;
 const NECK = 0.52;
@@ -142,6 +187,8 @@ export class Soldiers {
   private readonly upper: Batch;
   private readonly fore: Batch;
   private readonly rifle: Batch;
+  private readonly mg: Batch;
+  private readonly tube: Batch;
   private readonly body1: Batch;
   private readonly thigh1: Batch;
   private readonly shin1: Batch;
@@ -164,9 +211,13 @@ export class Soldiers {
   private g = 0;
   private b = 0;
   private a = 0;
+  /** Set by `drill` for the next man: his hands leave the rifle for these places. */
+  private task = false;
+  private readonly hands = new Float32Array(7);
 
-  constructor(make: MakeBatch, u: Uniform = NEUTRAL) {
-    const m = buildParts(u);
+  /** The men of the army of `faction` (sim/factions.ts): its helmets, packs and rifles. */
+  constructor(make: MakeBatch, faction = 0) {
+    const m = buildParts(uniformOf(faction), faction);
     this.torso = make(m.torso, NEAR_MEN, 0);
     this.head = make(m.head, NEAR_MEN, 0);
     this.thigh = make(m.thigh, NEAR_MEN * 2, 0);
@@ -174,6 +225,8 @@ export class Soldiers {
     this.upper = make(m.upper, NEAR_MEN * 2, 0);
     this.fore = make(m.fore, NEAR_MEN * 2, 0);
     this.rifle = make(m.rifle, NEAR_MEN, 0);
+    this.mg = make(m.mg, NEAR_MEN >> 2, 0);
+    this.tube = make(m.tube, NEAR_MEN >> 2, 0);
     this.body1 = make(m.body1, FAR_MEN, 1);
     this.thigh1 = make(m.thigh1, FAR_MEN * 2, 1);
     this.shin1 = make(m.shin1, FAR_MEN * 2, 1);
@@ -199,6 +252,8 @@ export class Soldiers {
       [this.upper, m.upper],
       [this.fore, m.fore],
       [this.rifle, m.rifle],
+      [this.mg, m.mg],
+      [this.tube, m.tube],
     ] as const)
       this.pieceOf.set(b, g);
     this.stillMuzzle = new Float32Array(STILLS.length * 3);
@@ -376,7 +431,12 @@ export class Soldiers {
     b: number,
     a: number,
     look = 0,
+    arm = ARM_RIFLE,
+    breath = 0,
   ): void {
+    const task = this.task;
+    this.task = false;
+    const hands = this.hands;
     this.ox = x;
     this.oy = y;
     this.oz = z;
@@ -403,7 +463,8 @@ export class Soldiers {
     }
     const swing = Math.sin(stride);
     const lift = Math.cos(stride);
-    const lean = p[0];
+    // He breathes at the halt, and bows over a weapon he serves.
+    const lean = p[0] + 0.02 * breath * (1 - go) + (task ? hands[6] : 0);
     const thL = p[1] + 0.75 * swing * go;
     const knL = p[2] + 0.9 * (lift > 0 ? lift : 0) * go;
     const thR = p[3] - 0.75 * swing * go;
@@ -430,7 +491,7 @@ export class Soldiers {
     const sp = Math.sin(pitch);
     const cp = Math.cos(pitch);
     const gx = p[6];
-    const gy = hy + p[7] + (0.02 * lift * go - kick * sp);
+    const gy = hy + p[7] + (0.02 * lift * go - kick * sp) + 0.006 * breath * (1 - go);
     const gz = hz + p[8] - kick * cp;
     const mz = this.muzzle;
     mz[0] = x + (gx * cos + (gz + MUZZLE * cp) * sin) * S;
@@ -463,19 +524,62 @@ export class Soldiers {
       );
       this.leg(this.thigh, this.shin, HIP_X, hy, hz, thL, knL);
       this.leg(this.thigh, this.shin, -HIP_X, hy, hz, thR, knR);
-      this.sag(this.rifle, gx, gy, gz, pitch);
-      // Trigger hand on the grip, support hand out on the handguard.
-      this.reach(-1, shY, shZ, gx, gy - 0.02, gz, wP);
-      this.reach(1, shY, shZ, gx, gy + HANDGUARD * sp, gz + HANDGUARD * cp, wP);
+      if (arm === ARM_TUBE) this.sag(this.tube, 0, hy, hz, -lean);
+      if (task) {
+        // Both hands on the weapon he serves, his rifle slung muzzle down beside the pack.
+        this.sag(
+          this.rifle,
+          -0.2,
+          hy + 0.4 * cl + 0.19 * sl,
+          hz + 0.4 * sl - 0.19 * cl,
+          -1.2 - lean,
+        );
+        this.reach(-1, shY, shZ, hands[3], hy + hands[4], hz + hands[5], wP);
+        this.reach(1, shY, shZ, hands[0], hy + hands[1], hz + hands[2], wP);
+      } else {
+        this.sag(arm === ARM_MG ? this.mg : this.rifle, gx, gy, gz, pitch);
+        // Trigger hand on the grip, support hand out on the handguard.
+        this.reach(-1, shY, shZ, gx, gy - 0.02, gz, wP);
+        this.reach(1, shY, shZ, gx, gy + HANDGUARD * sp, gz + HANDGUARD * cp, wP);
+      }
     } else {
       this.sag(this.body1, 0, hy, hz, -lean);
       this.leg(this.thigh1, this.shin1, HIP_X, hy, hz, thL, knL);
       this.leg(this.thigh1, this.shin1, -HIP_X, hy, hz, thR, knR);
-      this.sag(this.rifle1, gx, gy, gz, pitch);
-      // One straight bone a side, from the shoulder at the hand: enough to read as arms.
-      this.point(-1, shY, shZ, gx, gy - 0.02, gz);
-      this.point(1, shY, shZ, gx, gy + HANDGUARD * sp, gz + HANDGUARD * cp);
+      if (task) {
+        this.sag(
+          this.rifle1,
+          -0.2,
+          hy + 0.4 * cl + 0.19 * sl,
+          hz + 0.4 * sl - 0.19 * cl,
+          -1.2 - lean,
+        );
+        this.point(-1, shY, shZ, hands[3], hy + hands[4], hz + hands[5]);
+        this.point(1, shY, shZ, hands[0], hy + hands[1], hz + hands[2]);
+      } else {
+        this.sag(this.rifle1, gx, gy, gz, pitch);
+        // One straight bone a side, from the shoulder at the hand: enough to read as arms.
+        this.point(-1, shY, shZ, gx, gy - 0.02, gz);
+        this.point(1, shY, shZ, gx, gy + HANDGUARD * sp, gz + HANDGUARD * cp);
+      }
     }
+  }
+
+  /**
+   * The next man drawn serves a weapon instead of holding his rifle: his left and right
+   * hands go to these places in his own frame (metres; heights are above his hips), he bows
+   * forward by `bow` radians, and his rifle rides on his back.
+   */
+  drill(lx: number, ly: number, lz: number, rx: number, ry: number, rz: number, bow: number): void {
+    const h = this.hands;
+    h[0] = lx;
+    h[1] = ly;
+    h[2] = lz;
+    h[3] = rx;
+    h[4] = ry;
+    h[5] = rz;
+    h[6] = bow;
+    this.task = true;
   }
 
   /** A thigh from the hip and a shin from the knee it ends at. */
@@ -633,7 +737,7 @@ export class Soldiers {
  * with a curve to it; his kit is boxes, which is what kit is. The middle-distance figure
  * is the same man with fewer points.
  */
-function buildParts(u: Uniform) {
+function buildParts(u: Uniform, faction: number) {
   setWear(0.018);
   const cloth = { cloth: true };
   const body = (seg: number, fine: boolean): Ring[] => {
@@ -658,15 +762,30 @@ function buildParts(u: Uniform) {
       ],
       { seg, square: 3.6, color: u.vest, ...cloth },
     );
+  // The pack: the alliance's tall assault pack, Russia's small squat one, China's slim one.
   const pack = (seg: number) =>
     loft(
-      [
-        { y: 0.15, rx: 0.13, rz: 0.07 },
-        { y: 0.2, rx: 0.155, rz: 0.092 },
-        { y: 0.44, rx: 0.15, rz: 0.088 },
-        { y: 0.5, rx: 0.12, rz: 0.062 },
-      ],
-      { seg, square: 3.2, color: u.pack, at: [0, 0, -0.215], ...cloth },
+      faction === 2
+        ? [
+            { y: 0.17, rx: 0.14, rz: 0.07 },
+            { y: 0.21, rx: 0.16, rz: 0.1 },
+            { y: 0.37, rx: 0.155, rz: 0.1 },
+            { y: 0.41, rx: 0.13, rz: 0.07 },
+          ]
+        : faction === 3
+          ? [
+              { y: 0.16, rx: 0.115, rz: 0.06 },
+              { y: 0.2, rx: 0.135, rz: 0.078 },
+              { y: 0.43, rx: 0.13, rz: 0.074 },
+              { y: 0.47, rx: 0.105, rz: 0.055 },
+            ]
+          : [
+              { y: 0.15, rx: 0.13, rz: 0.07 },
+              { y: 0.2, rx: 0.155, rz: 0.092 },
+              { y: 0.44, rx: 0.15, rz: 0.088 },
+              { y: 0.5, rx: 0.12, rz: 0.062 },
+            ],
+      { seg, square: 3.2, color: u.pack, at: [0, 0, faction === 3 ? -0.2 : -0.215], ...cloth },
     );
   const skull = (seg: number, at: number) =>
     loft(
@@ -679,15 +798,34 @@ function buildParts(u: Uniform) {
       ],
       { seg, color: u.skin, at: [0, at, 0] },
     );
+  // The helmet is most of what tells one army's man from another's at a glance: the
+  // alliance's high-cut shell that clears the ears for a headset, Russia's deep round pot
+  // that covers them, China's with a flared rim all round.
   const helmet = (seg: number, at: number) =>
     loft(
-      [
-        { y: 0.128, rx: 0.106, rz: 0.124, z: -0.006 },
-        { y: 0.15, rx: 0.11, rz: 0.128, z: -0.006 },
-        { y: 0.215, rx: 0.103, rz: 0.12, z: -0.004 },
-        { y: 0.262, rx: 0.076, rz: 0.09 },
-        { y: 0.284, rx: 0.034, rz: 0.042 },
-      ],
+      faction === 2
+        ? [
+            { y: 0.085, rx: 0.108, rz: 0.118, z: -0.014 },
+            { y: 0.12, rx: 0.116, rz: 0.132, z: -0.008 },
+            { y: 0.2, rx: 0.112, rz: 0.128, z: -0.006 },
+            { y: 0.262, rx: 0.084, rz: 0.098 },
+            { y: 0.29, rx: 0.036, rz: 0.044 },
+          ]
+        : faction === 3
+          ? [
+              { y: 0.112, rx: 0.126, rz: 0.146, z: -0.004 },
+              { y: 0.132, rx: 0.11, rz: 0.128, z: -0.006 },
+              { y: 0.205, rx: 0.104, rz: 0.121, z: -0.004 },
+              { y: 0.255, rx: 0.078, rz: 0.092 },
+              { y: 0.276, rx: 0.034, rz: 0.042 },
+            ]
+          : [
+              { y: 0.128, rx: 0.106, rz: 0.124, z: -0.006 },
+              { y: 0.15, rx: 0.11, rz: 0.128, z: -0.006 },
+              { y: 0.215, rx: 0.103, rz: 0.12, z: -0.004 },
+              { y: 0.262, rx: 0.076, rz: 0.09 },
+              { y: 0.284, rx: 0.034, rz: 0.042 },
+            ],
       { seg, color: u.helmet, team: 0.1, at: [0, at, 0] },
     );
 
@@ -696,25 +834,50 @@ function buildParts(u: Uniform) {
     carrier(8),
     pack(8),
     box(0.345, 0.045, 0.24, { at: [0, 0.14, 0], color: u.vest, ...cloth }), // belt
-    // Magazine pouches across the front, a radio high on the left, a pouch on each hip.
+    // Magazine pouches across the front, a pouch on each hip.
     box(0.085, 0.125, 0.05, { at: [-0.095, 0.25, 0.165], color: u.pack, ...cloth }),
     box(0.085, 0.125, 0.05, { at: [0, 0.25, 0.168], color: u.pack, ...cloth }),
     box(0.085, 0.125, 0.05, { at: [0.095, 0.25, 0.165], color: u.pack, ...cloth }),
-    box(0.07, 0.1, 0.045, { at: [0.11, 0.39, 0.158], color: u.gloves }),
-    box(0.012, 0.16, 0.012, { at: [0.135, 0.5, 0.15], color: u.weapon }), // its aerial
     box(0.06, 0.11, 0.11, { at: [0.185, 0.12, -0.02], color: u.pack, ...cloth }),
     box(0.06, 0.11, 0.11, { at: [-0.185, 0.12, 0.0], color: u.pack, ...cloth }),
-    cyl(0.055, 0.3, 'x', { at: [0, 0.545, -0.2], color: u.cloth, ...cloth }, 7), // bedroll
     box(0.2, 0.03, 0.02, { at: [0, 0.35, 0.152], team: 1 }), // name tape: the army's colour
+    ...(faction === 2
+      ? [
+          // A sleeping mat rolled under the pack, a medical pouch on the back of the belt.
+          cyl(0.065, 0.36, 'x', { at: [0, 0.13, -0.19], color: u.vest, ...cloth }, 7),
+          box(0.1, 0.09, 0.06, { at: [0.1, 0.11, -0.14], color: u.pack, ...cloth }),
+        ]
+      : faction === 3
+        ? [
+            // A canteen on the hip and the folded spade's handle up the side of the pack.
+            cyl(0.05, 0.13, 'y', { at: [-0.15, 0.13, -0.13], color: u.vest, ...cloth }, 7),
+            box(0.035, 0.34, 0.035, { at: [0.15, 0.34, -0.22], color: u.weapon }),
+            box(0.09, 0.11, 0.03, { at: [0.15, 0.18, -0.22], color: u.weapon }),
+          ]
+        : [
+            // A radio high on the left with its aerial, a bedroll across the top of the pack.
+            box(0.07, 0.1, 0.045, { at: [0.11, 0.39, 0.158], color: u.gloves }),
+            box(0.012, 0.16, 0.012, { at: [0.135, 0.5, 0.15], color: u.weapon }),
+            cyl(0.055, 0.3, 'x', { at: [0, 0.545, -0.2], color: u.cloth, ...cloth }, 7),
+          ]),
   ]);
   const head = merge([
     skull(8, 0),
     helmet(9, 0),
-    box(0.05, 0.035, 0.045, { at: [0, 0.225, 0.118], color: u.weapon }), // night-sight mount
-    box(0.03, 0.075, 0.075, { at: [0.098, 0.12, 0], color: u.gloves }), // headset
-    box(0.03, 0.075, 0.075, { at: [-0.098, 0.12, 0], color: u.gloves }),
     box(0.15, 0.03, 0.02, { at: [0, 0.135, 0.092], color: u.weapon }), // glasses
-    box(0.07, 0.05, 0.012, { at: [0, 0.2, -0.123], team: 1 }), // helmet patch, seen from behind
+    box(0.07, 0.05, 0.012, { at: [0, 0.2, faction === 2 ? -0.131 : -0.123], team: 1 }), // helmet patch, seen from behind
+    ...(faction === 2
+      ? [
+          // Goggles pushed up on the front of the helmet.
+          box(0.16, 0.05, 0.03, { at: [0, 0.215, 0.118], color: u.weapon }),
+        ]
+      : faction === 3
+        ? [box(0.04, 0.04, 0.012, { at: [0, 0.19, 0.122], team: 1 })] // the badge on the front
+        : [
+            box(0.05, 0.035, 0.045, { at: [0, 0.225, 0.118], color: u.weapon }), // night-sight mount
+            box(0.03, 0.075, 0.075, { at: [0.098, 0.12, 0], color: u.gloves }), // headset
+            box(0.03, 0.075, 0.075, { at: [-0.098, 0.12, 0], color: u.gloves }),
+          ]),
   ]);
   const thighRings: Ring[] = [
     { y: 0.03, rx: 0.08, rz: 0.092 },
@@ -768,21 +931,115 @@ function buildParts(u: Uniform) {
     ],
     { seg: 7, color: u.cloth, ...cloth },
   );
-  // A carbine with optic, magazine, stock and suppressor, a third thicker than life so it
-  // does not vanish at arm's length from the camera.
-  const steel = 0x2b2e2c;
-  const rifle = merge([
-    box(0.045, 0.07, 0.26, { at: [0, 0.035, 0.04], color: u.weapon }),
-    box(0.036, 0.14, 0.055, { at: [0, -0.065, 0.1], rot: [0.22, 0, 0], color: steel }),
+  // Weapons are a third thicker than life so they do not vanish at arm's length from the
+  // camera. The grip is at the origin, the muzzle 0.62 ahead of it on every one.
+  const steel = under(0x2b2e2c, faction);
+  const wood = under(0x4a3524, faction);
+  const rifle =
+    faction === 2
+      ? // Russia: a long-stroke rifle. Curved magazine, gas tube over the barrel, a
+        // front sight post, no optic to speak of.
+        merge([
+          box(0.045, 0.065, 0.3, { at: [0, 0.035, 0.03], color: u.weapon }),
+          box(0.036, 0.1, 0.055, { at: [0, -0.05, 0.115], rot: [0.3, 0, 0], color: wood }),
+          box(0.036, 0.09, 0.055, { at: [0, -0.125, 0.155], rot: [0.62, 0, 0], color: wood }),
+          box(0.036, 0.1, 0.045, { at: [0, -0.04, -0.03], rot: [-0.35, 0, 0], color: u.weapon }),
+          box(0.03, 0.05, 0.22, { at: [0, 0.03, -0.22], color: u.weapon }),
+          box(0.04, 0.1, 0.03, { at: [0, 0.01, -0.33], color: steel }),
+          box(0.05, 0.055, 0.17, { at: [0, 0.035, 0.265], color: wood }),
+          cyl(0.014, 0.28, 'z', { at: [0, 0.03, 0.47], color: steel }, 5),
+          cyl(0.016, 0.2, 'z', { at: [0, 0.062, 0.3], color: steel }, 5),
+          box(0.016, 0.06, 0.02, { at: [0, 0.065, 0.52], color: u.weapon }),
+          cyl(0.022, 0.06, 'z', { at: [0, 0.03, 0.59], color: u.weapon }, 6),
+          box(0.022, 0.025, 0.06, { at: [0, 0.08, 0.0], color: u.weapon }),
+        ])
+      : faction === 3
+        ? // China: a bullpup. The magazine sits behind the grip, a carrying handle runs
+          // along the top, the barrel is short out of the front.
+          merge([
+            box(0.05, 0.085, 0.5, { at: [0, 0.035, -0.06], color: u.weapon }),
+            box(0.038, 0.15, 0.06, { at: [0, -0.07, -0.17], rot: [0.25, 0, 0], color: steel }),
+            box(0.036, 0.1, 0.045, { at: [0, -0.04, 0.0], rot: [-0.3, 0, 0], color: u.weapon }),
+            box(0.012, 0.06, 0.1, { at: [0, -0.035, 0.07], color: u.weapon }),
+            box(0.022, 0.02, 0.3, { at: [0, 0.135, 0.0], color: u.weapon }),
+            box(0.022, 0.06, 0.025, { at: [0, 0.105, 0.14], color: u.weapon }),
+            box(0.022, 0.06, 0.025, { at: [0, 0.105, -0.14], color: u.weapon }),
+            box(0.046, 0.06, 0.16, { at: [0, 0.03, 0.26], color: steel }),
+            cyl(0.014, 0.26, 'z', { at: [0, 0.04, 0.46], color: steel }, 5),
+            cyl(0.022, 0.06, 'z', { at: [0, 0.04, 0.59], color: u.weapon }, 6),
+          ])
+        : // The alliance: a carbine with optic, magazine, stock and suppressor.
+          merge([
+            box(0.045, 0.07, 0.26, { at: [0, 0.035, 0.04], color: u.weapon }),
+            box(0.036, 0.14, 0.055, { at: [0, -0.065, 0.1], rot: [0.22, 0, 0], color: steel }),
+            box(0.036, 0.1, 0.045, { at: [0, -0.04, -0.03], rot: [-0.35, 0, 0], color: u.weapon }),
+            box(0.034, 0.05, 0.2, { at: [0, 0.035, -0.19], color: u.weapon }),
+            box(0.042, 0.11, 0.035, { at: [0, 0.012, -0.3], color: steel }),
+            cyl(0.03, 0.27, 'z', { at: [0, 0.04, 0.3], color: steel }, 7),
+            cyl(0.013, 0.12, 'z', { at: [0, 0.04, 0.48], color: u.weapon }, 5),
+            cyl(0.023, 0.14, 'z', { at: [0, 0.04, 0.56], color: steel }, 6),
+            cyl(0.026, 0.1, 'z', { at: [0, 0.105, 0.05], color: u.weapon }, 6),
+            box(0.02, 0.03, 0.05, { at: [0, 0.078, 0.05], color: u.weapon }),
+          ]);
+  // The squad's machine gun: a long heavy barrel, a box of belt under it, a folded bipod.
+  // Russia's has its box slung low and a long flash hider; the others a squarer box.
+  const mg = merge([
+    box(0.055, 0.085, 0.36, { at: [0, 0.04, 0.02], color: u.weapon }),
     box(0.036, 0.1, 0.045, { at: [0, -0.04, -0.03], rot: [-0.35, 0, 0], color: u.weapon }),
-    box(0.034, 0.05, 0.2, { at: [0, 0.035, -0.19], color: u.weapon }),
-    box(0.042, 0.11, 0.035, { at: [0, 0.012, -0.3], color: steel }),
-    cyl(0.03, 0.27, 'z', { at: [0, 0.04, 0.3], color: steel }, 7),
-    cyl(0.013, 0.12, 'z', { at: [0, 0.04, 0.48], color: u.weapon }, 5),
-    cyl(0.023, 0.14, 'z', { at: [0, 0.04, 0.56], color: steel }, 6),
-    cyl(0.026, 0.1, 'z', { at: [0, 0.105, 0.05], color: u.weapon }, 6),
-    box(0.02, 0.03, 0.05, { at: [0, 0.078, 0.05], color: u.weapon }),
+    box(0.04, 0.07, 0.24, { at: [0, 0.03, -0.25], color: faction === 2 ? wood : u.weapon }),
+    box(0.045, 0.12, 0.035, { at: [0, 0.01, -0.37], color: steel }),
+    faction === 2
+      ? box(0.09, 0.11, 0.2, { at: [0.01, -0.075, 0.1], color: steel })
+      : box(0.12, 0.12, 0.13, { at: [0.035, -0.07, 0.11], color: u.pack, cloth: true }),
+    cyl(0.03, 0.2, 'z', { at: [0, 0.045, 0.3], color: steel }, 6),
+    cyl(0.018, 0.3, 'z', { at: [0, 0.045, 0.47], color: steel }, 5),
+    cyl(0.024, faction === 2 ? 0.1 : 0.05, 'z', { at: [0, 0.045, 0.59], color: u.weapon }, 6),
+    box(0.02, 0.02, 0.26, { at: [0.03, -0.005, 0.44], color: u.weapon }), // bipod, folded
+    box(0.02, 0.02, 0.26, { at: [-0.03, -0.005, 0.44], color: u.weapon }),
+    box(0.02, 0.05, 0.12, { at: [0, 0.105, 0.02], color: u.weapon }), // carrying handle
   ]);
+  // The squad's rocket, slung across the back outside the pack; its joint is the hips, as
+  // the torso's. Russia's is the thin tube with the fat warhead standing above the shoulder
+  // that everyone knows; the others carry a plain disposable tube.
+  const across = {
+    at: [0.02, 0.36, -0.335] as [number, number, number],
+    rot: [0.12, 0, -0.5] as [number, number, number],
+  };
+  const tube =
+    faction === 2
+      ? merge([
+          cyl(0.03, 0.9, 'y', { ...across, color: steel }, 6),
+          cyl(0.042, 0.3, 'y', { at: [0.02, 0.33, -0.335], rot: across.rot, color: wood }, 6),
+          cyl(
+            0.062,
+            0.2,
+            'y',
+            { at: [0.272, 0.84, -0.4], rot: across.rot, color: u.vest },
+            7,
+            0.02,
+          ),
+          cyl(0.03, 0.12, 'y', { at: [0.2, 0.7, -0.38], rot: across.rot, color: u.vest }, 6, 0.062),
+          cyl(
+            0.03,
+            0.1,
+            'y',
+            { at: [-0.215, -0.07, -0.28], rot: across.rot, color: steel },
+            6,
+            0.05,
+          ),
+        ])
+      : merge([
+          cyl(
+            faction === 3 ? 0.055 : 0.05,
+            faction === 3 ? 0.9 : 1.0,
+            'y',
+            { ...across, color: u.vest },
+            7,
+          ),
+          cyl(0.062, 0.07, 'y', { at: [0.25, 0.79, -0.39], rot: across.rot, color: u.weapon }, 7),
+          cyl(0.062, 0.07, 'y', { at: [-0.21, -0.07, -0.28], rot: across.rot, color: u.weapon }, 7),
+          box(0.03, 0.05, 0.1, { at: [0.06, 0.43, -0.39], rot: across.rot, color: u.weapon }),
+        ]);
 
   // The middle distance: the same man in one piece above the hips, with straight arms.
   const body1 = merge([
@@ -819,5 +1076,20 @@ function buildParts(u: Uniform) {
     box(0.04, 0.13, 0.05, { at: [0, -0.06, 0.1], color: steel }),
   ]);
   setWear(0.045);
-  return { torso, head, thigh, shin, upper, fore, rifle, body1, thigh1, shin1, arm1, rifle1 };
+  return {
+    torso,
+    head,
+    thigh,
+    shin,
+    upper,
+    fore,
+    rifle,
+    mg,
+    tube,
+    body1,
+    thigh1,
+    shin1,
+    arm1,
+    rifle1,
+  };
 }

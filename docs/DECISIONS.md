@@ -3589,3 +3589,165 @@ on four squads bunched in the open for a minute: 16 of 32 squads dead.
 Not done: mortars in the commander board's establishment presets (they can be added by
 hand), AI ambushes for anything but missile teams, drawing the circles of ambushes already
 laid, an animated crew for the mortar.
+
+## 156. Each army's own vehicles (models and animation, phase 1) (2026-11-20)
+
+Roadmap M11, "authored or CC0 models replacing procedural ones, animation", which Fabio
+asked to start. The CC0 asset sites are still closed to the cloud build (decision 069), so
+"authored" means written by hand in code, to the standard a modeller would work to, instead
+of downloaded. Render only: the sim, its hashes and every number in it are untouched.
+
+- **The kit** (`src/client/kit.ts`). Models are now written in metres at their true size
+  and scaled to the map (`M` 0.36 map units a metre, where a soldier is 0.344). New shapes
+  beside the box and the cylinder: `prism` (a side view pushed across the width, with a
+  half width per point, so a turret can narrow to its gun and a glacis can slope: flat
+  armour plate with hard edges), `fuselage` (a smooth skin over stations along the length)
+  and wheels with tyres. `Parts` is the bench: a model is written once and built at three
+  levels of detail, each part saying how far out it is still drawn, round things losing
+  sides with distance. The far model is therefore the near model's own silhouette, not a
+  separate guess of three boxes, and it wears the team colour over its paint as before.
+- **Eighteen ground vehicles** (`src/client/armour.ts`): tank, carrier, self-propelled gun,
+  air defence, jammer and truck, each in each army's own shape, original designs in the
+  manner of its present-day equipment. The alliance: tall, slab-sided, long turret bustles
+  with stowage racks. Russia: low, a round turret under wedges of reactive armour, fuel
+  drums and an unditching log on the tail, a carrier with a bow like a boat's, a jammer
+  with two great dishes. China: an arrowhead turret with a slatted basket, and wheels
+  wherever a wheel will do (its carrier has eight, its gun and air defence ride lorries).
+  A column can be told from its outline before its colour. No faction (0) draws as the
+  alliance.
+- **Per army in the renderer.** `UnitView` keeps a fleet per faction (`fleet()`), built for
+  the factions in the match when the battle loads (about 0.1 s each). A batch nobody is in
+  costs nothing, so a two-army game draws what it drew before.
+- **Motion.** A ground vehicle now lies along the slope under it (four height samples,
+  eased), rocks back from its own gun in a couple of dying swings (a gun most, a tank less,
+  an autocannon a little) and works on its springs as it drives; the turret turns on the
+  hull's own tilted deck and its gun runs back on firing. A wreck stays as it stopped. The
+  far level is still an upright instance.
+- **Paint.** One material as before, moved to `src/client/unitpaint.ts`; the wear width on
+  vehicles is 7 cm (it was about 12), so chipped edges read as wear and not as an outline.
+- **Bench** (`tools/modelview.html`, `tools/modelview.mjs`): every army's models in rows in
+  the game's paint and light, in ten seconds instead of the two minutes a picture of the
+  game takes in the cloud. `tools/paradeshots.mjs` stands them on a field in the game.
+
+Numbers: a near vehicle is 1,500 to 3,400 triangles (the old tank was 1,470 and the others
+about 600), a middle one 300 to 900 (was about 80), a far one 100 to 250 (was 36). The near
+level is rationed to 300 units as before. Not measured: frames a second on a real graphics
+card, which only Fabio's machine can show.
+
+Not done in this phase: infantry and their crew-served weapons (phase 2), aircraft (phase
+3), turning wheels and running tracks, gun elevation, per-army wrecks of helicopters.
+
+## 157. Buildings come down where they are hit (2026-11-20)
+
+Fabio, on the destruction since I1: "the destruction from top down is not realistic... it
+lost the effect of a battle destroying the building, specially for big ones." Until now a
+shot-up building lost its storeys evenly from the roof down as its health went, one level
+cut across the whole footprint, whatever hit it and from where.
+
+- **Sim** (`src/sim/scars.ts`): every building keeps a record of where damage landed, on a
+  grid of up to 4 by 4 sections over its footprint (`sScar`, 16 a building). Direct fire
+  lands on the face the shooter sees, where its line to the middle of the building crosses
+  that face, a cell either way; stray fire the same, wider; shells and bombs on the section
+  they burst over (and their share on each building the blast reaches); charges where the
+  engineers stand; wrecks where they burn. Mending a building to full wipes it.
+- **Nothing in the battle changes.** Health, stages, ground floor, fire, timings and every
+  rule stay as they were. The record is not in the world hash: the golden hashes are
+  unchanged, so the fight is the same hit for hit (that is the proof that time to level and
+  balance did not move).
+- **Client** (`ruinOf`, `breakColumns` in structures.ts): the storeys lost between damaged
+  and gutted are the same as before in total, but handed out section by section, most to
+  the sections hit hardest and those beside them (D'Hondt on weights from the record plus a
+  little of each building's own chance), and what has come down stays down. A section that
+  stands beside one that fell shows its rooms in section, floor ends broken off over the
+  drop and a slab hanging into it; the fallen section's walls stand in ragged stumps that
+  step up to the walls still standing; its floors lie in heaps on the storey that held and
+  spill into the street. A pitched roof is one piece: where any of it goes, it all goes.
+  Shell holes in the walls are on the faces that were hit, bigger where hit harder.
+  A gutted shell's walls stand lowest where it was hit hardest; a ruin of four floors or
+  more keeps the corner hit least standing, storeys high over the heap. Pancakes unchanged.
+- A building is redrawn at most 32 times between damaged and gutted (`RUIN_STEPS`).
+- Pictures: `tools/ruinshots.mjs` (tanks from one side, guns on one corner, a picture at
+  each mark of health); before and after in /mnt/project-files/destruction-v2/.
+
+Not done: men on a fallen section are drawn on its broken floor but the sim still has one
+garrison for the whole house; the sim does not yet use the record (cover from a half-fallen
+face, rubble spilling from the side that fell).
+
+## 158. Each army's own men, and crews that serve their weapons (models and animation, phase 2) (2026-11-20)
+
+Drawing only, as phase 1: the sim, its commands and the golden hash are untouched.
+
+- **Kit.** `Soldiers` is built once per faction in the match (`UnitView.troop`, as vehicles
+  are by `fleet`). The figure and its eight death poses are the same; what a man wears and
+  carries is his army's. The alliance keeps the high-cut helmet with a headset, the tall
+  pack with a bedroll, and the carbine with an optic and suppressor. Russia has the deep
+  round helmet with goggles, dark green cloth, a squat pack over a rolled mat, and a rifle
+  with a curved magazine and a gas tube. China has the helmet with a flared rim, sand khaki
+  with olive webbing, a slim pack with a spade and canteen, and a bullpup with a carrying
+  handle. Cloth colours are stated as they should look and divided by the faction's coat
+  (`under`), so the shader's coat still applies once.
+- **Squad weapons.** One man in five carries the machine gun (he is also one of the two
+  who go prone in a fight) and one has a rocket on his back: a disposable tube, or for
+  Russia the thin launcher with the warhead standing over his shoulder. Two more near
+  batches a faction; the middle level draws them with a rifle.
+- **Team weapons at the men's scale.** The mortar and the missile launcher were about
+  twice life size. They are rebuilt in metres and scaled with the men, one outline an army.
+  A team on the move has packed its weapon: it is not on the ground and the first man
+  carries the tube. Halted, it is set down and served (`src/client/drills.ts`): the mortar's
+  gunner kneels at the sight, the loader at the muzzle; on a shot the loader's hands are at
+  the muzzle, both duck with hands to helmets, he comes up with the next bomb and reaches
+  for the muzzle as the reload comes due. The missile gunner kneels behind the launcher
+  with his hands on the grips. Rifles ride slung, muzzle down. Mortar flash and missile
+  launch moved to the new muzzles.
+- **Stride.** A squad's stride now advances with the ground it covers (1.6 map units a
+  full stride) and not with the clock, so feet keep pace at any speed and stop when the
+  squad stops. Near men breathe at the halt.
+- **The dead** are baked per faction from that faction's kit (`Bodies.addSet`), so a body
+  is in its own army's helmet and colours. Poses, counts and persistence are unchanged.
+- **Cost.** Unit and body batches with nothing in them are now hidden, which the old code
+  did not do, so a second or third army's batches cost nothing until its men are in view
+  and an ordinary two-army battle issues fewer draws than before. Body batches start at
+  256 instances and grow.
+
+Trade-off taken: at true scale a mortar team is harder to tell from a rifle squad at
+distance than it was beside a two-metre-wide base plate. Its map symbol and the far-level
+shape are unchanged, and Fabio asked for true proportions (2026-11-15).
+
+Not done: per-army far-level shapes, hands on the weapon at the middle "still figure"
+level, a bomb in the loader's hands, engineers' and scouts' own kit.
+
+## 159. Each army's own aircraft, rotors that turn, and flight that banks (models and animation, phase 3) (2026-11-20)
+
+Drawing only, as phases 1 and 2: the sim, its commands and the golden hash are untouched.
+
+- **Models.** `src/client/aircraft.ts` holds eighteen aircraft, six per army: gunship,
+  transport helicopter, strike jet, transport plane, scout drone and one-way attack drone.
+  Original designs in the manner of each army's present-day types, chosen so the outline
+  from above tells them apart. Alliance: a narrow tandem gunship, a lifter with a rotor at
+  each end, a single-engine jet with two leaning fins, a four-propeller transport. Russia:
+  a gunship with two rotors one over the other and no tail rotor, a round-nosed lifter, a
+  straight-winged jet built to work low, a transport with four jets under drooping wings.
+  China: a gunship and lifter with long low cabins and a fan inside the fin, a delta jet
+  with a small wing ahead of it, a wide twin-engine transport. The army with no faction
+  flies the alliance's. The old shared aircraft builders in `models.ts` are gone.
+- **Rotors and propellers** are separate shapes (`VehicleModel.rotors`, `rotorShapes`),
+  each with a place, an axis and a rate, drawn by one instanced batch per shape and turned
+  from the clock in the unit view. The far level of detail carries a flat disc instead.
+- **Flight.** Flying units now share the hull frame code vehicles got in phase 1. They
+  roll into a turn in proportion to how fast the heading changes, put the nose down when
+  moving (helicopters most, planes least), and ride a slow swell when hovering. All eased,
+  all from positions the view already has.
+- **Wrecks.** A helicopter that comes down leaves its own army's airframe: `buildWrecks`
+  makes three poses from the model's body and its tail (whatever the builder put on
+  `tail` snaps off). Wrecks still stay all game (decision of 2026-11-17).
+- **Paint.** The unit shader puts mud on anything low in model space, right for a tank
+  and wrong for a jet. Aircraft models are therefore stored `AIR_LIFT` up from their
+  origin and drawn lowered along their own up axis (`VehicleModel.lift`), so no shader
+  change and no extra material. Aircraft wear is a narrower band than armour's
+  (`atLevels(build, wear)`), or a blade is all edge.
+- **Kit.** `fuselage` takes its stations in either order (nose first used to turn the
+  skin inside out).
+- **Cost.** Same budgets as phase 1, checked by `tests/models.test.ts`: under 6,500
+  triangles near, 1,400 mid, 420 far, per model with its rotors. Draw calls rise by the
+  rotor batches of the aircraft actually in the match. Frame rate on a real graphics card
+  is not measured from the cloud.
