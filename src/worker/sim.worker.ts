@@ -13,6 +13,7 @@ import { KINDS } from '../sim/units';
 import { NEEDS_SUPPLY, upkeepPerMinute } from '../sim/logistics';
 import { WORKS } from '../sim/works';
 import { stageOf } from '../sim/sim';
+import { SCAR_CELLS } from '../sim/scars';
 import { onRoof } from '../sim/ambush';
 import { fortified } from '../sim/urban';
 import {
@@ -300,6 +301,7 @@ function postSnapshot(w: World, simMs: number): void {
   const structStage = new Uint8Array(map.structCount);
   const structFire = new Uint8Array(map.structCount);
   const structGround = new Uint8Array(map.structCount).fill(255);
+  const structScar = new Uint8Array(map.structCount * SCAR_CELLS);
   for (let s = 0; s < map.structCount; s++) {
     structHp[s] = w.sHp[s] <= 0 ? 0 : Math.ceil((w.sHp[s] * 255) / map.sMaxHp[s]);
     let bits = stageOf(w, s);
@@ -310,6 +312,15 @@ function postSnapshot(w: World, simMs: number): void {
     structStage[s] = bits;
     if (map.sKind[s] === S_BUILDING) {
       structGround[s] = Math.ceil((Math.max(0, w.sGround[s]) * 255) / groundMax(map, s));
+      if (w.sHp[s] < map.sMaxHp[s]) {
+        let top = 0;
+        for (let c = 0; c < SCAR_CELLS; c++) top = Math.max(top, w.sScar[s * SCAR_CELLS + c]);
+        if (top > 0) {
+          for (let c = 0; c < SCAR_CELLS; c++) {
+            structScar[s * SCAR_CELLS + c] = Math.ceil((w.sScar[s * SCAR_CELLS + c] * 255) / top);
+          }
+        }
+      }
     }
     structFire[s] =
       Math.min(STRUCT_ALIGHT, floorsAlight(w, s)) |
@@ -403,6 +414,7 @@ function postSnapshot(w: World, simMs: number): void {
     structStage,
     structFire,
     structGround,
+    structScar,
     cameras: Float32Array.from(cams),
     townOwner: w.townOwner.slice(0, map.townCount),
     townCapturer: w.townCapturer.slice(0, map.townCount),

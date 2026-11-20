@@ -3636,8 +3636,43 @@ card, which only Fabio's machine can show.
 
 Not done in this phase: infantry and their crew-served weapons (phase 2), aircraft (phase
 3), turning wheels and running tracks, gun elevation, per-army wrecks of helicopters.
+## 157. Buildings come down where they are hit (2026-11-20)
 
-## 157. Each army's own men, and crews that serve their weapons (models and animation, phase 2) (2026-11-20)
+Fabio, on the destruction since I1: "the destruction from top down is not realistic... it
+lost the effect of a battle destroying the building, specially for big ones." Until now a
+shot-up building lost its storeys evenly from the roof down as its health went, one level
+cut across the whole footprint, whatever hit it and from where.
+
+- **Sim** (`src/sim/scars.ts`): every building keeps a record of where damage landed, on a
+  grid of up to 4 by 4 sections over its footprint (`sScar`, 16 a building). Direct fire
+  lands on the face the shooter sees, where its line to the middle of the building crosses
+  that face, a cell either way; stray fire the same, wider; shells and bombs on the section
+  they burst over (and their share on each building the blast reaches); charges where the
+  engineers stand; wrecks where they burn. Mending a building to full wipes it.
+- **Nothing in the battle changes.** Health, stages, ground floor, fire, timings and every
+  rule stay as they were. The record is not in the world hash: the golden hashes are
+  unchanged, so the fight is the same hit for hit (that is the proof that time to level and
+  balance did not move).
+- **Client** (`ruinOf`, `breakColumns` in structures.ts): the storeys lost between damaged
+  and gutted are the same as before in total, but handed out section by section, most to
+  the sections hit hardest and those beside them (D'Hondt on weights from the record plus a
+  little of each building's own chance), and what has come down stays down. A section that
+  stands beside one that fell shows its rooms in section, floor ends broken off over the
+  drop and a slab hanging into it; the fallen section's walls stand in ragged stumps that
+  step up to the walls still standing; its floors lie in heaps on the storey that held and
+  spill into the street. A pitched roof is one piece: where any of it goes, it all goes.
+  Shell holes in the walls are on the faces that were hit, bigger where hit harder.
+  A gutted shell's walls stand lowest where it was hit hardest; a ruin of four floors or
+  more keeps the corner hit least standing, storeys high over the heap. Pancakes unchanged.
+- A building is redrawn at most 32 times between damaged and gutted (`RUIN_STEPS`).
+- Pictures: `tools/ruinshots.mjs` (tanks from one side, guns on one corner, a picture at
+  each mark of health); before and after in /mnt/project-files/destruction-v2/.
+
+Not done: men on a fallen section are drawn on its broken floor but the sim still has one
+garrison for the whole house; the sim does not yet use the record (cover from a half-fallen
+face, rubble spilling from the side that fell).
+
+## 158. Each army's own men, and crews that serve their weapons (models and animation, phase 2) (2026-11-20)
 
 Drawing only, as phase 1: the sim, its commands and the golden hash are untouched.
 

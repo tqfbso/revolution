@@ -5,6 +5,7 @@ import { CMD_ENTRENCH, type Command } from './commands';
 import { fx } from './fixed';
 import { CELL_FX, MAP_CELLS, S_BUILDING, STAGE_INTACT, groundMax, wallMax } from './map';
 import { nextInt } from './rng';
+import { clearScars } from './scars';
 import { leaveHouse, sendTo, stageOf, structDist2, validUnits } from './sim';
 import { KINDS, KIND_TRUCK } from './units';
 import { WORK_RUBBLE, canFortify, placeWork } from './works';
@@ -154,6 +155,7 @@ export function updateEntrench(w: World): void {
       } else if (w.supplies[team] < 1) continue;
       const before = stageOf(w, s);
       w.sHp[s] = Math.min(max, w.sHp[s] + Math.ceil(max / MEND_DIV));
+      if (w.sHp[s] === max) clearScars(w, s);
       // The ground floor is shored up at the same pace, and is whole when the house is.
       const ground = groundMax(map, s);
       w.sGround[s] =

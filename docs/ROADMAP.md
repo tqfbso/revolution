@@ -543,7 +543,7 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
 
 - Authored or CC0 models replacing procedural ones, animation. IN PROGRESS 2026-11-20:
   phase 1 BUILT (decision 156): each army's own ground vehicles, written by hand in code,
-  and vehicles that lean with the ground and rock on firing. Phase 2 BUILT (decision 157):
+  and vehicles that lean with the ground and rock on firing. Phase 2 BUILT (decision 158):
   each army's own helmets, packs and rifles, a machine gun and a rocket in every squad,
   mortar and missile teams that serve true-size weapons, stride tied to ground covered.
   Phase 3: helicopters, jets, planes, drones

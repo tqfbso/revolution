@@ -58,6 +58,7 @@ import {
   kindle,
   updateFires,
 } from './collapse';
+import { scarAt, scarFace } from './scars';
 import { applyUrbanCommand, fortified, spillRubble, updateEntrench } from './urban';
 import {
   HIT_CHARGE,
@@ -1157,8 +1158,11 @@ function shootStructure(w: World, s: number, i: number, siege: number): void {
     structDamage[s] += siege;
     return;
   }
-  wallDamage[4 * s + faceToward(w.map, s, x, y)] += siege;
+  const face = faceToward(w.map, s, x, y);
+  wallDamage[4 * s + face] += siege;
   wallTouched[s] = 1;
+  // Shots from one gun land round one spot on the face: a cell either way of its line.
+  scarFace(w, s, face, x, y, ((((w.tick >> 2) + i * 3) % 3) - 1) * (CELL_FX >> 1), siege);
   structDamage[s] += (siege + 1) >> 1;
   if (!IS_AIR[w.kind[i]] && structDist2(w, s, x, y) <= POINT_BLANK * POINT_BLANK) {
     groundDamage[s] += (siege + 1) >> 1;
@@ -1216,8 +1220,13 @@ function strayFire(w: World, i: number, t: number, dx: number, dy: number, d2: n
   if (s < 0) return;
   // A strike drone comes down on its target: the wall it meets is the one beside the target.
   const drone = kindOf(w, i).kamikaze;
-  const face = 4 * s + faceToward(w.map, s, drone ? tx : w.posX[i], drone ? ty : w.posY[i]);
+  const fromX = drone ? tx : w.posX[i];
+  const fromY = drone ? ty : w.posY[i];
+  const side = faceToward(w.map, s, fromX, fromY);
+  const face = 4 * s + side;
   wallTouched[s] = 1;
+  if (drone) scarAt(w, s, tx, ty, stray);
+  else scarFace(w, s, side, fromX, fromY, (((w.tick + i) % 5) - 2) * (CELL_FX >> 1), stray);
   structBy[s] = w.team[i];
   if (stray >= BLAST_STRAY) {
     wallDamage[face] += stray;
@@ -1282,6 +1291,7 @@ function blastStructures(
     const share = Math.trunc((siege * (2 * R - blastDist[k])) / (2 * R));
     structDamage[blastStruct[k]] += share;
     if (low && map.sKind[blastStruct[k]] === S_BUILDING) groundDamage[blastStruct[k]] += share;
+    scarAt(w, blastStruct[k], x, y, share);
     structBy[blastStruct[k]] = team;
   }
 }
@@ -2915,6 +2925,7 @@ function fire(w: World): void {
         if (kind.engineer) {
           structDamage[s] += kind.siege;
           if (w.map.sKind[s] === S_BUILDING) groundDamage[s] += chargeGround(kind.siege);
+          scarAt(w, s, w.posX[i], w.posY[i], kind.siege);
           structBy[s] = w.team[i];
         } else shootStructure(w, s, i, kind.siege);
         w.cooldown[i] = reloadOf(w, i, kind);

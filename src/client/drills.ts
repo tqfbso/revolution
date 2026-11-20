@@ -1,4 +1,4 @@
-// Crew drills (models phase 2, decision 157). Drawing only.
+// Crew drills (models phase 2, decision 158). Drawing only.
 //
 // A mortar or missile team used to be two riflemen kneeling near a weapon. Now the men
 // serve it: the mortar's gunner kneels at the sight and the loader at the muzzle, who drops
