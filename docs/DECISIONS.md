@@ -3751,3 +3751,46 @@ Drawing only, as phases 1 and 2: the sim, its commands and the golden hash are u
   triangles near, 1,400 mid, 420 far, per model with its rotors. Draw calls rise by the
   rotor batches of the aircraft actually in the match. Frame rate on a real graphics card
   is not measured from the cloud.
+
+## 160. Kowloon from the real map (2026-11-20)
+
+Fabio: the Kowloon map (decision 153) was "underwhelming in terms of design and reality",
+and so was the park. His order of importance: the geography (the real coastline), the
+grid (the real streets at their real widths), the park (joined up with the green, small
+buildings, ponds, pools), then buildings like the real ones in size and kind (offices,
+shopping centres). He chose the real geography over keeping the mirror.
+
+- Built from OpenStreetMap (© OpenStreetMap contributors, ODbL; credit in CREDITS.md and
+  on the map's menu line), fetched once through the OSM API and turned into tables by
+  `tools/kowloon/osm2map.py` (`src/sim/kowloon-data.ts`, about 100 KB). North is up as
+  on Google Maps. A game cell of 4 m stands for about 5.5 real metres, so the whole of
+  Tsim Sha Tsui and Jordan fits: Austin Road to the harbour, the West Kowloon reclamation
+  to Ho Man Tin.
+- The coastline, the piers (Ocean Terminal, Star Ferry) and the typhoon shelter as they
+  are. Roads at their width from their lanes (Nathan Road six lanes, side streets two),
+  one-way streets drawn with broken lane lines, two-way with a double centre line, zebra
+  crossings, railings along the main roads, bus stops and MTR exits where OSM has them.
+  Tunnels and flyovers left out: no bridges.
+- Kowloon Park as it is: its paths, the swimming pool complex (turquoise water), the bird
+  lake and ponds, lawns, the wooded knoll, the mosque, the sports centre, the old
+  barracks. Trees where OSM has trees.
+- About 1,050 buildings at their real footprints and storeys (up to 40), each given a
+  kind from OSM: tenement, office tower (curtain glass, plant room, stone podium),
+  mall (glass ground floor, canopy, big boards, no windows above), hotel (stone base,
+  porch), civic, heritage (colonnade, pitched roof), the mosque (three storeys, dome,
+  minarets), the clock tower (clock faces, cupola), churches (spire). `map.sStyle`.
+- Flags and resource sites are moved automatically to the nearest open ground if they
+  would stand on a building, in water or in the wood (test).
+- No mirror, so the bases were placed by measurement: walking distance from each base to
+  every flag, choosing two spots where each army has as many flags near it as the other.
+  The first placement (West Kowloon and TST East) gave the east 11 of the 15 nearer, and
+  six hard-v-hard games ended 31 flags to 55. Now West Kowloon (28,50) and Ho Man Tin
+  (245,50): 8 flags nearer the west, 7 the east, the eight nearest at matching distances.
+  Eight hard-v-hard games of 25 minutes: flags at the end 64 west, 56 east; the west
+  ahead in 5, the east in 3; losses close. MAX_STRUCTS is 2,048.
+- Measured in the cloud (software WebGL), whole map in view: 2.56M triangles, 365 draw
+  calls (city 1.25M/226, European city 1.32M/286). The heaviest map now: twice the
+  triangles, more buildings and taller.
+
+Not done: the Avenue of Stars promenade and harbour walls drawn as quays, footbridges, the
+real Cultural Centre and Space Museum shapes, trams, shop signs from real names.

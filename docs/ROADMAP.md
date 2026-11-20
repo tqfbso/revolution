@@ -409,6 +409,8 @@ In this order, ahead of M10. Items 6 to 11 are planned only.
    Kowloon map (Fabio, 2026-11-20, asked for directly, outside this list): BUILT
    (decision 153). `?map=kowloon` or Menu > Map: Kowloon. Tsim Sha Tsui and Jordan round
    Kowloon Park: towers and tenements on a 48 m grid, the harbour on two sides, no bridges.
+   Rebuilt from the real map (decision 160): OpenStreetMap coastline, streets at their real
+   widths, the real park with its pools and lake, 1,050 buildings at real size by kind.
 8. The computer fighting in cities (U5): BUILT (decision 110). Its sappers fortify the
    houses its garrisons hold, garrisons without houses lie up in the ruins, and the
    player's commanders do both as well. Garrisoning and storming were already there.
