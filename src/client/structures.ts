@@ -44,6 +44,7 @@ import {
   type GameMap,
 } from '../sim/map';
 import { GARRISON_MAX } from '../sim/units';
+import { SCAR_CELLS, SCAR_SIDE, scarGrid } from '../sim/scars';
 import {
   BASE_STRIDE,
   STRUCT_ALIGHT,
@@ -110,6 +111,33 @@ const HK_WALLS = [
 ]; // prettier-ignore
 /** Whether the buildings are drawn the Hong Kong way (set by the Structures of the map). */
 let hk = false;
+/** What each building of the map is (Kowloon: map.sStyle), or null. */
+let hkStyle: Uint8Array | null = null;
+// The styles (sim/kowloon.ts).
+const ST_TENEMENT = 1;
+const ST_OFFICE = 2;
+const ST_MALL = 3;
+const ST_HOTEL = 4;
+const ST_CIVIC = 5;
+const ST_HERITAGE = 6;
+const ST_CLOCK = 8;
+const ST_MOSQUE = 9;
+const ST_SPORTS = 10;
+const ST_KIOSK = 11;
+const ST_CHURCH = 12;
+/** Walls by style: curtain glass for offices, stone for hotels, pale panels for malls. */
+const HK_STYLE_WALLS: Record<number, readonly number[]> = {
+  [ST_OFFICE]: [0x3c4a54, 0x44535b, 0x4e5c62, 0x56646c, 0x394650, 0x5d6a6a],
+  [ST_MALL]: [0xb9b4a8, 0xc6c0b2, 0xa9a69c, 0xcfcabe, 0x9f9b92],
+  [ST_HOTEL]: [0xb7a58a, 0xc2b49b, 0x9e9384, 0xcdc3ae, 0xa89c88],
+  [ST_CIVIC]: [0xa7a49c, 0xbab6ab, 0x8f8f88, 0xc4bfb3],
+  [ST_HERITAGE]: [0xd2c8ae, 0xcabd98, 0xddd4bf],
+  [ST_CLOCK]: [0xa35a40],
+  [ST_MOSQUE]: [0xe0dccf],
+  [ST_SPORTS]: [0xc4c1b7, 0xb5b3ab],
+  [ST_KIOSK]: [0x8c3027],
+  [ST_CHURCH]: [0x9a6a52, 0xa49e92],
+};
 /** Their roofs: bare concrete and screed, a shade lighter than tarred felt. */
 const HK_ROOFS = [0x66645e, 0x5c5a55, 0x716e66, 0x5f615e];
 const ASPHALT = 0x39393a;
@@ -630,9 +658,12 @@ function ribbons(
   wall: number,
   wear: number,
   wsurf: number,
+  curtain = false,
 ): Part[] {
   const parts: Part[] = [];
   const h = floors * FLOOR;
+  // A curtain wall is glass from floor to floor, a thin mullion every metre and a half.
+  const band = curtain ? 0.8 : 0.44;
   const faces: [number, number, boolean, number][] = [
     [FACE_SOUTH, w, true, 1],
     [FACE_NORTH, w, true, -1],
@@ -646,19 +677,20 @@ function ribbons(
       const y = base + f * FLOOR + FLOOR * 0.55;
       const lit = !damaged && rand(id, 5000 + face * 97 + f) < 0.16;
       parts.push({
-        size: alongX ? [len - 0.5, FLOOR * 0.44, 0.05] : [0.05, FLOOR * 0.44, len - 0.5],
+        size: alongX ? [len - 0.5, FLOOR * band, 0.05] : [0.05, FLOOR * band, len - 0.5],
         at: alongX ? [cx, y, cz + off] : [cx + off, y, cz],
-        color: GLASS,
+        color: curtain ? 0x2b3a44 : GLASS,
         gloss: lit ? LIT_GLOSS : 1,
       });
     }
     // The frame: a column every two metres or so, the full height of the block.
-    const n = Math.max(2, Math.round(len / 2.3));
+    const n = Math.max(2, Math.round(len / (curtain ? 1.6 : 2.3)));
     const out = side * ((alongX ? d : w) / 2 + 0.07);
     for (let i = 0; i <= n; i++) {
       const t = (i / n - 0.5) * (len - 0.2);
+      const thin = curtain ? 0.07 : 0.16;
       parts.push({
-        size: alongX ? [0.16, h, 0.12] : [0.12, h, 0.16],
+        size: alongX ? [thin, h, 0.12] : [0.12, h, thin],
         at: alongX ? [cx + t, base + h / 2, cz + out] : [cx + out, base + h / 2, cz + t],
         color: wall,
         shade: wear * (0.86 + rand(id, 5400 + i) * 0.1),
@@ -678,6 +710,302 @@ function ribbons(
         });
       }
     }
+  }
+  return parts;
+}
+
+/**
+ * What makes a Kowloon building read as what it is from the air: a mall's glazed ground
+ * floor, canopy and boards, an office's plant room, a hotel's porch, the mosque's dome and
+ * minarets, the clock tower's faces and cupola, a church's spire.
+ */
+function hkDressing(
+  id: number,
+  style: number,
+  cx: number,
+  cz: number,
+  w: number,
+  d: number,
+  base: number,
+  floors: number,
+  damaged: boolean,
+  wall: number,
+): Part[] {
+  const parts: Part[] = [];
+  const top = base + floors * FLOOR;
+  const worn = damaged ? 0.55 : 1;
+  const long = w >= d;
+  if (style === ST_MALL) {
+    // Shop glass all round the ground floor, a deep canopy over it, boards up the wall.
+    const gh = FLOOR * 0.8;
+    parts.push({
+      size: [w + 0.06, gh, 0.05],
+      at: [cx, base + gh / 2 + 0.1, cz + d / 2 + 0.03],
+      color: GLASS,
+      gloss: 1,
+    });
+    parts.push({
+      size: [w + 0.06, gh, 0.05],
+      at: [cx, base + gh / 2 + 0.1, cz - d / 2 - 0.03],
+      color: GLASS,
+      gloss: 1,
+    });
+    parts.push({
+      size: [0.05, gh, d + 0.06],
+      at: [cx + w / 2 + 0.03, base + gh / 2 + 0.1, cz],
+      color: GLASS,
+      gloss: 1,
+    });
+    parts.push({
+      size: [0.05, gh, d + 0.06],
+      at: [cx - w / 2 - 0.03, base + gh / 2 + 0.1, cz],
+      color: GLASS,
+      gloss: 1,
+    });
+    const cy = base + FLOOR * 0.95;
+    if (long) {
+      parts.push({
+        size: [w + 0.4, 0.14, 1.3],
+        at: [cx, cy, cz + d / 2 + 0.65],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+      parts.push({
+        size: [w + 0.4, 0.14, 1.3],
+        at: [cx, cy, cz - d / 2 - 0.65],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+    } else {
+      parts.push({
+        size: [1.3, 0.14, d + 0.4],
+        at: [cx + w / 2 + 0.65, cy, cz],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+      parts.push({
+        size: [1.3, 0.14, d + 0.4],
+        at: [cx - w / 2 - 0.65, cy, cz],
+        color: 0x5c5f60,
+        shade: worn,
+      });
+    }
+    // A band of darker cladding at each upper floor so the box is not blank.
+    for (let f = 2; f < floors; f += 2) {
+      const y = base + f * FLOOR;
+      parts.push({
+        size: [w + 0.08, 0.3, d + 0.08],
+        at: [cx, y, cz],
+        color: 0x7d7a73,
+        shade: worn,
+      });
+    }
+    if (floors >= 2) {
+      const boards = Math.max(1, Math.min(3, Math.floor((long ? w : d) / 7)));
+      const bh = Math.min(3.2, (floors - 1) * FLOOR * 0.6);
+      for (let i = 0; i < boards; i++) {
+        const t = ((i + 0.5) / boards - 0.5) * ((long ? w : d) - 3);
+        const bw = Math.min(5.5, bh * 1.8);
+        const y = base + FLOOR * 1.2 + bh / 2;
+        const cell =
+          rand(id, 7100 + i) < 0.5
+            ? SIGN_HOARDINGS.from + Math.floor(rand(id, 7110 + i) * SIGN_HOARDINGS.count)
+            : SIGN_SHOPS.from + Math.floor(rand(id, 7120 + i) * SIGN_SHOPS.count);
+        const shade = damaged ? 0.45 : 0.85;
+        if (long) {
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx + t, y, cz + d / 2 + 0.06],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+          });
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx - t, y, cz - d / 2 - 0.06],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+            rot: [0, Math.PI, 0],
+          });
+        } else {
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx + w / 2 + 0.06, y, cz + t],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+            rot: [0, Math.PI / 2, 0],
+          });
+          parts.push({
+            size: [bw, bh, 1],
+            at: [cx - w / 2 - 0.06, y, cz - t],
+            color: 0xffffff,
+            sign: cell,
+            shade,
+            rot: [0, -Math.PI / 2, 0],
+          });
+        }
+      }
+    }
+  } else if (style === ST_OFFICE) {
+    // A plant room set back on the roof, and a thin crown round the parapet.
+    if (!damaged) {
+      parts.push({
+        size: [w * 0.55, FLOOR * 1.2, d * 0.55],
+        at: [cx, top + FLOOR * 0.6, cz],
+        color: 0x54595c,
+      });
+      parts.push({
+        size: [w * 0.6, 0.12, d * 0.6],
+        at: [cx, top + FLOOR * 1.25, cz],
+        color: 0x3e4346,
+      });
+    }
+    parts.push({
+      size: [w + 0.16, 0.5, d + 0.16],
+      at: [cx, top - 0.1, cz],
+      color: 0x8a8d8c,
+      shade: worn,
+    });
+    // A podium: the lower two floors in stone.
+    if (floors >= 8)
+      parts.push({
+        size: [w + 0.1, FLOOR * 1.9, d + 0.1],
+        at: [cx, base + FLOOR * 0.95, cz],
+        color: 0x8e8a82,
+        shade: worn,
+      });
+  } else if (style === ST_HOTEL) {
+    // A porch over the door and a pale stone base.
+    const pw = Math.min(6, (long ? w : d) * 0.4);
+    if (long)
+      parts.push({
+        size: [pw, 0.18, 2.6],
+        at: [cx, base + FLOOR * 0.9, cz + d / 2 + 1.3],
+        color: 0x3b3a38,
+        shade: worn,
+      });
+    else
+      parts.push({
+        size: [2.6, 0.18, pw],
+        at: [cx + w / 2 + 1.3, base + FLOOR * 0.9, cz],
+        color: 0x3b3a38,
+        shade: worn,
+      });
+    if (floors >= 6)
+      parts.push({
+        size: [w + 0.1, FLOOR * 1.9, d + 0.1],
+        at: [cx, base + FLOOR * 0.95, cz],
+        color: 0xcfc6b4,
+        shade: worn,
+      });
+    parts.push({
+      size: [w + 0.14, 0.4, d + 0.14],
+      at: [cx, top - 0.05, cz],
+      color: 0xd8d0be,
+      shade: worn,
+    });
+  } else if (style === ST_HERITAGE || style === ST_CIVIC) {
+    // A colonnade of piers along the long front, white against the wall.
+    const len = long ? w : d;
+    const n = Math.max(3, Math.round(len / 2.4));
+    const ph = Math.min(floors, 2) * FLOOR - 0.2;
+    if (style === ST_HERITAGE || floors <= 4)
+      for (let i = 0; i <= n; i++) {
+        const t = (i / n - 0.5) * (len - 0.4);
+        const at: [number, number, number] = long
+          ? [cx + t, base + ph / 2, cz + d / 2 + 0.25]
+          : [cx + w / 2 + 0.25, base + ph / 2, cz + t];
+        parts.push({ size: [0.32, ph, 0.32], at, color: 0xe3dccb, shade: worn });
+      }
+  } else if (style === ST_MOSQUE && !damaged) {
+    // The Kowloon Mosque: a white dome on a drum, a minaret at each corner.
+    const r = Math.min(w, d) * 0.22;
+    parts.push({ size: [r * 2.1, 1.4, r * 2.1], at: [cx, top + 0.7, cz], color: wall });
+    // A dome as rings drawn in step by step: radius r cos(a) at height r sin(a).
+    let y0 = top + 1.4;
+    const steps = 5;
+    for (let i = 0; i < steps; i++) {
+      const a0 = (i / steps) * (Math.PI / 2);
+      const a1 = ((i + 1) / steps) * (Math.PI / 2);
+      const r0 = r * Math.cos(a0);
+      const r1 = r * Math.cos(a1) + (i === steps - 1 ? 0.12 : 0);
+      const hh = r * (Math.sin(a1) - Math.sin(a0));
+      parts.push({
+        size: [r0 * 2, hh, r0 * 2],
+        at: [cx, y0 + hh / 2, cz],
+        color: 0xe9e6dc,
+        taper: [r0 - r1, r0 - r1],
+      });
+      y0 += hh;
+    }
+    parts.push({ size: [0.08, 1.4, 0.08], at: [cx, y0 + 0.7, cz], color: 0xb99a52 });
+    for (const [sx, sz] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ]) {
+      const mx = cx + sx * (w / 2 - 0.5);
+      const mz = cz + sz * (d / 2 - 0.5);
+      const mh = floors * FLOOR + 5;
+      parts.push({ size: [0.7, mh, 0.7], at: [mx, base + mh / 2, mz], color: 0xe6e2d6 });
+      parts.push({ size: [1.0, 0.25, 1.0], at: [mx, base + mh - 1.2, mz], color: 0xd8d3c4 });
+      parts.push({
+        size: [0.7, 1.3, 0.7],
+        at: [mx, base + mh + 0.65, mz],
+        color: 0xe6e2d6,
+        taper: [0.33, 0.33],
+      });
+    }
+  } else if (style === ST_CLOCK) {
+    // The old railway clock tower: stone bands, four clock faces, a cupola and a mast.
+    const s = Math.min(w, d);
+    for (let f = 3; f < floors; f += 3)
+      parts.push({
+        size: [w + 0.1, 0.35, d + 0.1],
+        at: [cx, base + f * FLOOR, cz],
+        color: 0xd2c8b2,
+        shade: worn,
+      });
+    if (!damaged) {
+      const cy = top - FLOOR * 1.2;
+      const c = s * 0.62;
+      parts.push({ size: [c, c, 0.06], at: [cx, cy, cz + d / 2 + 0.04], color: 0xece7da });
+      parts.push({ size: [c, c, 0.06], at: [cx, cy, cz - d / 2 - 0.04], color: 0xece7da });
+      parts.push({ size: [0.06, c, c], at: [cx + w / 2 + 0.04, cy, cz], color: 0xece7da });
+      parts.push({ size: [0.06, c, c], at: [cx - w / 2 - 0.04, cy, cz], color: 0xece7da });
+      parts.push({
+        size: [w * 0.7, FLOOR, d * 0.7],
+        at: [cx, top + FLOOR / 2, cz],
+        color: 0xd2c8b2,
+      });
+      parts.push({
+        size: [w * 0.7, FLOOR * 1.1, d * 0.7],
+        at: [cx, top + FLOOR * 1.55, cz],
+        color: 0x4f5a52,
+        taper: [w * 0.3, d * 0.3],
+      });
+      parts.push({
+        size: [0.1, 2.5, 0.1],
+        at: [cx, top + FLOOR * 2.1 + 1.25, cz],
+        color: 0x3a3a36,
+      });
+    }
+  } else if (style === ST_CHURCH && !damaged) {
+    // A square tower and a spire at one end.
+    const tw = Math.min(w, d) * 0.45;
+    const ex = long ? cx - w / 2 + tw / 2 : cx;
+    const ez = long ? cz : cz - d / 2 + tw / 2;
+    const th = floors * FLOOR + 3;
+    parts.push({ size: [tw, th, tw], at: [ex, base + th / 2, ez], color: wall });
+    parts.push({
+      size: [tw, tw * 2.2, tw],
+      at: [ex, base + th + tw * 1.1, ez],
+      color: 0x4b4f4d,
+      taper: [tw * 0.47, tw * 0.47],
+    });
   }
   return parts;
 }
@@ -784,18 +1112,30 @@ export function buildingParts(
   breached: number,
   cls: number,
   fort: boolean,
-  level = 0,
+  level: number | Ruin = 0,
   scorched = false,
 ): Part[] {
   const damaged = stage >= STAGE_DAMAGED;
+  // Where it has come down (decision 157); a plain level is the same all over.
+  const ruin: Ruin | null =
+    typeof level !== 'number'
+      ? level
+      : level > 0
+        ? { gx: 1, gz: 1, loss: [level], hit: [1] }
+        : null;
+  const hitAt = (x: number, z: number): number =>
+    ruin ? ruin.hit[sectionAt(ruin, x0, z0, w, d, x, z)] : 0;
   const parts: Part[] = [];
   const cx = x0 + w / 2;
   const cz = z0 + d / 2;
   const h = floors * FLOOR;
   // Plaster and brick for houses; precast panels for most blocks and halls.
   const brick = !hk && cls === BUILD_HOUSE && rand(id, 41) < 0.42;
-  const wall =
-    hk && cls !== BUILD_HALL
+  const style = hkStyle ? hkStyle[id] : 0;
+  const styleWalls = HK_STYLE_WALLS[style];
+  const wall = styleWalls
+    ? styleWalls[Math.floor(rand(id, 1) * styleWalls.length)]
+    : hk && cls !== BUILD_HALL
       ? HK_WALLS[Math.floor(rand(id, 1) * HK_WALLS.length)]
       : brick
         ? BRICKS[Math.floor(rand(id, 1) * BRICKS.length)]
@@ -984,9 +1324,12 @@ export function buildingParts(
       for (let i = 0; i < n; i++) {
         const corner = i === 0 || i === n - 1;
         const r = rand(id, 1100 + f * 40 + i);
-        let hh = h * (corner ? 0.85 + r * 0.15 : 0.5 + r * 0.5);
-        if (open && !corner && Math.abs(i - (n - 1) / 2) < n * 0.3) hh = FLOOR * 0.25;
         const t = ((i + 0.5) / n - 0.5) * len;
+        // Lowest where it was hit hardest: the walls stand where the fire only went through.
+        const hit = alongX ? hitAt(cx + t, cz + off) : hitAt(cx + off, cz + t);
+        let hh = h * (corner ? 0.85 + r * 0.15 : 0.5 + r * 0.5) * (1 - hit * (corner ? 0.45 : 0.7));
+        hh = Math.max(FLOOR * 0.3, hh);
+        if (open && !corner && Math.abs(i - (n - 1) / 2) < n * 0.3) hh = FLOOR * 0.25;
         parts.push({
           size: alongX ? [len / n + 0.02, hh, 0.3] : [0.3, hh, len / n + 0.02],
           at: alongX ? [cx + t, base + hh / 2, cz + off] : [cx + off, base + hh / 2, cz + t],
@@ -1071,7 +1414,11 @@ export function buildingParts(
   // or a low hipped roof of zinc; halls a row of gables in sheet, or one low one.
   const rr = rand(id, 10);
   const roof = hk
-    ? 'flat'
+    ? style === ST_HERITAGE || style === ST_CHURCH || style === ST_KIOSK
+      ? 'gable'
+      : style === ST_SPORTS && cls === BUILD_HALL
+        ? 'saw'
+        : 'flat'
     : cls === BUILD_HALL
       ? rr < 0.55 && L / Math.max(2, Math.round(L / 4)) < S
         ? 'saw'
@@ -1486,9 +1833,33 @@ export function buildingParts(
   // Windows on all four faces: dark glass set just proud of the wall. A Hong Kong block
   // has them in bands, one to a floor, between the columns of its frame.
   let k = 10;
-  if (hk && floors >= 5)
-    parts.push(...ribbons(id, cx, cz, w, d, base, floors, shopFace, damaged, wall, wear, wsurf));
-  for (let f = 0; f < (hk && floors >= 5 ? 0 : floors); f++) {
+  // A mall has no windows to speak of: a glazed ground floor, a canopy, big boards.
+  const banded =
+    hk && floors >= 5 && (style <= ST_OFFICE || style === ST_HOTEL || style === ST_CIVIC);
+  if (banded)
+    parts.push(
+      ...ribbons(
+        id,
+        cx,
+        cz,
+        w,
+        d,
+        base,
+        floors,
+        shopFace,
+        damaged,
+        wall,
+        wear,
+        wsurf,
+        style === ST_OFFICE,
+      ),
+    );
+  if (style !== 0) parts.push(...hkDressing(id, style, cx, cz, w, d, base, floors, damaged, wall));
+  const plainWindows =
+    style === ST_MALL || style === ST_KIOSK || style === ST_SPORTS || style === ST_CLOCK
+      ? 0
+      : floors;
+  for (let f = 0; f < (banded ? 0 : plainWindows); f++) {
     const y = base + f * FLOOR + FLOOR * 0.56;
     for (const [len, alongX] of [
       [w, true],
@@ -1527,17 +1898,23 @@ export function buildingParts(
       }
     }
   }
-  if (hk && floors >= 3 && cls !== BUILD_HALL) {
+  if (hk && floors >= 3 && cls !== BUILD_HALL && style <= ST_TENEMENT) {
     parts.push(...streetFront(id, cx, cz, w, d, base, floors, shopFace, damaged));
   }
   if (damaged) {
     // Shell holes: big scorched patches on the walls, and part of the roof gone.
     for (let i = 0; i < 5 + w; i++) {
-      const alongX = rand(id, 200 + i) < 0.5;
-      const side = rand(id, 230 + i) < 0.5 ? -1 : 1;
-      const t = (rand(id, 260 + i) - 0.5) * ((alongX ? w : d) - 1.6);
+      let alongX = rand(id, 200 + i) < 0.5;
+      let side = rand(id, 230 + i) < 0.5 ? -1 : 1;
+      let t = (rand(id, 260 + i) - 0.5) * ((alongX ? w : d) - 1.6);
+      let big = 1;
+      if (ruin && ruin.gx * ruin.gz > 1) {
+        // On the faces that were hit, round where they were hit, and bigger there.
+        const at = holeAt(ruin, id, i, w, d);
+        if (at) [alongX, side, t, big] = at;
+      }
       const y = base + 0.5 + rand(id, 290 + i) * (h - 0.9);
-      const s = 0.8 + rand(id, 320 + i) * 1.1;
+      const s = (0.8 + rand(id, 320 + i) * 1.1) * big;
       const off = (side * (alongX ? d : w)) / 2;
       parts.push({
         size: alongX ? [s, s * 0.8, 0.09] : [0.09, s * 0.8, s],
@@ -1588,7 +1965,9 @@ export function buildingParts(
       }
     }
   }
-  return level > 0 ? breakTop(parts, id, cx, cz, w, d, base, floors, level, wall, wsurf) : parts;
+  return ruin && ruin.loss.some((u) => u > 0)
+    ? breakColumns(parts, id, x0, z0, w, d, base, floors, ruin, wall, wsurf)
+    : parts;
 }
 
 /**
@@ -1597,10 +1976,18 @@ export function buildingParts(
  * is gutted on the very hit it always was. `hp` is 0..255 of the maximum.
  */
 export function brokenLevel(hp: number, floors: number): number {
-  const t = (DAMAGED_PCT - (hp * 100) / 255) / (DAMAGED_PCT - GUTTED_PCT);
+  const t = brokenT(hp);
   if (t <= 0) return 0;
   return Math.min(floors, Math.floor(Math.min(1, t) * (floors + 1)));
 }
+
+/** How far a building is from damaged (0) to gutted (1) at `hp` (0..255 of its maximum). */
+export function brokenT(hp: number): number {
+  return (DAMAGED_PCT - (hp * 100) / 255) / (DAMAGED_PCT - GUTTED_PCT);
+}
+
+/** `broken` of a gutted shell. */
+const GUTTED_MARK = 0xffff;
 
 /** Storeys a building has lost at a broken level: the roof goes first, then a floor a step. */
 export function lostFloors(level: number, floors: number): number {
@@ -1608,131 +1995,481 @@ export function lostFloors(level: number, floors: number): number {
 }
 
 /**
- * A building burnt down from the top: the roof and the top storeys gone, ragged walls
- * standing where they were with the sky through their windows, charred beams across, the
- * fallen roof in heaps on the floor that held, and soot up the face over the windows the
- * fire came out of.
+ * Where a shot-up building has come down (decision 157). Its footprint is cut into `gx` by
+ * `gz` sections (see SCAR_SIDE in the sim); for each, by `iz * gx + ix`, `loss` is how far it
+ * has come down, counted as brokenLevel counts (0 whole, 1 the roof off, then a storey more
+ * a step), and `hit` how hard it was hit, 0..1 of the section hit hardest.
  */
-function breakTop(
+export interface Ruin {
+  gx: number;
+  gz: number;
+  loss: number[];
+  hit: number[];
+}
+
+/** Steps a building is redrawn in on its way from damaged to gutted, at most. */
+export const RUIN_STEPS = 32;
+
+/** The section of `ruin` under (x, z), for a footprint from (x0, z0), `w` by `d`. */
+export function sectionAt(
+  ruin: Ruin,
+  x0: number,
+  z0: number,
+  w: number,
+  d: number,
+  x: number,
+  z: number,
+): number {
+  const ix = Math.min(ruin.gx - 1, Math.max(0, Math.floor(((x - x0) * ruin.gx) / w)));
+  const iz = Math.min(ruin.gz - 1, Math.max(0, Math.floor(((z - z0) * ruin.gz) / d)));
+  return iz * ruin.gx + ix;
+}
+
+/**
+ * How building `id` has come down, `t` of the way from damaged (0) to gutted (1), from
+ * where it was hit (`scar`, SCAR_CELLS a building from `at`, 0..255; null: nowhere known).
+ * The storeys it has lost go section by section, most to the sections hit hardest and the
+ * ones beside them, so a tank across the street takes a bite out of the face it sees and a
+ * shelled corner comes down while the far end stands. `before`, if given, is how it stood a
+ * moment ago: what has come down stays down, and only what is new is handed out.
+ */
+export function ruinOf(
+  scar: ArrayLike<number> | null,
+  at: number,
+  gx: number,
+  gz: number,
+  floors: number,
+  t: number,
+  id: number,
+  before: Ruin | null = null,
+): Ruin {
+  const n = gx * gz;
+  const hit: number[] = [];
+  let any = 0;
+  for (let iz = 0; iz < gz; iz++) {
+    for (let ix = 0; ix < gx; ix++) {
+      const v = scar ? scar[at + iz * SCAR_SIDE + ix] / 255 : 0;
+      hit.push(v);
+      any = Math.max(any, v);
+    }
+  }
+  // Hit or not, a building does not come down evenly: a little of its own chance in each.
+  const weight: number[] = [];
+  for (let c = 0; c < n; c++) {
+    const ix = c % gx;
+    const iz = (c - ix) / gx;
+    let near = 0;
+    let k = 0;
+    for (const [x, z] of [
+      [ix - 1, iz],
+      [ix + 1, iz],
+      [ix, iz - 1],
+      [ix, iz + 1],
+    ]) {
+      if (x < 0 || z < 0 || x >= gx || z >= gz) continue;
+      near += hit[z * gx + x];
+      k++;
+    }
+    const own = any > 0 ? hit[c] + (0.45 * near) / Math.max(1, k) : 0;
+    weight.push(Math.pow(own + 0.1 + 0.25 * rand(id, 3000 + c), 1.8));
+  }
+  const most = n * floors;
+  const steps = Math.min(RUIN_STEPS, most);
+  // In whole steps of the redraw, so the building is rebuilt a bounded number of times.
+  const q = Math.round(Math.min(1, Math.max(0, t)) * steps);
+  const total = Math.min(most, Math.round((q * Math.min(most, (floors + 1) * n)) / steps));
+  const loss = new Array<number>(n).fill(0);
+  let given = 0;
+  if (before && before.loss.length === n) {
+    const had = before.loss.reduce((a, b) => a + b, 0);
+    if (had <= total) {
+      for (let c = 0; c < n; c++) loss[c] = before.loss[c];
+      given = had;
+    }
+  }
+  // Each step to the section that has least for its weight (the D'Hondt rule).
+  for (; given < total; given++) {
+    let best = -1;
+    let bv = -1;
+    for (let c = 0; c < n; c++) {
+      if (loss[c] >= floors) continue;
+      const v = weight[c] / (loss[c] + 1);
+      if (v > bv) {
+        bv = v;
+        best = c;
+      }
+    }
+    if (best < 0) break;
+    loss[best]++;
+  }
+  return { gx, gz, loss, hit };
+}
+
+/**
+ * Where shell hole `i` of building `id` goes, on a face the hits came through: whether
+ * it is on a face along x, which side, how far along from the middle, and how much bigger
+ * than a stray one. Null: anywhere, as before.
+ */
+function holeAt(
+  ruin: Ruin,
+  id: number,
+  i: number,
+  w: number,
+  d: number,
+): [boolean, number, number, number] | null {
+  const { gx, gz, hit } = ruin;
+  // The outside faces of each section on the edge, weighted by how hard it was hit.
+  let sum = 0;
+  const faces: [number, number, number][] = [];
+  for (let iz = 0; iz < gz; iz++) {
+    for (let ix = 0; ix < gx; ix++) {
+      const v = hit[iz * gx + ix];
+      if (v <= 0.05) continue;
+      if (iz === 0) faces.push([FACE_NORTH, ix, v]);
+      if (iz === gz - 1) faces.push([FACE_SOUTH, ix, v]);
+      if (ix === 0) faces.push([FACE_WEST, iz, v]);
+      if (ix === gx - 1) faces.push([FACE_EAST, iz, v]);
+    }
+  }
+  for (const f of faces) sum += f[2];
+  if (sum <= 0 || rand(id, 3200 + i) < 0.2) return null;
+  let r = rand(id, 3230 + i) * sum;
+  let pick = faces[faces.length - 1];
+  for (const f of faces) {
+    r -= f[2];
+    if (r <= 0) {
+      pick = f;
+      break;
+    }
+  }
+  const [face, k, v] = pick;
+  const alongX = face === FACE_NORTH || face === FACE_SOUTH;
+  const len = alongX ? w : d;
+  const cells = alongX ? gx : gz;
+  const t = ((k + 0.15 + 0.7 * rand(id, 3260 + i)) / cells - 0.5) * (len - 1.6);
+  return [alongX, face === FACE_SOUTH || face === FACE_EAST ? 1 : -1, t, 0.8 + v * 0.9];
+}
+
+/**
+ * A building come down where it was hit: each section of it cut down to the storeys it has
+ * left, the roof off what is open to the sky. Where a section has come down beside one
+ * that stands, the standing one shows its rooms in section, the broken ends of its floors
+ * stick out over the drop and the odd slab hangs down into it; the walls of the fallen
+ * section stand in ragged stumps, stepping up to the walls still standing; its floors lie
+ * in heaps on the storey that held and have spilled out into the street below.
+ */
+function breakColumns(
   parts: Part[],
   id: number,
-  cx: number,
-  cz: number,
+  x0: number,
+  z0: number,
   w: number,
   d: number,
   base: number,
   floors: number,
-  level: number,
+  ruin: Ruin,
   wall: number,
   wsurf: number,
 ): Part[] {
-  const lost = lostFloors(level, floors);
-  const cut = base + (floors - lost) * FLOOR;
+  const { gx, gz } = ruin;
+  const n = gx * gz;
+  const loss = ruin.loss.slice();
+  const cw = w / gx;
+  const cd = d / gz;
+  const colX = (x: number): number => Math.min(gx - 1, Math.max(0, Math.floor((x - x0) / cw)));
+  const colZ = (z: number): number => Math.min(gz - 1, Math.max(0, Math.floor((z - z0) / cd)));
+  const cutOf = (u: number): number =>
+    u > 0 ? base + (floors - lostFloors(u, floors)) * FLOOR : Infinity;
+  const fancyOf = (p: Part): boolean =>
+    p.rot !== undefined || p.hip !== undefined || p.sign !== undefined || p.taper !== undefined;
+  // Sections a part covers, for a part `p` (a turned one by its middle).
+  const span = (p: Part): [number, number, number, number] => {
+    if (p.rot !== undefined) {
+      const ix = colX(p.at[0]);
+      const iz = colZ(p.at[2]);
+      return [ix, ix, iz, iz];
+    }
+    return [
+      colX(p.at[0] - p.size[0] / 2 + 1e-3),
+      colX(p.at[0] + p.size[0] / 2 - 1e-3),
+      colZ(p.at[2] - p.size[2] / 2 + 1e-3),
+      colZ(p.at[2] + p.size[2] / 2 - 1e-3),
+    ];
+  };
+  // A roof is one piece: where any part of it is gone, it is all gone, and the sections
+  // under it are open to the sky as well.
+  for (let pass = 0; pass < 2; pass++) {
+    const cut = loss.map(cutOf);
+    for (const p of parts) {
+      if (!fancyOf(p) || p.size[0] < 2 || p.size[2] < 2) continue;
+      const [a, b, c, e] = span(p);
+      let gone = false;
+      for (let iz = c; iz <= e; iz++)
+        for (let ix = a; ix <= b; ix++) if (p.at[1] >= cut[iz * gx + ix] - 0.05) gone = true;
+      if (!gone) continue;
+      for (let iz = c; iz <= e; iz++)
+        for (let ix = a; ix <= b; ix++) if (loss[iz * gx + ix] === 0) loss[iz * gx + ix] = 1;
+    }
+  }
+  const cut = loss.map(cutOf);
+  const top = cut.map((c) => (c === Infinity ? base + floors * FLOOR : c));
   const out: Part[] = [];
-  for (const p of parts) {
+  const clip = (p: Part, at: number): void => {
     const half = p.size[1] / 2;
     const bottom = p.at[1] - half;
-    const fancy =
-      p.rot !== undefined || p.hip !== undefined || p.sign !== undefined || p.taper !== undefined;
-    if (fancy) {
-      if (p.at[1] < cut - 0.05) out.push(p);
-      continue;
-    }
-    if (bottom >= cut - 0.02) continue;
-    if (p.at[1] + half <= cut) {
+    if (bottom >= at - 0.02) return;
+    if (p.at[1] + half <= at) {
       out.push(p);
-      continue;
+      return;
     }
-    const up = cut - bottom;
+    const up = at - bottom;
     out.push({ ...p, size: [p.size[0], up, p.size[2]], at: [p.at[0], bottom + up / 2, p.at[2]] });
-    // The top of what held is the charred floor of the storey that burnt.
+    // The top of what held is the charred floor of the storey that went.
     if (p.size[0] > 2 && p.size[2] > 2) {
       out.push({
         size: [p.size[0] - 0.12, 0.08, p.size[2] - 0.12],
-        at: [p.at[0], cut + 0.04, p.at[2]],
+        at: [p.at[0], at + 0.04, p.at[2]],
         color: 0x2b2926,
       });
     }
+  };
+  for (const p of parts) {
+    const [a, b, c, e] = span(p);
+    if (fancyOf(p)) {
+      let keep = true;
+      for (let iz = c; iz <= e; iz++)
+        for (let ix = a; ix <= b; ix++) if (p.at[1] >= cut[iz * gx + ix] - 0.05) keep = false;
+      if (keep) out.push(p);
+      continue;
+    }
+    let same = true;
+    for (let iz = c; iz <= e; iz++)
+      for (let ix = a; ix <= b; ix++) if (cut[iz * gx + ix] !== cut[c * gx + a]) same = false;
+    if (same) {
+      if (cut[c * gx + a] === Infinity) out.push(p);
+      else clip(p, cut[c * gx + a]);
+      continue;
+    }
+    // Across sections that stand to different heights: a piece in each.
+    const lx = p.at[0] - p.size[0] / 2;
+    const hx = p.at[0] + p.size[0] / 2;
+    const lz = p.at[2] - p.size[2] / 2;
+    const hz = p.at[2] + p.size[2] / 2;
+    for (let iz = c; iz <= e; iz++) {
+      const z1 = iz === c ? lz : z0 + iz * cd;
+      const z2 = iz === e ? hz : z0 + (iz + 1) * cd;
+      for (let ix = a; ix <= b; ix++) {
+        const x1 = ix === a ? lx : x0 + ix * cw;
+        const x2 = ix === b ? hx : x0 + (ix + 1) * cw;
+        const piece: Part = {
+          ...p,
+          size: [x2 - x1, p.size[1], z2 - z1],
+          at: [(x1 + x2) / 2, p.at[1], (z1 + z2) / 2],
+        };
+        if (cut[iz * gx + ix] === Infinity) out.push(piece);
+        else clip(piece, cut[iz * gx + ix]);
+      }
+    }
   }
-  // Ragged walls where the lost storeys were (a low burnt parapet when only the roof went).
-  const tall = lost * FLOOR + FLOOR * 0.55;
-  for (let f = 0; f < 4; f++) {
-    const alongX = f === FACE_NORTH || f === FACE_SOUTH;
-    const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
-    const len = alongX ? w : d;
-    const off = (side * ((alongX ? d : w) - 0.3)) / 2;
-    const n = Math.max(3, Math.round(len / 1.6));
-    for (let i = 0; i < n; i++) {
-      const corner = i === 0 || i === n - 1;
-      const r = rand(id, 2100 + f * 40 + i);
-      const hh = tall * (corner ? 0.7 + r * 0.3 : r < 0.18 ? 0 : 0.12 + r * r * 0.88);
-      if (hh < 0.15) continue;
-      const t = ((i + 0.5) / n - 0.5) * len;
+  const concrete = (k: number): number => (rand(id, k) < 0.5 ? CONCRETE : 0x67645d);
+  // Where a section stands higher than the one beside it: the rooms in section, floors
+  // broken off over the drop, now and then a slab hanging down into it.
+  for (let c = 0; c < n; c++) {
+    const ix = c % gx;
+    const iz = (c - ix) / gx;
+    for (const [nx, nz] of [
+      [ix + 1, iz],
+      [ix - 1, iz],
+      [ix, iz + 1],
+      [ix, iz - 1],
+    ]) {
+      if (nx < 0 || nz < 0 || nx >= gx || nz >= gz) continue;
+      const o = nz * gx + nx;
+      const hi = top[c];
+      const lo = top[o];
+      if (hi - lo < FLOOR * 0.9) continue;
+      const alongZ = nx !== ix; // the face between them runs along z
+      const dir = alongZ ? nx - ix : nz - iz;
+      const plane = alongZ ? x0 + (dir > 0 ? ix + 1 : ix) * cw : z0 + (dir > 0 ? iz + 1 : iz) * cd;
+      const mid = alongZ ? z0 + (iz + 0.5) * cd : x0 + (ix + 0.5) * cw;
+      const len = (alongZ ? cd : cw) - 0.1;
+      const room = hi - lo;
+      const key = 3400 + c * 8 + (dir > 0 ? 0 : 1) + (alongZ ? 2 : 0);
       out.push({
-        size: alongX ? [len / n + 0.02, hh, 0.3] : [0.3, hh, len / n + 0.02],
-        at: alongX ? [cx + t, cut + hh / 2, cz + off] : [cx + off, cut + hh / 2, cz + t],
-        color: wall,
-        shade: 0.38 + rand(id, 2300 + f * 40 + i) * 0.2,
-        surf: wsurf,
+        size: alongZ ? [0.06, room, len] : [len, room, 0.06],
+        at: alongZ
+          ? [plane + dir * 0.03, lo + room / 2, mid]
+          : [mid, lo + room / 2, plane + dir * 0.03],
+        color: 0x2e2b27,
+        shade: 0.8 + rand(id, key) * 0.2,
       });
-      for (let fl = 0; fl < lost; fl++) {
-        const wy = cut + fl * FLOOR + FLOOR * 0.56;
-        if (wy + 0.3 > cut + hh) break;
+      for (let f = 1; f <= floors; f++) {
+        const y = base + f * FLOOR;
+        if (y <= lo + 0.2 || y >= hi - 0.15) continue;
+        const r = rand(id, key * 31 + f);
+        const outBy = 0.25 + r * 1.5;
+        const wide = len * (0.45 + rand(id, key * 37 + f) * 0.55);
+        const t = (rand(id, key * 41 + f) - 0.5) * (len - wide);
+        const droop = r > 0.72 ? (r - 0.72) * 1.6 : 0;
         out.push({
-          size: alongX ? [0.5, 0.44, 0.34] : [0.34, 0.44, 0.5],
-          at: alongX ? [cx + t, wy, cz + off] : [cx + off, wy, cz + t],
-          color: SOOT,
+          size: alongZ ? [outBy, 0.18, wide] : [wide, 0.18, outBy],
+          at: alongZ
+            ? [plane + (dir * outBy) / 2, y - droop * outBy * 0.4, mid + t]
+            : [mid + t, y - droop * outBy * 0.4, plane + (dir * outBy) / 2],
+          rot: droop > 0 ? (alongZ ? [0, 0, -dir * droop] : [dir * droop, 0, 0]) : undefined,
+          color: concrete(key * 43 + f),
+          shade: 0.55 + r * 0.25,
+          surf: SURF_RUBBLE,
+        });
+      }
+      // A slab come away at the top, hanging down into the drop.
+      if (room >= FLOOR * 1.8 && rand(id, key + 5) < 0.75) {
+        const long = Math.min(room * 0.7, FLOOR * 1.6 + rand(id, key + 6) * FLOOR);
+        const tip = 0.55 + rand(id, key + 7) * 0.5;
+        const y = hi - 0.1 - (Math.sin(tip) * long) / 2;
+        const off = (Math.cos(tip) * long) / 2;
+        const wide = len * (0.35 + rand(id, key + 8) * 0.4);
+        const t = (rand(id, key + 9) - 0.5) * (len - wide);
+        out.push({
+          size: alongZ ? [long, 0.2, wide] : [wide, 0.2, long],
+          at: alongZ ? [plane + dir * off, y, mid + t] : [mid + t, y, plane + dir * off],
+          rot: alongZ ? [0, 0, -dir * tip] : [dir * tip, 0, 0],
+          color: concrete(key + 10),
+          shade: 0.6,
+          surf: SURF_RUBBLE,
         });
       }
     }
-    // Soot licked up the face from the windows of the top storey that still stands.
-    const streaks = 2 + Math.floor(rand(id, 2500 + f) * 3);
-    for (let k = 0; k < streaks; k++) {
-      const t = (rand(id, 2510 + f * 8 + k) - 0.5) * (len - 1.2);
-      const up = FLOOR * (0.45 + rand(id, 2530 + f * 8 + k) * 0.3);
-      const y = cut - FLOOR * 0.44 + up / 2;
-      const o = (side * (alongX ? d : w)) / 2 + side * 0.04;
+  }
+  // Each section that came down: stumps of its outside walls, soot over the windows the
+  // fire came out of, charred beams and heaps on the floor that held, and what fell on the
+  // far side of the wall lying in the street.
+  for (let c = 0; c < n; c++) {
+    if (loss[c] === 0) continue;
+    const ix = c % gx;
+    const iz = (c - ix) / gx;
+    const lost = lostFloors(loss[c], floors);
+    const at = top[c];
+    const sx0 = x0 + ix * cw;
+    const sz0 = z0 + iz * cd;
+    const scx = sx0 + cw / 2;
+    const scz = sz0 + cd / 2;
+    const outside: number[] = [];
+    if (iz === 0) outside.push(FACE_NORTH);
+    if (iz === gz - 1) outside.push(FACE_SOUTH);
+    if (ix === 0) outside.push(FACE_WEST);
+    if (ix === gx - 1) outside.push(FACE_EAST);
+    for (const f of outside) {
+      const alongX = f === FACE_NORTH || f === FACE_SOUTH;
+      const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
+      const len = alongX ? cw : cd;
+      const from = alongX ? sx0 : sz0;
+      const face = alongX ? (side > 0 ? z0 + d : z0) : side > 0 ? x0 + w : x0;
+      const off = face - side * 0.15;
+      // Neighbours along this face, either end: a wall steps up to a taller one.
+      const prev = alongX ? (ix > 0 ? top[c - 1] : at) : iz > 0 ? top[c - gx] : at;
+      const next = alongX ? (ix < gx - 1 ? top[c + 1] : at) : iz < gz - 1 ? top[c + gx] : at;
+      const segs = Math.max(2, Math.round(len / 1.6));
+      for (let i = 0; i < segs; i++) {
+        const k = 3600 + c * 64 + f * 16 + i;
+        const r = rand(id, k);
+        const s = (i + 0.5) / segs;
+        // Up to the wall still standing next door at the ends, ragged lower in between.
+        const lean = Math.max(
+          (prev - at) * Math.max(0, 1 - s * 2.2),
+          (next - at) * Math.max(0, s * 2.2 - 1.2),
+        );
+        const corner =
+          (alongX ? (ix === 0 && i === 0) || (ix === gx - 1 && i === segs - 1) : false) ||
+          (!alongX ? (iz === 0 && i === 0) || (iz === gz - 1 && i === segs - 1) : false);
+        let hh = FLOOR * (r < 0.2 ? 0 : 0.12 + r * r * (lost > 0 ? 1.1 : 0.5));
+        if (corner) hh = Math.max(hh, FLOOR * (0.4 + r * 0.6) * Math.min(2, lost + 0.6));
+        hh = Math.max(hh, lean * (0.55 + r * 0.45));
+        if (hh < 0.15) continue;
+        const t = from + (i + 0.5) * (len / segs);
+        out.push({
+          size: alongX ? [len / segs + 0.02, hh, 0.3] : [0.3, hh, len / segs + 0.02],
+          at: alongX ? [t, at + hh / 2, off] : [off, at + hh / 2, t],
+          color: wall,
+          shade: 0.38 + rand(id, k + 7000) * 0.2,
+          surf: wsurf,
+        });
+        for (let fl = 0; fl < lost + 1; fl++) {
+          const wy = at + fl * FLOOR + FLOOR * 0.56;
+          if (wy + 0.3 > at + hh) break;
+          out.push({
+            size: alongX ? [0.5, 0.44, 0.34] : [0.34, 0.44, 0.5],
+            at: alongX ? [t, wy, off] : [off, wy, t],
+            color: SOOT,
+          });
+        }
+      }
+      // Soot up the face from the windows of the top storey that still stands.
+      const streaks = 1 + Math.floor(rand(id, 3500 + c * 4 + f) * 2.5);
+      for (let k = 0; k < streaks; k++) {
+        const t = from + (0.15 + 0.7 * rand(id, 3510 + c * 16 + f * 4 + k)) * len;
+        const up = FLOOR * (0.45 + rand(id, 3530 + c * 16 + f * 4 + k) * 0.3);
+        if (at - up < base + 0.3) continue;
+        const o = face + side * 0.04;
+        out.push({
+          size: alongX ? [0.62, up, 0.05] : [0.05, up, 0.62],
+          at: alongX ? [t, at - FLOOR * 0.44 + up / 2, o] : [o, at - FLOOR * 0.44 + up / 2, t],
+          color: SOOT,
+        });
+      }
+      // What fell outside: masonry and slabs at the foot of the wall, out into the street.
+      const spill = Math.min(9, 1 + lost * 2);
+      for (let k = 0; k < spill; k++) {
+        const q = 3700 + c * 64 + f * 16 + k;
+        const s = 0.35 + rand(id, q) * (0.6 + Math.min(1.4, lost * 0.25));
+        const outBy = 0.3 + rand(id, q + 1) * (0.8 + lost * 0.45);
+        const t = from + rand(id, q + 2) * len;
+        out.push({
+          size: [s, s * (0.35 + rand(id, q + 3) * 0.3), s * (0.6 + rand(id, q + 4) * 0.6)],
+          at: alongX
+            ? [t, base + s * 0.15, face + side * outBy]
+            : [face + side * outBy, base + s * 0.15, t],
+          rot: [rand(id, q + 5) - 0.5, rand(id, q + 6) * 3.1, rand(id, q + 7) - 0.5],
+          color: k % 3 === 0 ? 0x4c4a46 : k % 3 === 1 ? concrete(q + 8) : wall,
+          shade: 0.4 + rand(id, q + 9) * 0.25,
+          surf: SURF_RUBBLE,
+        });
+      }
+    }
+    // Charred beams across, and the floors that came down, in heaps on the one that held.
+    const beams = Math.max(1, Math.round(Math.min(cw, cd) / 3));
+    for (let i = 0; i < beams; i++) {
+      const across = cw < cd;
+      const t = ((i + 0.5) / beams - 0.5) * (across ? cd : cw) * 0.7;
+      const y = at + Math.min(FLOOR * 0.6, 0.25 + rand(id, 3800 + c * 8 + i) * FLOOR * 0.5);
       out.push({
-        size: alongX ? [0.62, up, 0.05] : [0.05, up, 0.62],
-        at: alongX ? [cx + t, y, cz + o] : [cx + o, y, cz + t],
+        size: across
+          ? [cw * (0.5 + rand(id, 3810 + c * 8 + i) * 0.45), 0.1, 0.12]
+          : [0.12, 0.1, cd * (0.5 + rand(id, 3810 + c * 8 + i) * 0.45)],
+        at: across ? [scx, y, scz + t] : [scx + t, y, scz],
+        rot: across
+          ? [0, 0, (rand(id, 3820 + c * 8 + i) - 0.5) * 0.6]
+          : [(rand(id, 3820 + c * 8 + i) - 0.5) * 0.6, 0, 0],
         color: SOOT,
       });
     }
-  }
-  // Charred beams across the gap, and the roof that came down, in heaps on the floor.
-  for (let i = 0; i < 3; i++) {
-    const across = w < d;
-    const t = ((i + 0.5) / 3 - 0.5) * (across ? d : w) * 0.7;
-    const y = cut + Math.min(tall * 0.8, 0.3 + rand(id, 2600 + i) * tall * 0.7);
-    out.push({
-      size: across
-        ? [w * (0.5 + rand(id, 2610 + i) * 0.45), 0.1, 0.12]
-        : [0.12, 0.1, d * (0.5 + rand(id, 2610 + i) * 0.45)],
-      at: across ? [cx, y, cz + t] : [cx + t, y, cz],
-      rot: across
-        ? [0, 0, (rand(id, 2620 + i) - 0.5) * 0.6]
-        : [(rand(id, 2620 + i) - 0.5) * 0.6, 0, 0],
-      color: SOOT,
-    });
-  }
-  for (let i = 0; i < 4 + Math.min(14, w * d * 0.04); i++) {
-    const s = 0.5 + rand(id, 2700 + i) * 1.3;
-    out.push({
-      size: [s, 0.14 + rand(id, 2730 + i) * 0.3, s * (0.5 + rand(id, 2760 + i) * 0.6)],
-      at: [
-        cx + (rand(id, 2790 + i) - 0.5) * (w - 1.5),
-        cut + 0.12 + rand(id, 2820 + i) * 0.2,
-        cz + (rand(id, 2850 + i) - 0.5) * (d - 1.5),
-      ],
-      rot: [
-        (rand(id, 2880 + i) - 0.5) * 0.7,
-        rand(id, 2910 + i) * 3.1,
-        (rand(id, 2940 + i) - 0.5) * 0.7,
-      ],
-      color: i % 3 === 0 ? 0x4c4a46 : i % 3 === 1 ? TILES[i % TILES.length] : wall,
-      shade: 0.35 + rand(id, 2970 + i) * 0.25,
-      surf: SURF_RUBBLE,
-    });
+    const heaps = 2 + Math.min(10, cw * cd * 0.05 + lost);
+    for (let i = 0; i < heaps; i++) {
+      const q = 3900 + c * 40 + i;
+      const s = 0.5 + rand(id, q) * 1.2;
+      out.push({
+        size: [s, 0.14 + rand(id, q + 1) * (0.3 + lost * 0.08), s * (0.5 + rand(id, q + 2) * 0.6)],
+        at: [
+          scx + (rand(id, q + 3) - 0.5) * Math.max(0.4, cw - 1.2),
+          at + 0.12 + rand(id, q + 4) * 0.25,
+          scz + (rand(id, q + 5) - 0.5) * Math.max(0.4, cd - 1.2),
+        ],
+        rot: [(rand(id, q + 6) - 0.5) * 0.7, rand(id, q + 7) * 3.1, (rand(id, q + 8) - 0.5) * 0.7],
+        color: i % 3 === 0 ? 0x4c4a46 : i % 3 === 1 ? TILES[i % TILES.length] : wall,
+        shade: 0.35 + rand(id, q + 9) * 0.25,
+        surf: SURF_RUBBLE,
+      });
+    }
   }
   return out;
 }
@@ -2079,11 +2816,15 @@ export function rubbleParts(
   base: number,
   floors: number,
   pancake = false,
+  ruin: Ruin | null = null,
 ): Part[] {
   const parts: Part[] = [];
   const cx = x0 + w / 2;
   const cz = z0 + d / 2;
   const wall = WALLS[Math.floor(rand(id, 1) * WALLS.length)];
+  // How hard the ground under (x, z) was hit, 0..1 (decision 157).
+  const hitAt = (x: number, z: number): number =>
+    ruin ? ruin.hit[sectionAt(ruin, x0, z0, w, d, x, z)] : 0;
   parts.push({ size: [w + 1.2, 2.4, d + 1.2], at: [cx, base - 1.14, cz], color: 0x3a3733 });
   if (pancake) return pancakeParts(parts, id, cx, cz, w, d, base, floors, wall);
   const slabs = 14 + w * d * 0.5;
@@ -2110,10 +2851,15 @@ export function rubbleParts(
   // Corners and stretches of wall that did not come down, at ragged heights.
   for (let i = 0; i < 5; i++) {
     const alongX = i % 2 === 0;
-    const side = rand(id, 800 + i) < 0.5 ? -1 : 1;
+    let side = rand(id, 800 + i) < 0.5 ? -1 : 1;
     const len = 1 + rand(id, 810 + i) * (alongX ? w : d) * 0.4;
     const t = (rand(id, 820 + i) - 0.5) * ((alongX ? w : d) - len);
-    const hh = FLOOR * (0.5 + rand(id, 830 + i) * Math.min(floors - 0.6, 1.7));
+    // What stands is on the side that was hit least.
+    const there = (sd: number): number =>
+      alongX ? hitAt(cx + t, cz + (sd * d) / 2) : hitAt(cx + (sd * w) / 2, cz + t);
+    if (ruin && there(-side) < there(side)) side = -side;
+    const hh =
+      FLOOR * (0.5 + rand(id, 830 + i) * Math.min(floors - 0.6, 1.7)) * (1 - 0.6 * there(side));
     const off = (side * (alongX ? d : w)) / 2;
     parts.push({
       size: alongX ? [len, hh, 0.3] : [0.3, hh, len],
@@ -2124,6 +2870,83 @@ export function rubbleParts(
       color: wall,
       shade: 0.5,
     });
+  }
+  // A big building seldom comes down whole: the corner the fire took least still stands,
+  // two walls and the ends of its floors, storeys high over the heap.
+  if (floors >= 4) {
+    const corners: [number, number][] = [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ];
+    let best = 0;
+    let least = 2;
+    for (let k = 0; k < 4; k++) {
+      const [sx, sz] = corners[k];
+      const v = hitAt(cx + sx * (w / 2 - 0.5), cz + sz * (d / 2 - 0.5)) + rand(id, 1900 + k) * 0.3;
+      if (v < least) {
+        least = v;
+        best = k;
+      }
+    }
+    const [sx, sz] = corners[best];
+    const stands = Math.max(
+      1,
+      Math.round(Math.min(floors * 0.45, 7) * (1 - 0.5 * Math.min(1, least))),
+    );
+    const hh = stands * FLOOR + FLOOR * 0.3 * rand(id, 1910);
+    const lx = Math.min(w * 0.45, 3 + rand(id, 1911) * 4);
+    const lz = Math.min(d * 0.45, 3 + rand(id, 1912) * 4);
+    const ex = cx + sx * (w / 2 - 0.15);
+    const ez = cz + sz * (d / 2 - 0.15);
+    // Each wall broken off in steps toward the open end.
+    for (let k = 0; k < 3; k++) {
+      const f = 1 - k * 0.3;
+      const tx = lx * (1 - k * 0.33);
+      const tz = lz * (1 - k * 0.33);
+      const up = hh * f * (0.85 + rand(id, 1913 + k) * 0.15);
+      parts.push({
+        size: [tx, up, 0.3],
+        at: [ex - (sx * tx) / 2, base + up / 2, ez],
+        color: wall,
+        shade: 0.45 + rand(id, 1916 + k) * 0.15,
+        surf: SURF_PLASTER,
+      });
+      parts.push({
+        size: [0.3, up, tz],
+        at: [ex, base + up / 2, ez - (sz * tz) / 2],
+        color: wall,
+        shade: 0.45 + rand(id, 1919 + k) * 0.15,
+        surf: SURF_PLASTER,
+      });
+    }
+    for (let fl = 0; fl < stands; fl++) {
+      const y = base + fl * FLOOR + FLOOR * 0.56;
+      // Window holes up both walls, and the floor ends between them.
+      for (let k = 0; k < 2; k++) {
+        const t = 0.9 + k * 1.3;
+        if (t < lx - 0.6 && y + 0.3 < base + hh * (1 - (t / lx) * 0.6)) {
+          parts.push({ size: [0.5, 0.44, 0.34], at: [ex - sx * t, y, ez], color: SOOT });
+        }
+        if (t < lz - 0.6 && y + 0.3 < base + hh * (1 - (t / lz) * 0.6)) {
+          parts.push({ size: [0.34, 0.44, 0.5], at: [ex, y, ez - sz * t], color: SOOT });
+        }
+      }
+      if (fl > 0) {
+        const r = rand(id, 1930 + fl);
+        const fx = lx * (0.4 + r * 0.4);
+        const fz = lz * (0.4 + rand(id, 1950 + fl) * 0.4);
+        parts.push({
+          size: [fx, 0.18, fz],
+          at: [ex - (sx * fx) / 2, base + fl * FLOOR, ez - (sz * fz) / 2],
+          rot: r > 0.7 ? [sz * (r - 0.7) * 0.8, 0, -sx * (r - 0.7) * 0.8] : undefined,
+          color: CONCRETE,
+          shade: 0.6,
+          surf: SURF_RUBBLE,
+        });
+      }
+    }
   }
   return parts;
 }
@@ -2404,8 +3227,16 @@ export class StructureView {
   readonly breached = new Uint8Array(MAX_STRUCTS);
   /** 1 where engineers have fortified the building. */
   readonly fort = new Uint8Array(MAX_STRUCTS);
-  /** How far each shot-up building has burnt down from the top (brokenLevel), and since when. */
-  readonly broken = new Uint8Array(MAX_STRUCTS);
+  /**
+   * How far each shot-up building has come down: the steps its sections have lost between
+   * them (see ruinOf), GUTTED_MARK for a gutted shell; and since when (burnAt).
+   */
+  readonly broken = new Uint16Array(MAX_STRUCTS);
+  /** Where each building was hit (SCAR_CELLS each, 0..255) and how it has come down. */
+  private readonly scar = new Uint8Array(MAX_STRUCTS * SCAR_CELLS);
+  readonly ruins: (Ruin | null)[] = new Array<Ruin | null>(MAX_STRUCTS).fill(null);
+  /** The health (hp plus what went in below) each ruin was last worked out for. */
+  private readonly ruinTop = new Int16Array(MAX_STRUCTS).fill(-1);
   /**
    * The fire in the ground floor (I5): floors alight now, 1 where the ground floor is or
    * has been on fire, and 1 where the building came down as a pancake.
@@ -2420,7 +3251,7 @@ export class StructureView {
    * What is drawn: 0 standing, 1 damaged, 2 destroyed, 3 going up, 4 gutted, plus the
    * breached faces times eight.
    */
-  private readonly shown = new Int16Array(MAX_STRUCTS).fill(-1);
+  private readonly shown = new Int32Array(MAX_STRUCTS).fill(-1);
   private readonly fellAt = new Float32Array(MAX_STRUCTS).fill(-1e9);
   /** How far each building's roof stands above its counted floors (chimneys and all). */
   private readonly crest = new Float32Array(MAX_STRUCTS).fill(0.9);
@@ -2464,6 +3295,7 @@ export class StructureView {
     }
     // Signs: a panel shows its cell of the sign sheet instead of its own colour.
     hk = map.layout === 'kowloon';
+    hkStyle = hk ? map.sStyle : null;
     const signs = makeSigns(hk);
     const tint = attribute('color', 'vec3');
     const sign = attribute('sign', 'float');
@@ -2556,9 +3388,19 @@ export class StructureView {
     const m = this.map;
     if (m.sKind[s] === S_BRIDGE) return Math.max(fromFx(m.sBase[s]), fromFx(m.sEast[s]));
     if (this.hp[s] === 0) return fromFx(m.sBase[s]) + 0.8;
+    return fromFx(m.sBase[s]) + this.standing(s) * FLOOR + this.crest[s];
+  }
+
+  /** Storeys of building `s` still standing where it stands highest (a gutted shell: 1). */
+  standing(s: number): number {
+    const floors = this.map.sFloors[s];
     const b = this.broken[s];
-    const lost = b > 0 && b < 250 ? lostFloors(b, m.sFloors[s]) : 0;
-    return fromFx(m.sBase[s]) + (m.sFloors[s] - lost) * FLOOR + this.crest[s];
+    if (b === GUTTED_MARK) return 1;
+    const r = this.ruins[s];
+    if (b === 0 || !r) return floors;
+    let least = floors;
+    for (const u of r.loss) least = Math.min(least, u > 0 ? lostFloors(u, floors) : 0);
+    return floors - least;
   }
 
   /**
@@ -2567,6 +3409,13 @@ export class StructureView {
    */
   roofAt(s: number, x: number, z: number): number {
     const m = this.map;
+    const r = this.ruins[s];
+    if (r && this.broken[s] > 0 && this.broken[s] !== GUTTED_MARK) {
+      // On the floor that held, in a section that came down; on the roof where it stands.
+      const k = sectionAt(r, m.sX[s] * CELL, m.sY[s] * CELL, m.sW[s] * CELL, m.sH[s] * CELL, x, z);
+      const lost = r.loss[k] > 0 ? lostFloors(r.loss[k], m.sFloors[s]) : 0;
+      return fromFx(m.sBase[s]) + (m.sFloors[s] - lost) * FLOOR + 0.05;
+    }
     const c = this.crest[s];
     const eaves = this.topOf(s) - c;
     if (c <= 1) return eaves + 0.05;
@@ -2606,7 +3455,7 @@ export class StructureView {
     const holes = state === 2 || state === 3 ? 0 : this.breached[s];
     const fort = state === 2 || state === 3 ? 0 : this.fort[s];
     // How far it has burnt down from the top (I1): only a shot-up building shows it.
-    const level = state === 1 ? Math.min(63, this.broken[s]) : 0;
+    const level = state === 1 ? Math.min(4095, this.broken[s]) : 0;
     // A scorched ground floor on a standing building; the stacked floors of a pancake.
     const low =
       state === 2
@@ -2614,7 +3463,7 @@ export class StructureView {
         : state === 0 || state === 1 || state === 4
           ? this.scorched[s]
           : 0;
-    const key = state + 8 * holes + 128 * fort + 256 * level + 16384 * low;
+    const key = state + 8 * holes + 128 * fort + 256 * low + 512 * level;
     if (this.shown[s] === key && !this.pending.has(s)) return;
     if (this.pending.get(s) === key) return;
     if (this.map.sKind[s] === S_BUILDING && this.ready) {
@@ -2660,8 +3509,8 @@ export class StructureView {
     const state = key & 7;
     const holes = (key >> 3) & 15;
     const fort = (key >> 7) & 1;
-    const level = (key >> 8) & 63;
-    const low = ((key >> 14) & 1) === 1;
+    const low = ((key >> 8) & 1) === 1;
+    const level = key >> 9;
     const sm = this.map;
     if (sm.sKind[s] === S_BASE) {
       // A base building takes the place of whatever hedge or fence stood there.
@@ -2691,7 +3540,7 @@ export class StructureView {
       : m.sKind[s] === S_BASE && state !== 2
         ? baseParts(s, this.baseType[s], this.baseTeam[s], x0, z0, w, d, base, state)
         : state === 2
-          ? rubbleParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s], low)
+          ? rubbleParts(s, x0 + 0.5, z0 + 0.5, w - 1, d - 1, base, m.sFloors[s], low, this.ruins[s])
           : buildingParts(
               s,
               x0 + 0.5,
@@ -2704,7 +3553,7 @@ export class StructureView {
               holes,
               m.sClass[s],
               fort === 1,
-              level,
+              (state === 1 || state === 4) && this.ruins[s] ? this.ruins[s]! : level,
               low,
             );
     if (m.sKind[s] === S_BUILDING) {
@@ -2835,11 +3684,26 @@ export class StructureView {
         // Gutted by what went in below, its walls and roof still stand: it is drawn shot
         // up and burning, not as an open shell, until it pancakes.
         if (look === STAGE_GUTTED && low > 0 && top * 100 >= 255 * GUTTED_PCT) look = STAGE_DAMAGED;
-        const level = hp > 0 && look === STAGE_DAMAGED ? brokenLevel(top, map.sFloors[k]) : 0;
-        if (level > this.broken[k] || (look === STAGE_GUTTED && this.broken[k] < 250))
+        // Where it was hit decides where it comes down (decision 157).
+        const mark = hp === 0 ? 1 : look === STAGE_GUTTED ? 2 : look === STAGE_DAMAGED ? 3 : 0;
+        const at = k * SCAR_CELLS;
+        if (mark === 0) {
+          this.ruins[k] = null;
+          this.ruinTop[k] = -1;
+        } else if (this.ruinTop[k] !== top * 4 + mark) {
+          this.ruinTop[k] = top * 4 + mark;
+          if (s.structScar) this.scar.set(s.structScar.subarray(at, at + SCAR_CELLS), at);
+          const [gx, gz] = scarGrid(map, k);
+          const t = mark === 3 ? brokenT(top) : 0;
+          const before = mark === 3 ? this.ruins[k] : null;
+          this.ruins[k] = ruinOf(this.scar, at, gx, gz, map.sFloors[k], t, k, before);
+        }
+        const r = this.ruins[k];
+        const level = hp > 0 && look === STAGE_DAMAGED && r ? r.loss.reduce((a, b) => a + b, 0) : 0;
+        if (level > this.broken[k] || (look === STAGE_GUTTED && this.broken[k] !== GUTTED_MARK))
           this.burnAt[k] = seconds;
         // Gutted keeps a mark, so its fire is lit once and then burns down.
-        this.broken[k] = look === STAGE_GUTTED && hp > 0 ? 250 : level;
+        this.broken[k] = look === STAGE_GUTTED && hp > 0 ? GUTTED_MARK : level;
       }
       if (this.hidden(k) && !this.spot(k)) continue;
       const rising = this.baseTeam[k] >= 0 && this.basePct[k] < 100;
@@ -2986,8 +3850,7 @@ export class StructureView {
     const dz = cz - this.eye.z;
     if (dx * dx + dz * dz + this.eye.y * this.eye.y > 700 * 700) return;
     if (Math.random() > dt * (3 + lit * 2.5)) return;
-    const b = this.broken[s];
-    const stands = b === 250 ? 1 : m.sFloors[s] - (b > 0 ? lostFloors(b, m.sFloors[s]) : 0);
+    const stands = this.standing(s);
     const top = Math.max(1, Math.min(lit, stands));
     const w = m.sW[s] * CELL - 1;
     const d = m.sH[s] * CELL - 1;
@@ -3020,7 +3883,7 @@ export class StructureView {
    */
   private burn(s: number, seconds: number, dt: number): void {
     const m = this.map;
-    const gutted = this.broken[s] === 250;
+    const gutted = this.broken[s] === GUTTED_MARK;
     const age = seconds - this.burnAt[s];
     const heat = gutted ? Math.max(0, 1 - age / 120) : Math.max(0.22, 1 - age / 100);
     if (heat <= 0) return;
@@ -3028,11 +3891,29 @@ export class StructureView {
     const dx = cx - this.eye.x;
     const dz = cz - this.eye.z;
     if (dx * dx + dz * dz + this.eye.y * this.eye.y > 700 * 700) return;
-    const level = gutted ? 1 : this.broken[s];
-    if (Math.random() > dt * (0.8 + level * 0.6) * heat * 3) return;
-    const w = m.sW[s] * CELL - 1;
-    const d = m.sH[s] * CELL - 1;
+    const r = gutted ? null : this.ruins[s];
+    // The sections that came down burn; a whole shell burns all over.
+    let pick = -1;
+    let open = 0;
+    if (r) {
+      for (let c = 0; c < r.loss.length; c++) if (r.loss[c] > 0) open++;
+      let k = Math.floor(Math.random() * open);
+      for (let c = 0; c < r.loss.length && pick < 0; c++) if (r.loss[c] > 0 && k-- === 0) pick = c;
+      if (pick < 0) return;
+    }
+    const level = gutted ? 1 : Math.min(m.sFloors[s] + 1, r ? r.loss[pick] : 1);
+    const share = r ? Math.min(1, (2 * open) / r.loss.length) : 1;
+    if (Math.random() > dt * (0.8 + level * 0.6) * heat * 3 * share) return;
     const base = fromFx(m.sBase[s]);
+    // The section's own ground: its middle and size.
+    const gx = r ? r.gx : 1;
+    const gz = r ? r.gz : 1;
+    const ix = pick < 0 ? 0 : pick % gx;
+    const iz = pick < 0 ? 0 : (pick - ix) / gx;
+    const sw = (m.sW[s] * CELL) / gx;
+    const sd = (m.sH[s] * CELL) / gz;
+    const scx = m.sX[s] * CELL + (ix + 0.5) * sw;
+    const scz = m.sY[s] * CELL + (iz + 0.5) * sd;
     const floors = gutted ? 1 : m.sFloors[s] - lostFloors(level, m.sFloors[s]);
     const top = base + floors * FLOOR;
     let x: number;
@@ -3040,21 +3921,26 @@ export class StructureView {
     let z: number;
     let nx = 0;
     let nz = 0;
-    if (!gutted && Math.random() < 0.6) {
-      // Out of a window of the top storey left standing.
-      const f = Math.floor(Math.random() * 4);
+    const faces: number[] = [];
+    if (iz === 0) faces.push(FACE_NORTH);
+    if (iz === gz - 1) faces.push(FACE_SOUTH);
+    if (ix === 0) faces.push(FACE_WEST);
+    if (ix === gx - 1) faces.push(FACE_EAST);
+    if (!gutted && faces.length > 0 && Math.random() < 0.6) {
+      // Out of a window of the top storey left standing, on the section's outside wall.
+      const f = faces[Math.floor(Math.random() * faces.length)];
       const alongX = f === FACE_NORTH || f === FACE_SOUTH;
       const side = f === FACE_SOUTH || f === FACE_EAST ? 1 : -1;
-      const t = (Math.random() - 0.5) * ((alongX ? w : d) - 1.2);
-      x = alongX ? cx + t : cx + side * (w / 2 + 0.15);
-      z = alongX ? cz + side * (d / 2 + 0.15) : cz + t;
+      const t = (Math.random() - 0.5) * Math.max(0.4, (alongX ? sw : sd) - 1.2);
+      x = alongX ? scx + t : cx + side * ((m.sW[s] * CELL - 1) / 2 + 0.15);
+      z = alongX ? cz + side * ((m.sH[s] * CELL - 1) / 2 + 0.15) : scz + t;
       y = top - FLOOR * 0.44;
       nx = alongX ? 0 : side;
       nz = alongX ? side : 0;
     } else {
       // Off the broken top (or up out of a gutted shell).
-      x = cx + (Math.random() - 0.5) * (w - 1.5);
-      z = cz + (Math.random() - 0.5) * (d - 1.5);
+      x = scx + (Math.random() - 0.5) * Math.max(0.4, sw - 1.5);
+      z = scz + (Math.random() - 0.5) * Math.max(0.4, sd - 1.5);
       y = gutted ? base + 0.6 : top + 0.2;
     }
     if (!this.fog.sees(x, z)) return;

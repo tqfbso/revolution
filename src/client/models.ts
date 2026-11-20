@@ -1,91 +1,68 @@
-// Procedural unit models. Everything is built from boxes and cylinders at start-up: no
-// asset downloads, original designs, and each model comes in three levels of detail.
+// Unit models, built in code at start-up: no asset downloads, original designs, three
+// levels of detail each. The ground vehicles of each army are in armour.ts, its aircraft in
+// aircraft.ts; the shapes they are all made from are in kit.ts.
 //
 // Conventions: forward is +Z, the model sits on y = 0, 1 unit is about 3.8 m.
 // Vertex attributes: `color` is the paint/metal albedo, `teamMask` says how much of the
 // per-instance team colour replaces it (0 = none, 1 = recognition panel).
 import * as THREE from 'three/webgpu';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { creases, dress } from './shape';
+import {
+  KIND_AD,
+  KIND_ARTILLERY,
+  KIND_COUNT,
+  KIND_DRONE,
+  KIND_EW,
+  KIND_HELI,
+  KIND_IFV,
+  KIND_LIFT,
+  KIND_PLANE,
+  KIND_STRIKE,
+  KIND_TANK,
+  KIND_TRUCK,
+} from '../sim/units';
+import {
+  adAlliance,
+  adChina,
+  adRussia,
+  gunAlliance,
+  gunChina,
+  gunRussia,
+  ifvAlliance,
+  ifvChina,
+  ifvRussia,
+  jammerAlliance,
+  jammerChina,
+  jammerRussia,
+  tankAlliance,
+  tankChina,
+  tankRussia,
+  truckAlliance,
+  truckChina,
+  truckRussia,
+} from './armour';
+import {
+  gunshipAlliance,
+  gunshipChina,
+  gunshipRussia,
+  jetAlliance,
+  jetChina,
+  jetRussia,
+  liftAlliance,
+  liftChina,
+  liftRussia,
+  planeAlliance,
+  planeChina,
+  planeRussia,
+  reconAlliance,
+  reconChina,
+  reconRussia,
+  strikeAlliance,
+  strikeChina,
+  strikeRussia,
+} from './aircraft';
+import { box, cyl, merge, RUBBER, STEEL } from './kit';
 
-const PAINT = 0x565c45;
-const PAINT_DARK = 0x3f4434;
-const RUBBER = 0x17181a;
-const STEEL = 0x2b2e2c;
-/**
- * Art direction is grounded realism (docs/DECISIONS.md 011): hulls keep muted service paint
- * and carry the team colour only on small markings. The barely visible tint below just
- * separates two paint batches. Readability at long range is the job of the far LOD and UI.
- */
-const TINT = 0.05;
-
-type Vec3 = [number, number, number];
-
-interface Opts {
-  at?: Vec3;
-  rot?: Vec3;
-  color?: number;
-  team?: number;
-  /** Scale the top face in x/z (boxes only): 1 = straight sides. */
-  top?: [number, number];
-  /** Slide the top face along z, for sloped fronts. */
-  shear?: number;
-  /** Fabric: its edges fray pale instead of chipping to bare metal. */
-  cloth?: boolean;
-}
-
-/**
- * `half` is the part's half size before it is bent, turned or moved, and `local` where each
- * vertex is inside it: what the edge wear is measured from (see shape.ts).
- */
-function finish(
-  g: THREE.BufferGeometry,
-  o: Opts,
-  half: [number, number, number],
-  local?: Float32Array,
-): THREE.BufferGeometry {
-  const pos = g.getAttribute('position');
-  const boxP = local ?? Float32Array.from(pos.array as Float32Array);
-  if (o.top || o.shear) {
-    g.computeBoundingBox();
-    const midY = (g.boundingBox!.max.y + g.boundingBox!.min.y) / 2;
-    for (let i = 0; i < pos.count; i++) {
-      if (pos.getY(i) <= midY) continue;
-      pos.setX(i, pos.getX(i) * (o.top?.[0] ?? 1));
-      pos.setZ(i, pos.getZ(i) * (o.top?.[1] ?? 1) + (o.shear ?? 0));
-    }
-  }
-  if (o.rot) g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...o.rot)));
-  if (o.at) g.translate(...o.at);
-  g.computeVertexNormals();
-  g.deleteAttribute('uv');
-  return dress(g, { color: o.color ?? PAINT, team: o.team, cloth: o.cloth }, boxP, half);
-}
-
-export const box = (w: number, h: number, d: number, o: Opts = {}) =>
-  finish(new THREE.BoxGeometry(w, h, d), o, [w / 2, h / 2, d / 2]);
-
-/** Cylinder whose axis runs along `axis`. */
-export function cyl(r: number, len: number, axis: 'x' | 'y' | 'z', o: Opts = {}, seg = 10) {
-  const g = new THREE.CylinderGeometry(r, r, len, seg);
-  // A cylinder's only edges are its two rims: measured by distance from the axis and
-  // along it, so the side wears at its ends and each end wears at its rim.
-  const pos = g.getAttribute('position');
-  const local = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) {
-    local[i * 3] = Math.hypot(pos.getX(i), pos.getZ(i));
-    local[i * 3 + 1] = pos.getY(i);
-  }
-  if (axis === 'x') g.rotateZ(Math.PI / 2);
-  else if (axis === 'z') g.rotateX(Math.PI / 2);
-  return finish(g, o, [r, len / 2, 1e9], local);
-}
-
-/** Join the parts of a model into one mesh, marking the creases where parts meet. */
-export const merge = (parts: THREE.BufferGeometry[]) => {
-  creases(parts);
-  return mergeGeometries(parts);
-};
+export { box, cyl, merge };
 
 export interface VehicleModel {
   hull: THREE.BufferGeometry[]; // LOD 0, 1
@@ -96,563 +73,28 @@ export interface VehicleModel {
   turretZ: number;
   muzzleY: number;
   muzzleZ: number;
+  /** What turns on an aircraft: each is drawn turning where it sits on the airframe. */
+  rotors?: Rotor[];
+  /** The shapes the rotors are drawn with, near and middle level each: `Rotor.shape` picks one. */
+  rotorShapes?: THREE.BufferGeometry[][];
+  /** An aircraft's model sits this far above its own origin (aircraft.ts): draw it that much lower. */
+  lift?: number;
+  /** A helicopter's airframe in two pieces, for the wrecks: the tail snaps off. */
+  wreck?: { body: THREE.BufferGeometry; tail: THREE.BufferGeometry };
 }
-export type TankModel = VehicleModel;
-
-/** Turret ring position on the hull, and the muzzle relative to the turret pivot. */
-export const TURRET_Y = 0.7;
-export const TURRET_Z = -0.08;
-export const MUZZLE_Z = 2.2;
-export const MUZZLE_Y = 0.14;
-
-/** A low, wedge-fronted main battle tank: original design, generic present-day shapes. */
-export function buildTank(): TankModel {
-  const tint = { team: TINT };
-  const h: THREE.BufferGeometry[] = [];
-  // Hull tub, sponsons with a sloped glacis, engine deck.
-  h.push(box(1.02, 0.3, 2.36, { at: [0, 0.37, 0], color: PAINT_DARK, ...tint }));
-  h.push(box(1.46, 0.2, 2.5, { at: [0, 0.6, -0.02], top: [0.94, 0.8], shear: -0.14, ...tint }));
-  h.push(box(1.0, 0.05, 0.62, { at: [0, 0.715, -0.9], color: PAINT_DARK, ...tint }));
-  for (let k = 0; k < 4; k++) {
-    h.push(box(0.84, 0.02, 0.07, { at: [0, 0.75, -0.68 - k * 0.14], color: STEEL }));
-  }
-  h.push(box(0.5, 0.03, 0.34, { at: [0, 0.69, 0.62], rot: [0.5, 0, 0], team: 1 }));
-  for (const s of [-1, 1]) {
-    // Track run, skirt, fender, wheels.
-    h.push(box(0.3, 0.36, 2.56, { at: [s * 0.6, 0.2, 0], color: RUBBER, top: [1, 1.04] }));
-    h.push(box(0.05, 0.24, 2.3, { at: [s * 0.755, 0.42, -0.04], ...tint }));
-    h.push(box(0.055, 0.1, 0.7, { at: [s * 0.76, 0.46, -0.2], team: 1 }));
-    h.push(box(0.36, 0.03, 2.62, { at: [s * 0.6, 0.5, 0], color: PAINT_DARK, ...tint }));
-    for (let k = 0; k < 6; k++) {
-      h.push(cyl(0.135, 0.07, 'x', { at: [s * 0.74, 0.15, -0.95 + k * 0.38], color: STEEL }));
-    }
-    h.push(cyl(0.11, 0.07, 'x', { at: [s * 0.74, 0.27, 1.2], color: STEEL }, 8));
-    h.push(cyl(0.12, 0.07, 'x', { at: [s * 0.74, 0.27, -1.2], color: STEEL }, 8));
-    h.push(box(0.12, 0.06, 0.05, { at: [s * 0.45, 0.6, 1.1], color: 0xd8d2b0 })); // headlight
-    h.push(box(0.1, 0.1, 0.3, { at: [s * 0.62, 0.62, -1.02], color: STEEL })); // exhaust
-    h.push(cyl(0.11, 0.5, 'x', { at: [s * 0.3, 0.52, -1.33], color: PAINT_DARK, ...tint }, 8));
-  }
-  h.push(box(0.9, 0.04, 0.04, { at: [0, 0.3, 1.2], color: STEEL })); // tow bar
-
-  const t: THREE.BufferGeometry[] = [];
-  // Turret shell, arrow-shaped front armour, bustle with stowage rack.
-  t.push(box(1.0, 0.28, 1.1, { at: [0, 0.14, 0], top: [0.82, 0.86], ...tint }));
-  for (const s of [-1, 1]) {
-    t.push(
-      box(0.5, 0.25, 0.5, {
-        at: [s * 0.24, 0.13, 0.5],
-        rot: [0, s * 0.42, 0],
-        top: [0.8, 0.8],
-        ...tint,
-      }),
-    );
-    t.push(box(0.1, 0.16, 0.9, { at: [s * 0.53, 0.14, -0.1], color: PAINT_DARK, ...tint }));
-    for (let k = 0; k < 3; k++) {
-      t.push(
-        cyl(
-          0.03,
-          0.12,
-          'z',
-          { at: [s * 0.6, 0.12 + k * 0.065, 0.28], rot: [0, s * 0.5, 0], color: STEEL },
-          6,
-        ),
-      );
-    }
-  }
-  t.push(box(0.92, 0.2, 0.5, { at: [0, 0.14, -0.74], color: PAINT_DARK, ...tint }));
-  t.push(box(0.98, 0.03, 0.03, { at: [0, 0.26, -1.0], color: STEEL }));
-  t.push(box(0.56, 0.02, 0.4, { at: [0, 0.25, -0.74], team: 1 })); // recognition panel
-  t.push(box(0.34, 0.22, 0.24, { at: [0, 0.14, 0.72], color: PAINT_DARK, ...tint })); // mantlet
-  // Gun: barrel, thermal sleeve, bore evacuator, muzzle.
-  t.push(cyl(0.05, 1.5, 'z', { at: [0, MUZZLE_Y, 1.45], color: STEEL }));
-  t.push(cyl(0.065, 0.55, 'z', { at: [0, MUZZLE_Y, 1.1], ...tint }));
-  t.push(cyl(0.085, 0.24, 'z', { at: [0, MUZZLE_Y, 1.62], ...tint }));
-  t.push(cyl(0.062, 0.08, 'z', { at: [0, MUZZLE_Y, MUZZLE_Z - 0.04], color: RUBBER }));
-  // Roof: commander's cupola with remote gun, loader's hatch, sight, antenna.
-  t.push(cyl(0.17, 0.07, 'y', { at: [-0.24, 0.31, -0.1], color: PAINT_DARK, ...tint }));
-  t.push(cyl(0.14, 0.03, 'y', { at: [0.26, 0.29, -0.16], color: PAINT_DARK, ...tint }));
-  t.push(box(0.1, 0.1, 0.16, { at: [-0.24, 0.4, -0.1], color: STEEL }));
-  t.push(cyl(0.015, 0.42, 'z', { at: [-0.24, 0.41, 0.16], color: RUBBER }, 5));
-  t.push(box(0.16, 0.12, 0.14, { at: [0.28, 0.33, 0.28], color: STEEL }));
-  t.push(box(0.012, 0.75, 0.012, { at: [0.4, 0.62, -0.9], color: RUBBER }));
-
-  const hull1 = merge([
-    box(1.02, 0.3, 2.36, { at: [0, 0.37, 0], color: PAINT_DARK, ...tint }),
-    box(1.46, 0.2, 2.5, { at: [0, 0.6, -0.02], top: [0.94, 0.8], shear: -0.14, ...tint }),
-    box(0.3, 0.36, 2.56, { at: [-0.6, 0.2, 0], color: RUBBER }),
-    box(0.3, 0.36, 2.56, { at: [0.6, 0.2, 0], color: RUBBER }),
-    box(0.055, 0.12, 0.8, { at: [-0.76, 0.46, -0.2], team: 1 }),
-    box(0.055, 0.12, 0.8, { at: [0.76, 0.46, -0.2], team: 1 }),
-  ]);
-  const turret1 = merge([
-    box(1.0, 0.28, 1.5, { at: [0, 0.14, 0.1], top: [0.82, 0.8], ...tint }),
-    box(0.92, 0.2, 0.5, { at: [0, 0.14, -0.74], color: PAINT_DARK, ...tint }),
-    box(0.56, 0.02, 0.4, { at: [0, 0.25, -0.74], team: 1 }),
-    box(0.1, 0.1, 1.5, { at: [0, MUZZLE_Y, 1.45], color: STEEL }),
-  ]);
-  // At this distance a tank is a few pixels: silhouette and team colour are all that count.
-  const far = merge([
-    box(1.46, 0.6, 2.5, { at: [0, 0.3, 0], team: 0.45 }),
-    box(0.95, 0.3, 1.3, { at: [0, 0.82, -0.1], team: 0.8 }),
-    box(0.12, 0.12, 1.4, { at: [0, 0.84, 1.2], color: STEEL }),
-  ]);
-  return {
-    hull: [merge(h), hull1],
-    turret: [merge(t), turret1],
-    far,
-    turretY: TURRET_Y,
-    turretZ: TURRET_Z,
-    muzzleY: MUZZLE_Y,
-    muzzleZ: MUZZLE_Z,
-  };
-}
-
-export interface VehicleSpec {
-  /** Hull length, width and height (without running gear). */
-  len: number;
-  wid: number;
-  height: number;
-  /** Wheels per side; 0 = tracked. */
-  wheels: number;
-  /** Turret box and where it sits along the hull. */
-  turret: { w: number; h: number; d: number; z: number };
-  /** Gun barrels on the turret: sideways offset, length, radius, elevation in radians. */
-  barrels: { x: number; len: number; r: number; pitch: number }[];
-  /** A radar panel on the turret roof. */
-  radar?: boolean;
-  /** An antenna mast of this height on the turret, with cross-pieces. */
-  mast?: number;
-}
-
-/**
- * A box-bodied armoured vehicle from a few numbers: sloped nose, wheels or tracks, a turret
- * with its guns. Every vehicle that is not the tank is one of these.
- */
-export function buildVehicle(v: VehicleSpec): VehicleModel {
-  const tint = { team: TINT };
-  const gear = v.wheels > 0 ? 0.42 : 0.34;
-  const top = gear + v.height;
-  const h: THREE.BufferGeometry[] = [];
-  h.push(
-    box(v.wid * 0.78, v.height * 0.5, v.len * 0.94, {
-      at: [0, gear * 0.6 + v.height * 0.25, 0],
-      color: PAINT_DARK,
-      ...tint,
-    }),
-  );
-  h.push(
-    box(v.wid, v.height * 0.62, v.len, {
-      at: [0, top - v.height * 0.31, 0],
-      top: [0.86, 0.84],
-      shear: -v.len * 0.05,
-      ...tint,
-    }),
-  );
-  h.push(box(v.wid * 0.4, 0.02, v.len * 0.13, { at: [0, top + 0.005, -v.len * 0.36], team: 1 }));
-  for (const s of [-1, 1]) {
-    const x = s * v.wid * 0.5;
-    if (v.wheels > 0) {
-      for (let k = 0; k < v.wheels; k++) {
-        const z = -v.len * 0.36 + (k * v.len * 0.72) / (v.wheels - 1);
-        h.push(cyl(0.2, 0.16, 'x', { at: [x - s * 0.06, 0.2, z], color: RUBBER }, 10));
-        h.push(cyl(0.09, 0.17, 'x', { at: [x - s * 0.05, 0.2, z], color: STEEL }, 6));
-      }
-    } else {
-      h.push(box(0.28, 0.34, v.len * 1.02, { at: [x - s * 0.1, 0.18, 0], color: RUBBER }));
-      for (let k = 0; k < 5; k++) {
-        const z = -v.len * 0.4 + k * v.len * 0.2;
-        h.push(cyl(0.12, 0.07, 'x', { at: [x + s * 0.045, 0.14, z], color: STEEL }, 8));
-      }
-    }
-    h.push(
-      box(0.04, v.height * 0.22, v.len * 0.3, { at: [x * 0.99, top - v.height * 0.3, 0], team: 1 }),
-    );
-    h.push(
-      box(0.1, 0.05, 0.04, { at: [x * 0.7, top - v.height * 0.35, v.len * 0.46], color: 0xd8d2b0 }),
-    );
-  }
-  h.push(
-    box(v.wid * 0.6, v.height * 0.5, 0.04, {
-      at: [0, gear + v.height * 0.4, -v.len * 0.5],
-      color: PAINT_DARK,
-    }),
-  );
-
-  const tu = v.turret;
-  const t: THREE.BufferGeometry[] = [];
-  const t1: THREE.BufferGeometry[] = [];
-  t.push(box(tu.w, tu.h, tu.d, { at: [0, tu.h / 2, 0], top: [0.8, 0.8], ...tint }));
-  t.push(box(tu.w * 0.4, 0.02, tu.d * 0.25, { at: [0, tu.h + 0.005, -tu.d * 0.28], team: 1 }));
-  t.push(box(0.12, 0.1, 0.12, { at: [tu.w * 0.25, tu.h + 0.05, 0.05], color: STEEL }));
-  t1.push(box(tu.w, tu.h, tu.d, { at: [0, tu.h / 2, 0], top: [0.8, 0.8], team: 0.3 }));
-  let muzzleY = tu.h * 0.55;
-  let muzzleZ = tu.d / 2;
-  for (const b of v.barrels) {
-    const cy = tu.h * 0.55 + (Math.sin(b.pitch) * b.len) / 2;
-    const cz = tu.d * 0.4 + (Math.cos(b.pitch) * b.len) / 2;
-    const o = { at: [b.x, cy, cz] as Vec3, rot: [-b.pitch, 0, 0] as Vec3, color: STEEL };
-    t.push(cyl(b.r, b.len, 'z', o, 8));
-    t1.push(box(b.r * 2, b.r * 2, b.len, o));
-    muzzleY = tu.h * 0.55 + Math.sin(b.pitch) * b.len;
-    muzzleZ = tu.d * 0.4 + Math.cos(b.pitch) * b.len;
-  }
-  if (v.radar) {
-    const o = {
-      at: [0, tu.h + 0.28, -tu.d * 0.3] as Vec3,
-      rot: [-0.3, 0, 0] as Vec3,
-      color: PAINT_DARK,
-    };
-    t.push(box(tu.w * 0.8, 0.42, 0.05, o));
-    t1.push(box(tu.w * 0.8, 0.42, 0.05, o));
-    t.push(box(0.08, 0.3, 0.08, { at: [0, tu.h + 0.1, -tu.d * 0.3], color: STEEL }));
-  }
-  if (v.mast) {
-    const m = v.mast;
-    t.push(box(0.05, m, 0.05, { at: [0, tu.h + m / 2, -tu.d * 0.25], color: STEEL }));
-    t1.push(box(0.07, m, 0.07, { at: [0, tu.h + m / 2, -tu.d * 0.25], color: STEEL }));
-    for (let k = 0; k < 3; k++) {
-      const y = tu.h + m * (0.55 + k * 0.2);
-      const o = { at: [0, y, -tu.d * 0.25] as Vec3, rot: [0, k * 1.05, 0] as Vec3, color: RUBBER };
-      t.push(box(0.9 - k * 0.2, 0.025, 0.025, o));
-      t1.push(box(0.9 - k * 0.2, 0.04, 0.04, o));
-    }
-    for (const sx of [-1, 1]) {
-      t.push(
-        cyl(0.012, 1.3, 'y', { at: [sx * tu.w * 0.4, tu.h + 0.65, tu.d * 0.35], color: RUBBER }, 5),
-      );
-    }
-  }
-  const hull1 = merge([
-    box(v.wid, v.height, v.len, { at: [0, gear + v.height / 2, 0], top: [0.86, 0.84], ...tint }),
-    box(v.wid * 0.96, gear, v.len * 0.9, { at: [0, gear / 2, 0], color: RUBBER }),
-    box(v.wid * 0.5, 0.02, v.len * 0.2, { at: [0, top + 0.005, -v.len * 0.33], team: 1 }),
-  ]);
-  const longest = v.barrels.reduce((m, b) => Math.max(m, b.len * Math.cos(b.pitch)), 0);
-  const far = merge([
-    ...(v.mast
-      ? [box(0.12, v.mast, 0.12, { at: [0, top + tu.h + v.mast / 2, tu.z], color: STEEL })]
-      : []),
-    ...(v.radar
-      ? [box(tu.w, 0.4, 0.1, { at: [0, top + tu.h + 0.3, tu.z - tu.d * 0.3], color: PAINT_DARK })]
-      : []),
-    box(v.wid, top, v.len, { at: [0, top / 2, 0], team: 0.45 }),
-    box(tu.w, tu.h + 0.1, tu.d, { at: [0, top + tu.h / 2, tu.z], team: 0.8 }),
-    box(0.1, 0.1, longest || 0.1, {
-      at: [0, top + tu.h * 0.6, tu.z + tu.d / 2 + longest / 2],
-      color: STEEL,
-    }),
-  ]);
-  return {
-    hull: [merge(h), hull1],
-    turret: [merge(t), merge(t1)],
-    far,
-    turretY: top,
-    turretZ: tu.z,
-    muzzleY,
-    muzzleZ,
-  };
-}
-
-/** A tracked gun carriage: a tall slab-sided turret far back, a very long barrel held high. */
-export function buildArtillery(): VehicleModel {
-  return buildVehicle({
-    len: 2.7,
-    wid: 1.3,
-    height: 0.5,
-    wheels: 0,
-    turret: { w: 1.05, h: 0.6, d: 1.3, z: -0.45 },
-    barrels: [{ x: 0, len: 2.6, r: 0.06, pitch: 0.45 }],
-  });
-}
-
-/** Tracked, twin cannon pointing at the sky, a radar panel above them. */
-export function buildAirDefence(): VehicleModel {
-  return buildVehicle({
-    len: 2.4,
-    wid: 1.25,
-    height: 0.45,
-    wheels: 0,
-    turret: { w: 0.95, h: 0.4, d: 0.95, z: 0 },
-    barrels: [
-      { x: -0.3, len: 1.25, r: 0.03, pitch: 0.55 },
-      { x: 0.3, len: 1.25, r: 0.03, pitch: 0.55 },
-    ],
-    radar: true,
-  });
-}
-
-/** A six-wheeled truck with a box body and a mast full of antennas. */
-export function buildJammer(): VehicleModel {
-  return buildVehicle({
-    len: 2.5,
-    wid: 1.1,
-    height: 0.4,
-    wheels: 3,
-    turret: { w: 1.0, h: 0.62, d: 1.5, z: -0.35 },
-    barrels: [],
-    mast: 2.3,
-  });
-}
-
-const DRONE_GREY = 0x8b908d;
-
-/** A small fixed-wing reconnaissance drone: long straight wing, twin tail, pusher propeller. */
-/** Logistics truck: a cab, and a covered load bed where other vehicles carry a turret. */
-export function buildTruck(): VehicleModel {
-  return buildVehicle({
-    len: 3.1,
-    wid: 1.15,
-    height: 0.42,
-    wheels: 3,
-    turret: { w: 1.12, h: 0.85, d: 1.9, z: -0.5 },
-    barrels: [],
-  });
-}
-
-export function buildReconDrone(): VehicleModel {
-  const g = merge([
-    box(0.22, 0.2, 1.3, { at: [0, 0, 0.05], top: [0.7, 0.9], color: DRONE_GREY }),
-    box(2.6, 0.035, 0.34, { at: [0, 0.1, 0.1], color: DRONE_GREY }),
-    box(0.5, 0.036, 0.3, { at: [-0.95, 0.102, 0.1], team: 1 }),
-    box(0.5, 0.036, 0.3, { at: [0.95, 0.102, 0.1], team: 1 }),
-    box(0.03, 0.3, 0.22, { at: [-0.25, 0.14, -0.75], rot: [0, 0, 0.5], color: DRONE_GREY }),
-    box(0.03, 0.3, 0.22, { at: [0.25, 0.14, -0.75], rot: [0, 0, -0.5], color: DRONE_GREY }),
-    box(0.035, 0.035, 0.7, { at: [0, 0.02, -0.45], color: STEEL }),
-    cyl(0.1, 0.1, 'y', { at: [0, -0.13, 0.4], color: RUBBER }, 8), // sensor ball
-  ]);
-  const far = merge([
-    box(0.3, 0.2, 1.3, { at: [0, 0, 0], color: DRONE_GREY, team: 0.4 }),
-    box(2.6, 0.08, 0.4, { at: [0, 0.1, 0.1], color: DRONE_GREY, team: 0.6 }),
-  ]);
-  return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
-}
-
-/** A one-way attack quadcopter: four arms, four rotors, a warhead slung underneath. */
-export function buildStrikeDrone(): VehicleModel {
-  const parts = [
-    box(0.2, 0.1, 0.34, { at: [0, 0, 0], color: RUBBER }),
-    cyl(0.07, 0.5, 'z', { at: [0, -0.1, 0.12], color: 0x4a4f3c }, 8), // warhead
-    box(0.08, 0.02, 0.1, { at: [0, 0.06, -0.08], team: 1 }),
-  ];
-  for (const [x, z] of [
-    [-1, -1],
-    [1, -1],
-    [-1, 1],
-    [1, 1],
-  ]) {
-    parts.push(
-      box(0.04, 0.03, 0.62, {
-        at: [x * 0.2, 0.02, z * 0.2],
-        rot: [0, x * z * 0.785, 0],
-        color: RUBBER,
-      }),
-    );
-    parts.push(cyl(0.2, 0.012, 'y', { at: [x * 0.4, 0.07, z * 0.4], color: 0x6f7472 }, 10));
-  }
-  const g = merge(parts);
-  const far = box(0.9, 0.14, 0.9, { at: [0, 0, 0], color: RUBBER, team: 0.5 });
-  return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
-}
-
-const AIRFRAME = 0x4b5140;
-const GLASS = 0x1c2428;
-
-/**
- * A helicopter: `gunship` is the narrow tandem two-seater with stub wings and rocket pods,
- * otherwise the fat-bodied transport with a sliding door. The rotor is the "turret", which
- * the unit renderer spins.
- */
-function helicopterParts(gunship: boolean): THREE.BufferGeometry[] {
-  const wid = gunship ? 0.62 : 1.05;
-  const tall = gunship ? 0.8 : 1.0;
-  const parts = [
-    // Cabin, nose and the boom to the tail.
-    box(wid, tall, 2.3, { at: [0, 0, 0.2], top: [0.8, 0.86], color: AIRFRAME, team: 0.1 }),
-    box(wid * 0.8, tall * 0.6, 0.8, { at: [0, -0.12, 1.6], top: [0.6, 0.5], color: AIRFRAME }),
-    box(wid * 0.74, tall * 0.4, 0.75, { at: [0, 0.14, 1.28], top: [0.8, 0.6], color: GLASS }),
-    box(0.2, 0.24, 2.5, { at: [0, 0.14, -2.1], top: [0.7, 0.6], color: AIRFRAME }),
-    box(0.06, 0.8, 0.46, { at: [0, 0.5, -3.2], top: [1, 0.55], color: AIRFRAME }),
-    box(0.9, 0.05, 0.3, { at: [0, 0.22, -3.0], team: 1 }),
-    cyl(0.42, 0.03, 'x', { at: [0.12, 0.62, -3.25], color: 0x6f7472 }, 10), // tail rotor disc
-    // Engines on the roof and the mast.
-    box(wid * 0.9, 0.26, 1.2, { at: [0, tall / 2 + 0.1, -0.1], top: [0.8, 0.8], color: AIRFRAME }),
-    cyl(0.07, 0.3, 'y', { at: [0, tall / 2 + 0.34, 0.05], color: STEEL }, 6),
-    // Skids.
-    box(0.05, 0.05, 1.9, { at: [-wid * 0.62, -tall / 2 - 0.2, 0.25], color: STEEL }),
-    box(0.05, 0.05, 1.9, { at: [wid * 0.62, -tall / 2 - 0.2, 0.25], color: STEEL }),
-    box(wid * 1.24, 0.04, 0.05, { at: [0, -tall / 2 - 0.1, 0.8], color: STEEL }),
-    box(wid * 1.24, 0.04, 0.05, { at: [0, -tall / 2 - 0.1, -0.3], color: STEEL }),
-  ];
-  if (gunship) {
-    parts.push(
-      box(2.2, 0.07, 0.5, { at: [0, -0.12, 0.1], color: AIRFRAME, team: 0.3 }),
-      cyl(0.16, 0.9, 'z', { at: [-0.8, -0.28, 0.2], color: 0x3a3d33 }, 8),
-      cyl(0.16, 0.9, 'z', { at: [0.8, -0.28, 0.2], color: 0x3a3d33 }, 8),
-      cyl(0.035, 0.6, 'z', { at: [0, -0.42, 1.9], color: STEEL }, 6), // chin gun
-    );
-  } else {
-    parts.push(
-      box(0.03, tall * 0.55, 0.9, { at: [-wid / 2 - 0.01, 0, 0.1], color: 0x33382c }),
-      box(0.03, tall * 0.55, 0.9, { at: [wid / 2 + 0.01, 0, 0.1], color: 0x33382c }),
-      box(wid + 0.04, 0.1, 0.5, { at: [0, 0.05, -0.75], team: 1 }),
-    );
-  }
-  return parts;
-}
-
-export function buildHelicopter(gunship: boolean): VehicleModel {
-  const wid = gunship ? 0.62 : 1.05;
-  const tall = gunship ? 0.8 : 1.0;
-  const parts = helicopterParts(gunship);
-  const g = merge(parts);
-  const span = gunship ? 4.6 : 5.2;
-  const rotor = merge([
-    box(span, 0.03, 0.2, { at: [0, 0, 0], color: RUBBER }),
-    box(0.2, 0.03, span, { at: [0, 0, 0], color: RUBBER }),
-    cyl(0.16, 0.08, 'y', { at: [0, 0, 0], color: STEEL }, 8),
-  ]);
-  const far = merge([
-    box(wid, tall, 2.6, { at: [0, 0, 0.3], color: AIRFRAME, team: 0.4 }),
-    box(0.22, 0.3, 2.6, { at: [0, 0.14, -2.1], color: AIRFRAME, team: 0.4 }),
-    cyl(span / 2, 0.04, 'y', { at: [0, tall / 2 + 0.5, 0.05], color: 0x6f7472 }, 10),
-  ]);
-  return {
-    hull: [g, g.clone()],
-    turret: [rotor, rotor.clone()],
-    far,
-    turretY: tall / 2 + 0.5,
-    turretZ: 0.05,
-    muzzleY: -tall / 2 - 0.9,
-    muzzleZ: 1.2,
-  };
-}
-
-/**
- * A helicopter that came down (visual only; it stays for the rest of the game). Three ways
- * to lie, each the airframe itself turned over or nose-first into the ground, with the tail
- * boom snapped, the rotor gone and a bent blade lying alongside. Built from the flying
- * model's own parts, so the paint and the wear match; the burn material scorches it.
- */
-export function buildHelicopterWrecks(gunship: boolean): THREE.BufferGeometry[] {
-  const wid = gunship ? 0.62 : 1.05;
-  const pose = (roll: number, pitch: number, yaw: number, snapTail: boolean) => {
-    const parts = helicopterParts(gunship);
-    // The tail (boom is part 3, fin 4, stabiliser 5, tail rotor disc 6) is thrown clear of the
-    // fuselage when the boom snaps.
-    const air = merge(snapTail ? [...parts.slice(0, 3), ...parts.slice(7)] : parts.slice());
-    let tail: THREE.BufferGeometry | null = null;
-    if (snapTail) {
-      tail = merge(parts.slice(3, 7));
-      tail.rotateY(0.55);
-      tail.rotateZ(0.3);
-      tail.translate(wid * 0.9, 0.05, -0.2);
-    }
-    const blades = merge([
-      box(2.1, 0.03, 0.18, { at: [0, 0, 0], rot: [0.0, 0.3, 0.12], color: RUBBER }),
-      box(1.4, 0.03, 0.18, { at: [0.9, 0, -1.1], rot: [0.1, -0.9, 0], color: RUBBER }),
-    ]);
-    blades.translate(-wid * 1.7, 0.07, 0.4);
-    const all = mergeGeometries([air, ...(tail ? [tail] : []), blades]);
-    all.applyMatrix4(
-      new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ')),
-    );
-    all.computeBoundingBox();
-    // Sits on the ground with a little of it sunk in.
-    all.translate(0, 0.03 - all.boundingBox!.min.y, 0);
-    return all;
-  };
-  return [
-    pose(1.42, 0.12, 0.4, false), // on its side
-    pose(0.1, 0.62, -0.5, true), // nose into the ground, tail snapped off
-    pose(-0.18, -0.12, 1.1, true), // upright and broken, tilted on a skid
-  ];
-}
-
-/** A four-engined transport plane with a high wing and a tall tail. */
-export function buildTransportPlane(): VehicleModel {
-  const parts = [
-    cyl(0.8, 8.2, 'z', { at: [0, 0, 0], color: 0x596057 }, 10),
-    box(1.3, 1.2, 1.6, { at: [0, -0.05, 4.6], top: [0.5, 0.35], color: 0x596057 }),
-    box(1.1, 0.4, 0.9, { at: [0, 0.3, 4.3], top: [0.8, 0.5], color: GLASS }),
-    box(1.2, 1.1, 2.6, { at: [0, 0.25, -5.2], top: [0.4, 0.5], color: 0x596057 }),
-    // Wing on top of the fuselage, with a band in the army's colour.
-    box(13, 0.16, 1.7, { at: [0, 0.82, 0.5], color: 0x596057 }),
-    box(1.6, 0.17, 1.72, { at: [-4.6, 0.82, 0.5], team: 1 }),
-    box(1.6, 0.17, 1.72, { at: [4.6, 0.82, 0.5], team: 1 }),
-    // Tail.
-    box(0.14, 2.3, 1.5, { at: [0, 1.5, -5.8], top: [1, 0.55], color: 0x596057 }),
-    box(4.6, 0.1, 1.0, { at: [0, 0.75, -5.9], color: 0x596057 }),
-    box(0.16, 0.7, 1.2, { at: [0, 2.2, -5.9], team: 1 }),
-  ];
-  for (const x of [-4.1, -2.1, 2.1, 4.1]) {
-    parts.push(cyl(0.3, 1.5, 'z', { at: [x, 0.6, 1.2], color: 0x3f443c }, 8));
-    parts.push(cyl(0.95, 0.03, 'z', { at: [x, 0.6, 2.0], color: 0x7b807c }, 10)); // propeller disc
-  }
-  const g = merge(parts);
-  const far = merge([
-    box(1.5, 1.4, 11, { at: [0, 0, -0.4], color: 0x596057, team: 0.2 }),
-    box(13, 0.2, 1.7, { at: [0, 0.8, 0.5], color: 0x596057, team: 0.5 }),
-    box(0.2, 2.2, 1.5, { at: [0, 1.5, -5.8], color: 0x596057, team: 0.6 }),
-  ]);
-  return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
-}
-
-/**
- * A strike jet (I7): a single-seat fighter-bomber in grey, swept wings, twin fins, the
- * load on pylons under the wings, the army's colour only on the fins.
- */
-export function buildJet(): VehicleModel {
-  const GREY = 0x6a7076;
-  const DARK = 0x4a4f54;
-  const parts = [
-    cyl(0.55, 8.6, 'z', { at: [0, 0, -0.4], color: GREY }, 12),
-    // Nose cone and canopy.
-    box(0.95, 0.9, 2.2, {
-      at: [0, 0, 4.9],
-      rot: [Math.PI / 2, 0, 0],
-      top: [0.18, 0.22],
-      color: GREY,
-    }),
-    box(0.5, 0.4, 1.7, { at: [0, 0.55, 2.6], top: [0.55, 0.6], color: GLASS }),
-    // Intakes either side.
-    box(0.45, 0.6, 2.2, { at: [-0.7, -0.1, 1.0], color: DARK }),
-    box(0.45, 0.6, 2.2, { at: [0.7, -0.1, 1.0], color: DARK }),
-    // Swept wings.
-    box(3.8, 0.12, 2.1, { at: [-2.2, -0.05, -0.9], rot: [0, -0.5, 0], color: GREY }),
-    box(3.8, 0.12, 2.1, { at: [2.2, -0.05, -0.9], rot: [0, 0.5, 0], color: GREY }),
-    // Tailplanes and twin fins with the army's colour.
-    box(1.8, 0.1, 1.2, { at: [-1.1, 0, -4.2], rot: [0, -0.45, 0], color: GREY }),
-    box(1.8, 0.1, 1.2, { at: [1.1, 0, -4.2], rot: [0, 0.45, 0], color: GREY }),
-    box(0.1, 1.5, 1.5, {
-      at: [-0.45, 0.85, -3.9],
-      rot: [0, 0, -0.25],
-      top: [1, 0.5],
-      shear: -0.5,
-      color: GREY,
-    }),
-    box(0.1, 1.5, 1.5, {
-      at: [0.45, 0.85, -3.9],
-      rot: [0, 0, 0.25],
-      top: [1, 0.5],
-      shear: -0.5,
-      color: GREY,
-    }),
-    box(0.11, 0.5, 0.8, { at: [-0.62, 1.4, -4.2], rot: [0, 0, -0.25], team: 1 }),
-    box(0.11, 0.5, 0.8, { at: [0.62, 1.4, -4.2], rot: [0, 0, 0.25], team: 1 }),
-    // Exhausts.
-    cyl(0.32, 0.5, 'z', { at: [-0.3, -0.05, -4.85], color: 0x2a2b2c }, 10),
-    cyl(0.32, 0.5, 'z', { at: [0.3, -0.05, -4.85], color: 0x2a2b2c }, 10),
-    // The load under the wings.
-    cyl(0.2, 2.0, 'z', { at: [-1.9, -0.45, -0.4], color: 0x4b5141 }, 8),
-    cyl(0.2, 2.0, 'z', { at: [1.9, -0.45, -0.4], color: 0x4b5141 }, 8),
-  ];
-  const g = merge(parts);
-  const far = merge([
-    box(1.2, 1.0, 10, { at: [0, 0, 0], color: GREY, team: 0.2 }),
-    box(8, 0.2, 2.4, { at: [0, 0, -0.9], color: GREY, team: 0.4 }),
-    box(1.4, 1.5, 1.4, { at: [0, 0.9, -3.9], color: GREY, team: 0.7 }),
-  ]);
-  return { hull: [g, g.clone()], turret: [], far, turretY: 0, turretZ: 0, muzzleY: 0, muzzleZ: 0 };
+/** A rotor's or a propeller's hub on the airframe, the axis it turns about and how fast. */
+export interface Rotor {
+  x: number;
+  y: number;
+  z: number;
+  /** `y` a main rotor, `x` a tail rotor, `z` a propeller. */
+  axis: 'x' | 'y' | 'z';
+  /** Radians a second, signed: two rotors on one airframe turn opposite ways. */
+  rate: number;
+  /** Index into the model's `rotorShapes`. */
+  shape: number;
+  /** Its radius. */
+  r: number;
 }
 
 /** A free-fall bomb on its way down, nose first: body, the fins at the top. */
@@ -668,18 +110,6 @@ export function buildBomb(): THREE.BufferGeometry {
     box(0.7, 0.4, 0.05, { at: [0, 0.85, 0], color: 0x3f4434 }),
     box(0.05, 0.4, 0.7, { at: [0, 0.85, 0], color: 0x3f4434 }),
   ]);
-}
-
-/** Eight wheels, a boat-shaped hull, a small turret with a long thin autocannon. */
-export function buildIfv(): VehicleModel {
-  return buildVehicle({
-    len: 2.3,
-    wid: 1.1,
-    height: 0.52,
-    wheels: 4,
-    turret: { w: 0.6, h: 0.22, d: 0.7, z: 0.15 },
-    barrels: [{ x: 0, len: 0.95, r: 0.028, pitch: 0.03 }],
-  });
 }
 
 export interface InfantryModel {
@@ -713,46 +143,126 @@ export const TEAM_OFFSETS: readonly [number, number][] = [
   [0.42, -0.3],
 ];
 
-/** An anti-tank missile launcher on its tripod: a fat tube, a sight, three legs. */
 /**
- * The mortar team's weapon (I6): a tube on a bipod, its base plate on the ground, a few
- * bombs in their cases beside it. The crew are the team's own men (TEAM_OFFSETS).
+ * Where a crew-served weapon stands in its team, ahead of the unit's centre, and where its
+ * two men kneel to serve it (drills.ts), in map units. A man is `MAN` units to the metre.
  */
-export function buildMortar(): { tube: THREE.BufferGeometry; far: THREE.BufferGeometry } {
+const MAN = 0.62 / 1.8;
+export const MORTAR_AT: readonly [number, number] = [0, 0.3];
+export const LAUNCHER_AT: readonly [number, number] = [0, 0.3];
+/** How high the mortar's muzzle is and how far ahead of its base plate, in metres. */
+export const MORTAR_MUZZLE: readonly [number, number] = [1.1, 0.6];
+
+/**
+ * The mortar team's weapon (I6), at the men's own scale: a tube on a bipod, its base plate
+ * on the ground, a few bombs in their cases beside it. The alliance's is the plain medium
+ * tube; Russia's sits on a wide square plate with a longer barrel; China's is the short
+ * one with a carrying handle.
+ */
+export function buildMortar(faction = 0): {
+  tube: THREE.BufferGeometry;
+  far: THREE.BufferGeometry;
+} {
   const g: THREE.BufferGeometry[] = [];
-  // Base plate, then the tube leaning forward at about 50 degrees from the ground.
-  g.push(cyl(0.2, 0.04, 'y', { at: [0, 0.02, -0.18], color: STEEL }, 10));
-  g.push(cyl(0.055, 0.95, 'z', { at: [0, 0.37, 0.1], rot: [-0.87, 0, 0], color: 0x3a3e30 }, 8));
-  g.push(cyl(0.07, 0.08, 'z', { at: [0, 0.69, 0.4], rot: [-0.87, 0, 0], color: STEEL }, 8));
-  // The bipod's two legs and the sight.
-  for (const x of [-0.16, 0.16]) {
-    g.push(box(0.03, 0.5, 0.03, { at: [x, 0.24, 0.32], rot: [0.2, 0, x * 1.6], color: STEEL }));
+  const [my, mz] = MORTAR_MUZZLE;
+  const long = faction === 2 ? 1.12 : faction === 3 ? 0.9 : 1;
+  const len = Math.hypot(my, mz);
+  const tilt = -Math.atan2(my, mz);
+  const along = (t: number): [number, number, number] => [0, my * t, mz * t];
+  if (faction === 2) g.push(box(0.5, 0.05, 0.5, { at: [0, 0.025, -0.02], color: STEEL }));
+  else g.push(cyl(0.26, 0.05, 'y', { at: [0, 0.025, -0.02], color: STEEL }, 10));
+  g.push(cyl(0.06, len * long, 'z', { at: along(0.5 * long), rot: [tilt, 0, 0] }, 8));
+  g.push(cyl(0.075, 0.1, 'z', { at: along(long - 0.04), rot: [tilt, 0, 0], color: STEEL }, 8));
+  g.push(cyl(0.08, 0.12, 'z', { at: along(0.05), rot: [tilt, 0, 0], color: STEEL }, 8));
+  // The bipod: two legs from two thirds up the tube out to the ground ahead, a brace.
+  const [, cy, cz] = along(0.62);
+  for (const x of [-1, 1]) {
+    g.push(
+      box(0.03, Math.hypot(cy, 0.3) + 0.04, 0.03, {
+        at: [x * 0.15, cy / 2, cz + 0.07],
+        rot: [0.16, 0, x * Math.atan2(0.3, cy)],
+        color: STEEL,
+      }),
+    );
   }
-  g.push(box(0.07, 0.07, 0.1, { at: [-0.08, 0.5, 0.22], team: 1 }));
-  // Bomb cases, olive with a stencil of team colour.
-  g.push(box(0.16, 0.1, 0.34, { at: [0.36, 0.05, -0.12], color: 0x4a4b36 }));
-  g.push(box(0.17, 0.02, 0.06, { at: [0.36, 0.1, -0.12], team: 0.6 }));
+  g.push(box(0.2, 0.025, 0.025, { at: [0, cy * 0.55, cz + 0.1], color: STEEL }));
+  g.push(box(0.09, 0.1, 0.12, { at: [-0.1, cy + 0.03, cz - 0.02], team: 1 })); // the sight
+  if (faction === 3)
+    g.push(
+      box(0.03, 0.05, 0.22, {
+        at: [0, cy * 0.5 + 0.1, cz * 0.5 - 0.06],
+        rot: [tilt, 0, 0],
+        color: STEEL,
+      }),
+    );
+  // Bomb cases, olive with a stencil of team colour, and two bombs stood ready.
+  g.push(box(0.2, 0.14, 0.5, { at: [0.55, 0.07, -0.25] }));
+  g.push(box(0.21, 0.03, 0.1, { at: [0.55, 0.13, -0.25], team: 0.6 }));
+  g.push(box(0.2, 0.14, 0.5, { at: [0.8, 0.07, -0.2], rot: [0, 0.3, 0] }));
+  for (const [x, z] of [
+    [0.42, 0.12],
+    [0.52, 0.2],
+  ]) {
+    g.push(cyl(0.04, 0.26, 'y', { at: [x, 0.13, z], color: STEEL }, 6, 0.03));
+    g.push(cyl(0.03, 0.1, 'y', { at: [x, 0.31, z], color: STEEL }, 6, 0.008));
+  }
   const far = merge([
     ...TEAM_OFFSETS.map(([x, z]) =>
       box(0.3, 0.6, 0.3, { at: [x, 0.3, z], color: 0x3a3d2e, team: 0.7 }),
     ),
     box(0.16, 0.16, 0.8, { at: [0, 0.35, 0.1], rot: [-0.87, 0, 0], color: 0x2c2f25, team: 0.5 }),
   ]);
-  return { tube: merge(g), far };
+  return { tube: merge(g).scale(MAN, MAN, MAN), far };
 }
 
-export function buildLauncher(): { launcher: THREE.BufferGeometry; far: THREE.BufferGeometry } {
+/** How high the launcher's tube is, and how far behind its tripod the gunner's grips are, in metres. */
+export const LAUNCHER_GRIP: readonly [number, number] = [0.8, -0.32];
+
+/**
+ * An anti-tank missile launcher on its tripod, at the men's own scale. The alliance's is a
+ * fat tube with a big boxy sight beside it; Russia's a long slim tube over a low sight
+ * unit; China's a short thick tube with a round sight on top.
+ */
+export function buildLauncher(faction = 0): {
+  launcher: THREE.BufferGeometry;
+  far: THREE.BufferGeometry;
+} {
   const g: THREE.BufferGeometry[] = [];
-  g.push(cyl(0.075, 0.95, 'z', { at: [0, 0.4, 0.1], rot: [-0.06, 0, 0], color: 0x3c4030 }, 8));
-  g.push(cyl(0.09, 0.12, 'z', { at: [0, 0.43, 0.56], color: RUBBER }, 8));
-  g.push(box(0.1, 0.12, 0.2, { at: [-0.12, 0.47, 0.0], color: STEEL }));
-  g.push(box(0.05, 0.03, 0.05, { at: [-0.12, 0.54, 0.0], team: 1 }));
+  const h = LAUNCHER_GRIP[0];
+  const r = faction === 2 ? 0.075 : faction === 3 ? 0.11 : 0.095;
+  const len = faction === 2 ? 1.35 : faction === 3 ? 1.05 : 1.2;
+  g.push(cyl(r, len, 'z', { at: [0, h, 0.1], rot: [-0.05, 0, 0] }, 9));
+  g.push(cyl(r + 0.02, 0.1, 'z', { at: [0, h + 0.03, 0.1 + len / 2], color: RUBBER }, 9));
+  g.push(cyl(r + 0.02, 0.1, 'z', { at: [0, h - 0.03, 0.1 - len / 2], color: RUBBER }, 9));
+  if (faction === 2) {
+    g.push(box(0.2, 0.2, 0.3, { at: [0, h - 0.19, -0.05], color: STEEL }));
+    g.push(cyl(0.05, 0.08, 'z', { at: [0.04, h - 0.17, 0.13], color: 0x1c2428 }, 7));
+  } else if (faction === 3) {
+    g.push(cyl(0.07, 0.3, 'z', { at: [0, h + 0.19, -0.1], color: STEEL }, 8));
+    g.push(box(0.1, 0.1, 0.12, { at: [0, h + 0.13, -0.1], color: STEEL }));
+  } else {
+    g.push(box(0.2, 0.24, 0.34, { at: [0.2, h + 0.04, -0.1], color: STEEL }));
+    g.push(cyl(0.06, 0.06, 'z', { at: [0.2, h + 0.06, 0.09], color: 0x1c2428 }, 7));
+  }
+  g.push(box(0.06, 0.04, 0.06, { at: [0, h + r + 0.02, 0.3], team: 1 }));
+  // Grips at the back for the gunner, the head of the tripod, three legs.
+  g.push(box(0.3, 0.03, 0.03, { at: [0, h - 0.12, LAUNCHER_GRIP[1]], color: STEEL }));
+  g.push(box(0.03, 0.03, 0.3, { at: [0, h - 0.12, LAUNCHER_GRIP[1] + 0.15], color: STEEL }));
+  g.push(cyl(0.06, 0.14, 'y', { at: [0, h - r - 0.07, 0.05], color: STEEL }, 7));
+  const top = h - r - 0.12;
   for (const [x, z] of [
-    [0, 0.3],
-    [-0.22, -0.18],
-    [0.22, -0.18],
+    [0, 0.5],
+    [-0.42, -0.28],
+    [0.42, -0.28],
   ]) {
-    g.push(box(0.03, 0.36, 0.03, { at: [x * 0.6, 0.17, z * 0.6], rot: [z, 0, -x], color: STEEL }));
+    const run = Math.hypot(x, z);
+    g.push(
+      box(0.035, Math.hypot(top, run), 0.035, {
+        at: [x / 2, top / 2, 0.05 + z / 2],
+        rot: [Math.atan2(z, top), 0, -Math.atan2(x, top)],
+        color: STEEL,
+      }),
+    );
   }
   const far = merge([
     ...TEAM_OFFSETS.map(([x, z]) =>
@@ -760,5 +270,30 @@ export function buildLauncher(): { launcher: THREE.BufferGeometry; far: THREE.Bu
     ),
     box(0.22, 0.2, 1.1, { at: [0, 0.45, 0.15], color: 0x2c2f25, team: 0.5 }),
   ]);
-  return { launcher: merge(g), far };
+  return { launcher: merge(g).scale(MAN, MAN, MAN), far };
+}
+
+/** Every model one army is drawn with. `vehicles[kind]` is null for the kinds on foot. */
+export interface Arsenal {
+  vehicles: (VehicleModel | null)[];
+  /** The strike jet (I7), which flies as a transport plane in the sim. */
+  jet: VehicleModel;
+}
+
+/** The models of the army of `faction` (sim/factions.ts). */
+export function buildArsenal(faction: number): Arsenal {
+  const vehicles = new Array<VehicleModel | null>(KIND_COUNT).fill(null);
+  const f = faction === 2 ? 1 : faction === 3 ? 2 : 0;
+  vehicles[KIND_TANK] = [tankAlliance, tankRussia, tankChina][f]();
+  vehicles[KIND_IFV] = [ifvAlliance, ifvRussia, ifvChina][f]();
+  vehicles[KIND_ARTILLERY] = [gunAlliance, gunRussia, gunChina][f]();
+  vehicles[KIND_AD] = [adAlliance, adRussia, adChina][f]();
+  vehicles[KIND_EW] = [jammerAlliance, jammerRussia, jammerChina][f]();
+  vehicles[KIND_TRUCK] = [truckAlliance, truckRussia, truckChina][f]();
+  vehicles[KIND_DRONE] = [reconAlliance, reconRussia, reconChina][f]();
+  vehicles[KIND_STRIKE] = [strikeAlliance, strikeRussia, strikeChina][f]();
+  vehicles[KIND_HELI] = [gunshipAlliance, gunshipRussia, gunshipChina][f]();
+  vehicles[KIND_LIFT] = [liftAlliance, liftRussia, liftChina][f]();
+  vehicles[KIND_PLANE] = [planeAlliance, planeRussia, planeChina][f]();
+  return { vehicles, jet: [jetAlliance, jetRussia, jetChina][f]() };
 }
