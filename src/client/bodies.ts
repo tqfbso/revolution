@@ -88,6 +88,17 @@ export class Bodies {
   }
 
   /**
+   * Another army's dead: its own eight poses at the near and the middle level, in its own
+   * kit. Returns the `set` to pass to `add` for a man of that army.
+   */
+  addSet(near: Batch[], mid: Batch[]): number {
+    const set = this.near.length / DEAD_POSES;
+    this.near.push(...near);
+    this.mid.push(...mid);
+    return set;
+  }
+
+  /**
    * A man goes down at (x, z). With `power` 0 he falls where he stands; above 0 a blast
    * throws him along (dx, dz), harder the nearer it was. `seen` 0 keeps him hidden until
    * the player's troops see the spot (the enemy's dead in the fog).
@@ -102,8 +113,10 @@ export class Bodies {
     dz: number,
     power: number,
     seen: boolean,
+    set = 0,
   ): void {
     const rnd = Math.random();
+    const first = set * DEAD_POSES;
     if (power > 0) {
       const len = Math.hypot(dx, dz) || 1;
       const ux = dx / len;
@@ -119,7 +132,7 @@ export class Bodies {
         vy,
         t: 0,
         T: (2 * vy) / GRAVITY,
-        pose: THROWN[(rnd * THROWN.length) | 0],
+        pose: first + THROWN[(rnd * THROWN.length) | 0],
         sin: Math.sin(h),
         cos: Math.cos(h),
         spin: (Math.random() < 0.5 ? -1 : 1) * (Math.PI * (1 + power * 0.9 + Math.random() * 0.6)),
@@ -138,7 +151,7 @@ export class Bodies {
       vy: 0,
       t: 0,
       T: TOPPLE * (0.8 + Math.random() * 0.5),
-      pose: (rnd * DEAD_POSES) | 0,
+      pose: first + ((rnd * DEAD_POSES) | 0),
       sin: Math.sin(h),
       cos: Math.cos(h),
       spin: (Math.random() < 0.5 ? -1 : 1) * (1.1 + Math.random() * 0.4),
@@ -327,8 +340,14 @@ export class Bodies {
       const d2 = dx * dx + (y - cam.y) * (y - cam.y) + dz * dz;
       (d2 < near2 ? this.near : this.mid)[fl.pose].frame(f, c[0], c[1], c[2], fl.paint);
     }
-    for (const b of this.near) b.flush();
-    for (const b of this.mid) b.flush();
+    for (const b of this.near) {
+      b.flush();
+      b.mesh.visible = b.n > 0;
+    }
+    for (const b of this.mid) {
+      b.flush();
+      b.mesh.visible = b.n > 0;
+    }
     this.far.flush();
   }
 }

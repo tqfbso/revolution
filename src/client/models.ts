@@ -364,46 +364,126 @@ export const TEAM_OFFSETS: readonly [number, number][] = [
   [0.42, -0.3],
 ];
 
-/** An anti-tank missile launcher on its tripod: a fat tube, a sight, three legs. */
 /**
- * The mortar team's weapon (I6): a tube on a bipod, its base plate on the ground, a few
- * bombs in their cases beside it. The crew are the team's own men (TEAM_OFFSETS).
+ * Where a crew-served weapon stands in its team, ahead of the unit's centre, and where its
+ * two men kneel to serve it (drills.ts), in map units. A man is `MAN` units to the metre.
  */
-export function buildMortar(): { tube: THREE.BufferGeometry; far: THREE.BufferGeometry } {
+const MAN = 0.62 / 1.8;
+export const MORTAR_AT: readonly [number, number] = [0, 0.3];
+export const LAUNCHER_AT: readonly [number, number] = [0, 0.3];
+/** How high the mortar's muzzle is and how far ahead of its base plate, in metres. */
+export const MORTAR_MUZZLE: readonly [number, number] = [1.1, 0.6];
+
+/**
+ * The mortar team's weapon (I6), at the men's own scale: a tube on a bipod, its base plate
+ * on the ground, a few bombs in their cases beside it. The alliance's is the plain medium
+ * tube; Russia's sits on a wide square plate with a longer barrel; China's is the short
+ * one with a carrying handle.
+ */
+export function buildMortar(faction = 0): {
+  tube: THREE.BufferGeometry;
+  far: THREE.BufferGeometry;
+} {
   const g: THREE.BufferGeometry[] = [];
-  // Base plate, then the tube leaning forward at about 50 degrees from the ground.
-  g.push(cyl(0.2, 0.04, 'y', { at: [0, 0.02, -0.18], color: STEEL }, 10));
-  g.push(cyl(0.055, 0.95, 'z', { at: [0, 0.37, 0.1], rot: [-0.87, 0, 0], color: 0x3a3e30 }, 8));
-  g.push(cyl(0.07, 0.08, 'z', { at: [0, 0.69, 0.4], rot: [-0.87, 0, 0], color: STEEL }, 8));
-  // The bipod's two legs and the sight.
-  for (const x of [-0.16, 0.16]) {
-    g.push(box(0.03, 0.5, 0.03, { at: [x, 0.24, 0.32], rot: [0.2, 0, x * 1.6], color: STEEL }));
+  const [my, mz] = MORTAR_MUZZLE;
+  const long = faction === 2 ? 1.12 : faction === 3 ? 0.9 : 1;
+  const len = Math.hypot(my, mz);
+  const tilt = -Math.atan2(my, mz);
+  const along = (t: number): [number, number, number] => [0, my * t, mz * t];
+  if (faction === 2) g.push(box(0.5, 0.05, 0.5, { at: [0, 0.025, -0.02], color: STEEL }));
+  else g.push(cyl(0.26, 0.05, 'y', { at: [0, 0.025, -0.02], color: STEEL }, 10));
+  g.push(cyl(0.06, len * long, 'z', { at: along(0.5 * long), rot: [tilt, 0, 0] }, 8));
+  g.push(cyl(0.075, 0.1, 'z', { at: along(long - 0.04), rot: [tilt, 0, 0], color: STEEL }, 8));
+  g.push(cyl(0.08, 0.12, 'z', { at: along(0.05), rot: [tilt, 0, 0], color: STEEL }, 8));
+  // The bipod: two legs from two thirds up the tube out to the ground ahead, a brace.
+  const [, cy, cz] = along(0.62);
+  for (const x of [-1, 1]) {
+    g.push(
+      box(0.03, Math.hypot(cy, 0.3) + 0.04, 0.03, {
+        at: [x * 0.15, cy / 2, cz + 0.07],
+        rot: [0.16, 0, x * Math.atan2(0.3, cy)],
+        color: STEEL,
+      }),
+    );
   }
-  g.push(box(0.07, 0.07, 0.1, { at: [-0.08, 0.5, 0.22], team: 1 }));
-  // Bomb cases, olive with a stencil of team colour.
-  g.push(box(0.16, 0.1, 0.34, { at: [0.36, 0.05, -0.12], color: 0x4a4b36 }));
-  g.push(box(0.17, 0.02, 0.06, { at: [0.36, 0.1, -0.12], team: 0.6 }));
+  g.push(box(0.2, 0.025, 0.025, { at: [0, cy * 0.55, cz + 0.1], color: STEEL }));
+  g.push(box(0.09, 0.1, 0.12, { at: [-0.1, cy + 0.03, cz - 0.02], team: 1 })); // the sight
+  if (faction === 3)
+    g.push(
+      box(0.03, 0.05, 0.22, {
+        at: [0, cy * 0.5 + 0.1, cz * 0.5 - 0.06],
+        rot: [tilt, 0, 0],
+        color: STEEL,
+      }),
+    );
+  // Bomb cases, olive with a stencil of team colour, and two bombs stood ready.
+  g.push(box(0.2, 0.14, 0.5, { at: [0.55, 0.07, -0.25] }));
+  g.push(box(0.21, 0.03, 0.1, { at: [0.55, 0.13, -0.25], team: 0.6 }));
+  g.push(box(0.2, 0.14, 0.5, { at: [0.8, 0.07, -0.2], rot: [0, 0.3, 0] }));
+  for (const [x, z] of [
+    [0.42, 0.12],
+    [0.52, 0.2],
+  ]) {
+    g.push(cyl(0.04, 0.26, 'y', { at: [x, 0.13, z], color: STEEL }, 6, 0.03));
+    g.push(cyl(0.03, 0.1, 'y', { at: [x, 0.31, z], color: STEEL }, 6, 0.008));
+  }
   const far = merge([
     ...TEAM_OFFSETS.map(([x, z]) =>
       box(0.3, 0.6, 0.3, { at: [x, 0.3, z], color: 0x3a3d2e, team: 0.7 }),
     ),
     box(0.16, 0.16, 0.8, { at: [0, 0.35, 0.1], rot: [-0.87, 0, 0], color: 0x2c2f25, team: 0.5 }),
   ]);
-  return { tube: merge(g), far };
+  return { tube: merge(g).scale(MAN, MAN, MAN), far };
 }
 
-export function buildLauncher(): { launcher: THREE.BufferGeometry; far: THREE.BufferGeometry } {
+/** How high the launcher's tube is, and how far behind its tripod the gunner's grips are, in metres. */
+export const LAUNCHER_GRIP: readonly [number, number] = [0.8, -0.32];
+
+/**
+ * An anti-tank missile launcher on its tripod, at the men's own scale. The alliance's is a
+ * fat tube with a big boxy sight beside it; Russia's a long slim tube over a low sight
+ * unit; China's a short thick tube with a round sight on top.
+ */
+export function buildLauncher(faction = 0): {
+  launcher: THREE.BufferGeometry;
+  far: THREE.BufferGeometry;
+} {
   const g: THREE.BufferGeometry[] = [];
-  g.push(cyl(0.075, 0.95, 'z', { at: [0, 0.4, 0.1], rot: [-0.06, 0, 0], color: 0x3c4030 }, 8));
-  g.push(cyl(0.09, 0.12, 'z', { at: [0, 0.43, 0.56], color: RUBBER }, 8));
-  g.push(box(0.1, 0.12, 0.2, { at: [-0.12, 0.47, 0.0], color: STEEL }));
-  g.push(box(0.05, 0.03, 0.05, { at: [-0.12, 0.54, 0.0], team: 1 }));
+  const h = LAUNCHER_GRIP[0];
+  const r = faction === 2 ? 0.075 : faction === 3 ? 0.11 : 0.095;
+  const len = faction === 2 ? 1.35 : faction === 3 ? 1.05 : 1.2;
+  g.push(cyl(r, len, 'z', { at: [0, h, 0.1], rot: [-0.05, 0, 0] }, 9));
+  g.push(cyl(r + 0.02, 0.1, 'z', { at: [0, h + 0.03, 0.1 + len / 2], color: RUBBER }, 9));
+  g.push(cyl(r + 0.02, 0.1, 'z', { at: [0, h - 0.03, 0.1 - len / 2], color: RUBBER }, 9));
+  if (faction === 2) {
+    g.push(box(0.2, 0.2, 0.3, { at: [0, h - 0.19, -0.05], color: STEEL }));
+    g.push(cyl(0.05, 0.08, 'z', { at: [0.04, h - 0.17, 0.13], color: 0x1c2428 }, 7));
+  } else if (faction === 3) {
+    g.push(cyl(0.07, 0.3, 'z', { at: [0, h + 0.19, -0.1], color: STEEL }, 8));
+    g.push(box(0.1, 0.1, 0.12, { at: [0, h + 0.13, -0.1], color: STEEL }));
+  } else {
+    g.push(box(0.2, 0.24, 0.34, { at: [0.2, h + 0.04, -0.1], color: STEEL }));
+    g.push(cyl(0.06, 0.06, 'z', { at: [0.2, h + 0.06, 0.09], color: 0x1c2428 }, 7));
+  }
+  g.push(box(0.06, 0.04, 0.06, { at: [0, h + r + 0.02, 0.3], team: 1 }));
+  // Grips at the back for the gunner, the head of the tripod, three legs.
+  g.push(box(0.3, 0.03, 0.03, { at: [0, h - 0.12, LAUNCHER_GRIP[1]], color: STEEL }));
+  g.push(box(0.03, 0.03, 0.3, { at: [0, h - 0.12, LAUNCHER_GRIP[1] + 0.15], color: STEEL }));
+  g.push(cyl(0.06, 0.14, 'y', { at: [0, h - r - 0.07, 0.05], color: STEEL }, 7));
+  const top = h - r - 0.12;
   for (const [x, z] of [
-    [0, 0.3],
-    [-0.22, -0.18],
-    [0.22, -0.18],
+    [0, 0.5],
+    [-0.42, -0.28],
+    [0.42, -0.28],
   ]) {
-    g.push(box(0.03, 0.36, 0.03, { at: [x * 0.6, 0.17, z * 0.6], rot: [z, 0, -x], color: STEEL }));
+    const run = Math.hypot(x, z);
+    g.push(
+      box(0.035, Math.hypot(top, run), 0.035, {
+        at: [x / 2, top / 2, 0.05 + z / 2],
+        rot: [Math.atan2(z, top), 0, -Math.atan2(x, top)],
+        color: STEEL,
+      }),
+    );
   }
   const far = merge([
     ...TEAM_OFFSETS.map(([x, z]) =>
@@ -411,7 +491,7 @@ export function buildLauncher(): { launcher: THREE.BufferGeometry; far: THREE.Bu
     ),
     box(0.22, 0.2, 1.1, { at: [0, 0.45, 0.15], color: 0x2c2f25, team: 0.5 }),
   ]);
-  return { launcher: merge(g), far };
+  return { launcher: merge(g).scale(MAN, MAN, MAN), far };
 }
 
 /** Every model one army is drawn with. `vehicles[kind]` is null for the kinds on foot. */

@@ -82,7 +82,8 @@ import {
   type Snapshot,
 } from '../worker/protocol';
 import { Batch } from './batch';
-import { Soldiers, stillPose } from './soldiers';
+import { ARM_MG, ARM_RIFLE, ARM_TUBE, Soldiers, stillPose } from './soldiers';
+import { CREW, WEAPON_LAUNCHER, WEAPON_MORTAR, serve } from './drills';
 import { Bodies } from './bodies';
 import { Wrecks } from './wrecks';
 import type { Effects } from './effects';
@@ -91,8 +92,9 @@ import { COMMANDER_RGB, ICON_FROM, ICON_FULL, ICON_PENNANT, Icons } from './icon
 import type { Look } from './look';
 import { BURN_BASE, BURN_SCALE, SEEDS, unitMaterial } from './unitpaint';
 import {
+  LAUNCHER_AT,
+  MORTAR_AT,
   SQUAD_OFFSETS,
-  TEAM_OFFSETS,
   buildArsenal,
   buildStrikeDrone,
   buildHelicopterWrecks,
@@ -161,6 +163,8 @@ const LOD_HIDDEN = 3;
 const DRILL_SQUAD = 0;
 const DRILL_CREW = 1;
 const DRILL_SCOUT = 2;
+/** Radians of stride per map unit walked: one full stride (two steps) carries a running man 1.6 units. */
+const STRIDE_RATE = (Math.PI * 2) / 1.6;
 
 /** Kinds drawn as one model (a vehicle or an aircraft), as against men on foot. */
 const HAS_MODEL = KINDS.map((k) => k.cls !== CLASS_FOOT);
@@ -205,11 +209,19 @@ interface VehicleDraw {
 }
 /** How a foot unit is drawn: figures (men, a launcher) around the unit's centre. */
 interface SquadDraw {
-  /** `batch` is a fixed model (the launcher); without one the figure is a soldier. */
-  figures: { batch?: Batch[]; x: number; z: number }[];
+  /** With `weapon` the figure is the team's weapon on the ground; without, a soldier, who may turn to face it. */
+  figures: { weapon?: number; x: number; z: number; turn?: number }[];
   /** What the men do when halted: see DRILL_*. */
   drill: number;
+  /** The weapon the team serves (drills.ts WEAPON_*), 0 for none. */
+  weapon: number;
   far: Batch;
+}
+/** One army's men: its soldiers, the weapons its teams set down, and its dead (bodies.ts set). */
+interface Troop {
+  soldiers: Soldiers;
+  weapons: (Batch[] | null)[];
+  dead: number;
 }
 /** Kinds with a hull whose direction comes from the sim. */
 const IS_VEHICLE = KINDS.map((k) => k.turn > 0);
@@ -312,7 +324,11 @@ export class UnitView {
   /** Per foot unit, eased 0 to 1: how settled it is at the halt, and how much in a fight. */
   private readonly halted = new Float32Array(MAX_UNITS);
   private readonly fight = new Float32Array(MAX_UNITS);
-  private readonly soldiers: Soldiers;
+  private readonly troops: (Troop | undefined)[] = [];
+  /** How far each squad has walked while in view, and from where: the men's stride follows it. */
+  private readonly gait = new Float32Array(MAX_UNITS);
+  private readonly gaitX = new Float32Array(MAX_UNITS);
+  private readonly gaitZ = new Float32Array(MAX_UNITS);
   /** For tuning and screenshots: force every foot unit to [halted, fight, seconds since a shot]. */
   pose: [number, number, number] | null = null;
   private readonly diedAt = new Float32Array(MAX_UNITS).fill(-1e9);
@@ -428,19 +444,11 @@ export class UnitView {
       0,
     );
     const infantry = buildInfantry();
-    this.soldiers = new Soldiers((g, cap, lod) => batch(g, cap, lod, true));
     // The dead keep their own batches, rewritten only when something changes (bodies.ts).
-    const kept = (g: THREE.BufferGeometry, cap: number, lod: number) => {
-      const b = new Batch(g, material, cap);
-      b.mesh.castShadow = shadows && lod === 0;
-      b.mesh.receiveShadow = shadows && lod === 0;
-      this.group.add(b.mesh);
-      return b;
-    };
     this.bodies = new Bodies(
-      this.soldiers.deadPoses(0).map((g) => kept(g, 1024, 0)),
-      this.soldiers.deadPoses(1).map((g) => kept(g, 8192, 1)),
-      kept(
+      [],
+      [],
+      this.kept(
         box(0.22, 0.09, 0.56, { at: [0, 0.045, 0], color: 0x4a4a38, team: 0.3, cloth: true }),
         32768,
         2,
@@ -450,6 +458,7 @@ export class UnitView {
       effects,
       TEAM_RGB,
     );
+    for (let t = 0; t < 4; t++) this.troop(factionOf(t));
     const crashed = (gunship: boolean) =>
       buildHelicopterWrecks(gunship).map((g) => {
         const b = new Batch(g, material, 256, 16);
@@ -475,22 +484,25 @@ export class UnitView {
     this.squads[KIND_INFANTRY] = {
       figures: SQUAD_OFFSETS.map(([x, z]) => ({ x, z })),
       drill: DRILL_SQUAD,
+      weapon: 0,
       far: batch(infantry.far, MAX_UNITS, 2),
     };
-    const team = buildLauncher();
-    const launcher = [0, 1].map((lod) => batch(team.launcher.clone(), MAX_UNITS >> 2, lod, true));
+    const crew = (weapon: number, at: readonly [number, number]) => [
+      { weapon, x: at[0], z: at[1] },
+      ...CREW[weapon].map(({ x, z, turn }) => ({ x, z, turn })),
+    ];
     this.squads[KIND_ATGM] = {
-      figures: [{ batch: launcher, x: 0, z: 0.25 }, ...TEAM_OFFSETS.map(([x, z]) => ({ x, z }))],
+      figures: crew(WEAPON_LAUNCHER, LAUNCHER_AT),
       drill: DRILL_CREW,
-      far: batch(team.far, MAX_UNITS >> 2, 2),
+      weapon: WEAPON_LAUNCHER,
+      far: batch(buildLauncher().far, MAX_UNITS >> 2, 2),
     };
-    // The mortar team (I6): the tube in front, its two crewmen beside it.
-    const mortar = buildMortar();
-    const tube = [0, 1].map((lod) => batch(mortar.tube.clone(), MAX_UNITS >> 3, lod, true));
+    // The mortar team (I6): the tube in front, its two crewmen at it.
     this.squads[KIND_MORTAR] = {
-      figures: [{ batch: tube, x: 0, z: 0.45 }, ...TEAM_OFFSETS.map(([x, z]) => ({ x, z }))],
+      figures: crew(WEAPON_MORTAR, MORTAR_AT),
       drill: DRILL_CREW,
-      far: batch(mortar.far, MAX_UNITS >> 3, 2),
+      weapon: WEAPON_MORTAR,
+      far: batch(buildMortar().far, MAX_UNITS >> 3, 2),
     };
     // A recon team is two men: fewer, and that is how you tell it from a rifle squad.
     const pair: [number, number][] = [
@@ -500,6 +512,7 @@ export class UnitView {
     this.squads[KIND_RECON] = {
       figures: pair.map(([x, z]) => ({ x, z })),
       drill: DRILL_SCOUT,
+      weapon: 0,
       far: batch(
         new THREE.BoxGeometry(0.9, 0.5, 0.5).translate(0, 0.25, 0).deleteAttribute('uv'),
         MAX_UNITS >> 3,
@@ -582,6 +595,38 @@ export class UnitView {
     this.group.add(b.mesh);
     this.batches.push(b);
     return b;
+  }
+
+  /** A batch that is rewritten only when something changes (the dead), not every frame. */
+  private kept(g: THREE.BufferGeometry, cap: number, lod: number): Batch {
+    const b = new Batch(g, this.material, cap, UNIT_BATCH_START);
+    b.mesh.castShadow = this.castShadows && lod === 0;
+    b.mesh.receiveShadow = this.castShadows && lod === 0;
+    this.group.add(b.mesh);
+    return b;
+  }
+
+  /** The men of a faction: its own kit and weapons (soldiers.ts), built the first time it is asked for. */
+  private troop(faction: number): Troop {
+    const have = this.troops[faction];
+    if (have) return have;
+    const soldiers = new Soldiers((g, cap, lod) => this.batch(g, cap, lod, true), faction);
+    const set = (g: THREE.BufferGeometry, cap: number) =>
+      [0, 1].map((lod) => this.batch(lod === 0 ? g : g.clone(), cap, lod, true));
+    const made: Troop = {
+      soldiers,
+      weapons: [
+        null,
+        set(buildLauncher(faction).launcher, MAX_UNITS >> 2),
+        set(buildMortar(faction).tube, MAX_UNITS >> 3),
+      ],
+      dead: this.bodies.addSet(
+        soldiers.deadPoses(0).map((g) => this.kept(g, 1024, 0)),
+        soldiers.deadPoses(1).map((g) => this.kept(g, 8192, 1)),
+      ),
+    };
+    this.troops[faction] = made;
+    return made;
   }
 
   /** The vehicles of a faction: its own models (models.ts), built the first time it is asked for. */
@@ -780,7 +825,7 @@ export class UnitView {
     i: number,
     from: number,
     to: number,
-    figures: readonly { batch?: Batch[]; x: number; z: number }[],
+    figures: readonly { weapon?: number; x: number; z: number }[],
   ): void {
     const pos = this.renderPos;
     const x = pos[3 * i];
@@ -793,7 +838,7 @@ export class UnitView {
     const coat = factionOf(team) * SEEDS;
     for (let k = from; k < to; k++) {
       const f = figures[k];
-      if (!f || f.batch) continue;
+      if (!f || f.weapon) continue;
       const mx = x + f.x * cos + f.z * sin;
       const mz = z - f.x * sin + f.z * cos;
       const seen = team === this.playerTeam || this.fog.sees(mx, mz) ? 1 : 0;
@@ -862,6 +907,7 @@ export class UnitView {
         dz,
         power,
         fallen[k + 6] === 1,
+        this.troop(factionOf(fallen[k + 4])).dead,
       );
     }
     fallen.length = 0;
@@ -1169,7 +1215,7 @@ export class UnitView {
         fx.thin = this.lodOf[a] >= 2 ? 1 : 0;
         if (tube) {
           // A small flash and a puff at the muzzle, up and forward.
-          fx.mortar(pos[3 * a] + ux * 0.6, pos[3 * a + 1] + 0.9, pos[3 * a + 2] + uz * 0.6, ux, uz);
+          fx.mortar(pos[3 * a] + ux * 0.5, pos[3 * a + 1] + 0.4, pos[3 * a + 2] + uz * 0.5, ux, uz);
           continue;
         }
         fx.howitzer(
@@ -1311,8 +1357,11 @@ export class UnitView {
       return;
     }
     if (!veh) {
-      if (kind === KIND_ATGM) fx.missile(ax, ay + 0.45, az, bx, by, bz);
-      else fx.rifleBurst(ax, ay + 0.42, az, bx, by, bz);
+      if (kind === KIND_ATGM) {
+        // Out of the front of the launcher on its tripod, ahead of the team.
+        const d = Math.hypot(bx - ax, bz - az) || 1;
+        fx.missile(ax + ((bx - ax) / d) * 0.55, ay + 0.28, az + ((bz - az) / d) * 0.55, bx, by, bz);
+      } else fx.rifleBurst(ax, ay + 0.42, az, bx, by, bz);
       return;
     }
     // The shot leaves along the turret, which is laid on the target.
@@ -1824,7 +1873,21 @@ export class UnitView {
             fight = forced[1];
           }
           const drill = squad.drill;
-          const near = lod === 0 && this.soldiers.roomNear ? 0 : 1;
+          const troop = this.troop(factionOf(teamId));
+          const soldiers = troop.soldiers;
+          const near = lod === 0 && soldiers.roomNear ? 0 : 1;
+          // The stride follows the ground covered, so feet do not slide whatever the pace.
+          const gx = x - this.gaitX[i];
+          const gz = z - this.gaitZ[i];
+          const gone = Math.hypot(gx, gz);
+          if (gone < 1.5) this.gait[i] += gone;
+          this.gaitX[i] = x;
+          this.gaitZ[i] = z;
+          const paces = this.gait[i] * STRIDE_RATE + i * 1.3;
+          // A team's weapon is set down once it has halted, and served from then on.
+          const weapon = squad.weapon;
+          const emplaced = weapon !== 0 && halted > 0.5;
+          const reload = KINDS[this.kind[i]].reload / 20;
           const still = lod === 1 && d2 >= still2;
           if (still) stillCount++;
           else if (lod === 1) jointedCount++;
@@ -1861,9 +1924,28 @@ export class UnitView {
               }
             }
             const seed = ((i + k * 5) % SEEDS) + coatOf + BURN_BASE;
-            if (f.batch) {
-              f.batch[lod].put(sx, sy, sz, mfs, mfc, 1, team[0], team[1], team[2], seed);
+            if (f.weapon) {
+              // Packed up and carried on the move (the first man has the tube on his back).
+              if (emplaced)
+                troop.weapons[f.weapon]![lod].put(
+                  sx,
+                  sy,
+                  sz,
+                  mfs,
+                  mfc,
+                  1,
+                  team[0],
+                  team[1],
+                  team[2],
+                  seed,
+                );
               continue;
+            }
+            if (f.turn && out >= 1) {
+              // Turned to face the weapon as he settles beside it.
+              const t = face + f.turn * halted;
+              mfs = Math.sin(t);
+              mfc = Math.cos(t);
             }
             // Halted, a squad takes a knee, and in a fight some of it goes flat; a missile
             // crew kneels by its launcher; scouts lie up and watch.
@@ -1880,15 +1962,34 @@ export class UnitView {
             }
             const burst = since * 7 + k * 0.37;
             const climbing = out < 1;
-            const firing = !climbing && since < 0.9 && halted > 0.6 && ((burst | 0) + k) % 2 === 0;
+            const firing =
+              weapon === 0 &&
+              !climbing &&
+              since < 0.9 &&
+              halted > 0.6 &&
+              ((burst | 0) + k) % 2 === 0;
+            // What he carries: one machine gun and one rocket in a squad; a team's first man
+            // has its weapon's tube on his back until it is set down.
+            const arm =
+              drill === DRILL_SQUAD
+                ? role === 1
+                  ? ARM_MG
+                  : role === 2
+                    ? ARM_TUBE
+                    : ARM_RIFLE
+                : weapon !== 0 && k === 1 && !emplaced
+                  ? ARM_TUBE
+                  : ARM_RIFLE;
             const phase = burst - (burst | 0);
             const run = climbing ? 1 : 1 - halted;
             const aim = climbing ? 0 : fight * halted;
             if (climbing) kneel = prone = 0;
-            const stride = seconds * 11 + i * 1.3 + k * 2.1;
+            const stride = (climbing ? seconds * 11 + i * 1.3 : paces) + k * 2.1;
+            const serving = emplaced && !climbing && (fight > 0.5 || k === 1);
+            if (still && serving) kneel = 1;
             if (
               !still ||
-              !this.soldiers.still(
+              !soldiers.still(
                 stillPose(kneel, prone, run, aim, stride),
                 sx,
                 sy,
@@ -1900,8 +2001,9 @@ export class UnitView {
                 team[2],
                 seed,
               )
-            )
-              this.soldiers.man(
+            ) {
+              if (serving) serve(soldiers, weapon, k - 1, since, reload);
+              soldiers.man(
                 near,
                 sx,
                 sy,
@@ -1923,9 +2025,12 @@ export class UnitView {
                   (1 - fight) *
                   0.75 *
                   Math.sin(seconds * (0.35 + ((i * 7 + k * 3) % 5) * 0.06) + i * 2.3 + k * 1.9),
+                arm,
+                near === 0 ? halted * Math.sin(seconds * 1.7 + i * 1.1 + k * 2.3) : 0,
               );
+            }
             if (firing && phase < dt * 7) {
-              const mz = this.soldiers.muzzle;
+              const mz = soldiers.muzzle;
               fx.thin = 0;
               fx.muzzle(mz[0], mz[1], mz[2], mz[3], mz[4]);
             }
@@ -1946,7 +2051,11 @@ export class UnitView {
     this.stats.still = stillCount;
     this.bodies.update(seconds, dt, camera, nearNow, this.lodFar);
     this.wrecks.update(seconds, dt, camera);
-    for (const b of batches) b.flush();
+    // An empty batch is hidden, so the armies' many kinds cost nothing until they are in view.
+    for (const b of batches) {
+      b.flush();
+      b.mesh.visible = b.n > 0;
+    }
     this.jamRings.flush();
     this.ownerRings.flush();
     this.shade.flush();
