@@ -158,8 +158,12 @@ const HILLS: readonly (readonly [number, number, number, number])[] = [
   [118, 50, 14, fx(1.6)],
 ];
 
-/** Supplies and fuel: kind, stock, cell. Each side's own, then those between them. */
-const SITE_PLAN: readonly (readonly [number, number, number, number])[] = [
+/**
+ * Supplies and fuel: kind, stock, cell. Each side's own, then those between them. (Built
+ * when asked for: map.ts and this file import each other, and unbundled this file runs
+ * before map.ts has made its constants.)
+ */
+const sitePlan = (): readonly (readonly [number, number, number, number])[] => [
   // West Kowloon: the base's own, then out along the reclamation and Canton Road.
   [SITE_SUPPLIES, 8000, 8, 26],
   [SITE_SUPPLIES, 8000, 38, 16],
@@ -290,7 +294,7 @@ export function generateKowloon(seed: number): GameMap {
     const [x, y] = settle(f.x, f.y, 2);
     return { ...f, x, y };
   });
-  const SITES = SITE_PLAN.map(([kind, stock, sx, sy]) => {
+  const SITES = sitePlan().map(([kind, stock, sx, sy]) => {
     const [x, y] = settle(sx, sy, 3);
     return [kind, stock, x, y] as const;
   });

@@ -3794,3 +3794,44 @@ shopping centres). He chose the real geography over keeping the mirror.
 
 Not done: the Avenue of Stars promenade and harbour walls drawn as quays, footbridges, the
 real Cultural Centre and Space Museum shapes, trams, shop signs from real names.
+
+## 161. The new models made cheap: full detail only under the camera, boxes far off (2026-11-21)
+
+Fabio, a day after the three model phases (156, 158, 159) went in: "the new models are too
+heavy and slow... and dont look as good as they should... two options: roll back to
+previous or try to optimise radically." Optimised, with the revert kept ready as the
+fallback; it was not needed.
+
+- Measured first, old build (the three phases reverted) against new, on the same scene:
+  3,048 units of one army in the army-mix proportions (2,430 on foot, 618 vehicles and
+  aircraft), ridge map, `tools/perfprobe.mjs`. The cloud has no graphics card, so the
+  figures are triangles, draw calls and software frame time, good for comparing two
+  builds and nothing else. The new models cost 4 to 11% more triangles and 8 to 17% more
+  frame time from the middle distance out: a vehicle there was 650 to 950 triangles where
+  the old one was 120, and 120 to 230 far off where the old one was 36.
+- The larger cost, in both builds, was never the vehicles: about 2,000 squads as still
+  figures of 486 triangles a man, 4.4M of the 5.7M triangles in the zoomed-out view.
+- Vehicles now have three shapes and a far one. All of it only within `lodFull` (50) of
+  the camera and for about `fullBudget` (20) vehicles at once; its masses (the old middle
+  shape) out to `lodNear`; its outline (the old far shape, hull and turret apart so the
+  turret still turns) out to `lodFar`; beyond, four or five boxes in the army's colour.
+- A soldier beyond `lodBlock` (150) is the same still pose in boxes (`boxed` in kit.ts:
+  each piece the box round it, the body as trunk and head): 108 triangles, not 486. The
+  trunk carries the army colour. Boxes carry no edge wear, or a box that small chips to
+  bare metal all over and goes dark.
+- Result against the old build, same scene, triangles (the two sizes of frame, without
+  and with the shadow pass) and software frame time: close 3.81M/5.54M against
+  3.78M/5.48M, 3,197 ms against 3,190 (level); middle 3.88M/5.03M against 4.02M/5.21M,
+  3,337 ms against 3,397; zoomed out 2.40M/3.36M against 5.68M/6.62M, 2,437 ms against
+  5,570. Draw calls 4 to 8 more with one army (more batches). Real frame rate on a
+  graphics card is still unmeasured from here.
+- The look. From the middle distance the new vehicles had lost the army colour the old
+  ones wore on their roofs and read as dark lumps: the outline shape now carries it on its
+  decks, most on the turret roof. Glass (the one dark colour that is clearly blue) shows
+  the sky and is smooth, so canopies and windscreens read as glass. Rotor blades are a worn
+  grey-green, not black planks.
+- Also: the Kowloon site table is built when asked for, because unbundled (the dev server,
+  the model bench) kowloon.ts ran before map.ts had made its constants. Same table.
+
+Not done: a real frame rate on Fabio's machine (his test decides it), a rotor drawn as a
+blurred disc at speed, far aircraft as boxes (few of them, left as they were).

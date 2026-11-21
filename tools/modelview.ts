@@ -6,6 +6,7 @@
 //   ?lod=0|1|2        level of detail                  ?men=1|2       foot soldiers, or teams at their weapons
 //   ?yaw=&pitch=&dist=&x=&z=   the camera              ?gap=          room between models
 //   ?burn=1           as wrecks                        ?renderer=webgl
+import '../src/sim/euro'; // first: the sim's map modules import each other in a ring, and this way in works unbundled
 import * as THREE from 'three/webgpu';
 import { Batch } from '../src/client/batch';
 import { makeLook, skyScene } from '../src/client/look';

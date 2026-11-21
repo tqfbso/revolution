@@ -12,7 +12,7 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Batch } from './batch';
-import { box, cyl, merge, under } from './kit';
+import { box, boxed, cyl, merge, under } from './kit';
 import { loft, setWear, type Ring } from './shape';
 
 /** The colours of one army's kit. Build the rig with another to dress another faction. */
@@ -196,6 +196,8 @@ export class Soldiers {
   private readonly arm1: Batch;
   /** One batch per still pose, and where each pose's muzzle is in the man's own frame. */
   private readonly stills: Batch[];
+  /** The same poses in boxes, for men too far off to show a shape (decision 161). */
+  private readonly blocks: Batch[];
   private readonly stillMuzzle: Float32Array;
   /** While baking the still poses: the pieces `put` would have drawn, and their frames. */
   private capture: { piece: THREE.BufferGeometry; f: number[] }[] | null = null;
@@ -258,6 +260,9 @@ export class Soldiers {
       this.pieceOf.set(b, g);
     this.stillMuzzle = new Float32Array(STILLS.length * 3);
     const frame = new THREE.Matrix4();
+    const cubes: THREE.BufferGeometry[] = [];
+    const blocks: Batch[] = [];
+    this.blocks = blocks;
     this.stills = STILLS.map(([kneel, prone, run, aim, stride], k) => {
       this.capture = [];
       this.man(1, 0, 0, 0, 0, 1, kneel, prone, run, aim, stride, 0, 1, 1, 1, 0);
@@ -281,6 +286,15 @@ export class Soldiers {
           0,
           1,
         );
+        // Each piece as the box round it, a body as trunk and head: a fifth of the triangles.
+        piece.computeBoundingBox();
+        const bb = piece.boundingBox!;
+        const cuts = piece === m.body1 ? [bb.min.y + (bb.max.y - bb.min.y) * 0.74] : [];
+        // The trunk carries the army's colour: at this size it is all that tells sides apart.
+        boxed(piece, { cuts }).forEach((b, part) => {
+          if (piece === m.body1 && part === 0) b.getAttribute('teamMask').array.fill(0.55);
+          cubes.push(b.applyMatrix4(frame));
+        });
         const g = piece.clone();
         g.deleteAttribute('aTint'); // the middle-distance batch's own, not the shape's
         return g.applyMatrix4(frame);
@@ -288,6 +302,10 @@ export class Soldiers {
       this.capture = null;
       const g = mergeGeometries(parts);
       for (const p of parts) p.dispose();
+      const block = mergeGeometries(cubes);
+      for (const c of cubes) c.dispose();
+      cubes.length = 0;
+      blocks.push(make(block, k < 6 ? STILL_MEN : STRIDE_MEN, 1));
       return make(g, k < 6 ? STILL_MEN : STRIDE_MEN, 1);
     });
   }
@@ -308,8 +326,9 @@ export class Soldiers {
     g: number,
     b: number,
     a: number,
+    blocky = false,
   ): boolean {
-    const batch = this.stills[pose];
+    const batch = (blocky ? this.blocks : this.stills)[pose];
     if (batch.n >= batch.capacity) return false;
     batch.put(x, y, z, sin, cos, 1, r, g, b, a);
     const q = pose * 3;

@@ -551,6 +551,8 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
   Phase 3 BUILT (decision 159): each army's own gunship, lifter, jet, transport and two
   drones, rotors and propellers that turn, aircraft that bank into turns and dip the nose,
   helicopter wrecks of the army that lost them. Models job complete bar Fabio's play test.
+  Made cheap 2026-11-21 (decision 161): full detail only under the camera, boxes far off;
+  zoomed out the game now draws half the triangles of the build before the new models.
 - Menus and settings: BUILT 2026-11-15 (decision 127). The v1 interface: glass HUD with the
   commander board always on screen, main menu, new battle screen, settings, glass lobby and
   end screen. Still to do: save/replay

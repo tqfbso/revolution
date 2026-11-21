@@ -41,15 +41,29 @@ describe('unit models', () => {
       expect(models.length).toBe(12);
       expect(a.vehicles.length).toBe(KIND_COUNT);
       for (const m of models) {
-        expect(m.hull.length).toBe(2);
+        expect(m.hull.length).toBe(3);
         for (const g of [...m.hull, ...m.turret, m.far]) sound(g);
-        const near = tris(m.hull[0]) + (m.turret[0] ? tris(m.turret[0]) : 0);
-        const mid = tris(m.hull[1]) + (m.turret[1] ? tris(m.turret[1]) : 0);
-        expect(near).toBeLessThan(6500);
-        expect(mid).toBeLessThan(1400);
-        expect(tris(m.far)).toBeLessThan(420);
+        const at = (k: number) => tris(m.hull[k]) + (m.turret[k] ? tris(m.turret[k]) : 0);
+        expect(at(0)).toBeLessThan(6500);
+        expect(at(1)).toBeLessThan(1400);
+        // From the middle distance out a vehicle costs what the first, plain models did
+        // (decision 161): a few hundred triangles, then a few dozen.
+        expect(at(2)).toBeLessThan(260);
+        expect(tris(m.far)).toBeLessThan(260);
         // Detail falls away with distance, never the other way.
-        expect(mid).toBeLessThanOrEqual(near);
+        expect(at(1)).toBeLessThanOrEqual(at(0));
+        expect(at(2)).toBeLessThanOrEqual(at(1));
+      }
+    }
+  });
+
+  it('draws a far ground vehicle as a handful of boxes in its army colour', () => {
+    for (const a of arsenals) {
+      for (const kind of [0, 3, 4, 8, 9, 10]) {
+        const far = a.vehicles[kind]!.far;
+        expect(tris(far)).toBeLessThanOrEqual(60);
+        const mask = far.getAttribute('teamMask').array as Float32Array;
+        expect(Math.min(...mask)).toBeGreaterThan(0.4);
       }
     }
   });

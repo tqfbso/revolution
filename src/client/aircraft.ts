@@ -68,7 +68,7 @@ function aircraft(build: (lod: number, body: Parts, tail: Parts) => Flown): Vehi
     r: r.r * M,
   }));
   const model: VehicleModel = {
-    hull: [up(whole(a).done()), up(whole(b).done())],
+    hull: [up(whole(a).done()), up(whole(b).done()), up(whole(c).done())],
     turret: [],
     far: up(farG),
     turretY: 0,
@@ -205,7 +205,8 @@ function gear(P: Parts, at: Plan, floor: number, top: number, r = 0.3): void {
   }
 }
 
-const BLADE = 0x1b1c1d;
+/** Rotor blades: a worn grey-green, not black, or they are all the eye sees of the machine. */
+const BLADE = 0x363a38;
 
 // ---------------------------------------------------------------------------------------
 // Gunships

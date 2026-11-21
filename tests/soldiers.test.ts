@@ -120,8 +120,19 @@ describe('soldier rig', () => {
       return b as unknown as Batch;
     };
     const soldiers = new Soldiers(make);
-    // The last 6 + STRIDE_FRAMES batches are the still poses, made after the pieces.
-    const stills = geometries.slice(-(6 + STRIDE_FRAMES));
+    // The last batches are the still poses, made after the pieces: each pose in boxes (for
+    // men far off, decision 161) and then in full.
+    const baked = geometries.slice(-2 * (6 + STRIDE_FRAMES));
+    const blocks = baked.filter((_, k) => k % 2 === 0);
+    const stills = baked.filter((_, k) => k % 2 === 1);
+    blocks.forEach((g, k) => {
+      // Nine boxes: trunk, head, four of leg, two arms, the rifle. Same man, same place (a turned box reaches a little past the limb in it).
+      expect(g.index!.count / 3).toBe(108);
+      g.computeBoundingBox();
+      stills[k].computeBoundingBox();
+      expect(g.boundingBox!.min.distanceTo(stills[k].boundingBox!.min)).toBeLessThan(0.1);
+      expect(g.boundingBox!.max.distanceTo(stills[k].boundingBox!.max)).toBeLessThan(0.1);
+    });
     const height = (g: THREE.BufferGeometry) => {
       g.computeBoundingBox();
       return g.boundingBox!.max.y - g.boundingBox!.min.y;

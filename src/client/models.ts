@@ -65,9 +65,11 @@ import { box, cyl, merge, RUBBER, STEEL } from './kit';
 export { box, cyl, merge };
 
 export interface VehicleModel {
-  hull: THREE.BufferGeometry[]; // LOD 0, 1
-  turret: THREE.BufferGeometry[]; // LOD 0, 1
-  far: THREE.BufferGeometry; // LOD 2: hull and turret in one tiny mesh
+  /** Three levels: all of it (close to), its masses (near), its outline (the middle distance). */
+  hull: THREE.BufferGeometry[];
+  turret: THREE.BufferGeometry[];
+  /** Far off: hull and turret as a few boxes in one mesh. */
+  far: THREE.BufferGeometry;
   /** Turret ring position on the hull, and the muzzle relative to the turret pivot. */
   turretY: number;
   turretZ: number;
