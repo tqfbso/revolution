@@ -301,6 +301,13 @@ export class UnitView {
   readonly stats: LodStats = { lod: [0, 0, 0], still: 0, culled: 0 };
   /** Distances (world units) at which units drop to LOD 1 and LOD 2. */
   lodNear = 120;
+  /** Inside this a vehicle is drawn with everything on it; from here to `lodNear`, its masses. */
+  lodFull = 50;
+  /** At most about this many vehicles in full detail at once: a parked army is not all of it. */
+  fullBudget = 20;
+  private fullScale = 1;
+  /** Beyond this a still soldier is a figure of boxes: a few pixels of the right colours. */
+  lodBlock = 150;
   lodFar = 340;
   /**
    * From here out to `lodFar` a foot soldier is a still figure: one instance in a fixed pose
@@ -635,8 +642,9 @@ export class UnitView {
     const arsenal = buildArsenal(faction);
     const draw = (model: VehicleModel, cap: number): VehicleDraw => ({
       model,
-      hull: model.hull.map((g, lod) => this.batch(g, cap, lod)),
-      turret: model.turret.map((g, lod) => this.batch(g, cap, lod)),
+      // Three levels of shape over two of distance: the first two are both "near".
+      hull: model.hull.map((g, level) => this.batch(g, cap, level < 2 ? 0 : 1)),
+      turret: model.turret.map((g, level) => this.batch(g, cap, level < 2 ? 0 : 1)),
       rotors: (model.rotorShapes ?? []).map((levels, shape) =>
         levels.map((g, lod) =>
           this.batch(g, cap * model.rotors!.filter((r) => r.shape === shape).length, lod),
@@ -1516,9 +1524,14 @@ export class UnitView {
     const cam = camera.position;
     const nearNow = this.lodNear * this.nearScale;
     const near2 = nearNow * nearNow;
+    const fullNow = this.lodFull * Math.min(this.nearScale, this.fullScale);
+    let fullCount = 0;
+    const full2 = fullNow * fullNow;
     const far2 = this.lodFar * this.lodFar;
     const stillNow = Math.max(nearNow, STILL_MIN, this.lodStill * this.stillScale);
     const still2 = stillNow * stillNow;
+    const blockNow = Math.max(stillNow, this.lodBlock);
+    const block2 = blockNow * blockNow;
     let stillCount = 0;
     let jointedCount = 0;
 
@@ -1812,7 +1825,10 @@ export class UnitView {
           f[9] = ox;
           f[10] = oy;
           f[11] = oz;
-          veh.hull[lod].frame(f, team[0], team[1], team[2], burn);
+          // All of a vehicle's detail only where it can be seen: right under the camera.
+          const level = lod === 1 ? 2 : d2 < full2 ? 0 : 1;
+          if (level === 0) fullCount++;
+          veh.hull[level].frame(f, team[0], team[1], team[2], burn);
           if (veh.turret.length > 0) {
             // The turret turns on the hull's own deck, and its gun runs back on firing.
             const rel = th - h;
@@ -1831,7 +1847,7 @@ export class UnitView {
             f[9] = x + yx * m.turretY + zx * m.turretZ - tzx * kick;
             f[10] = y + yy * m.turretY + zy * m.turretZ - tzy * kick;
             f[11] = z + yz * m.turretY + zz * m.turretZ - tzz * kick;
-            veh.turret[lod].frame(f, team[0], team[1], team[2], burn);
+            veh.turret[level].frame(f, team[0], team[1], team[2], burn);
           }
           const rotors = m.rotors;
           if (rotors) {
@@ -2069,6 +2085,7 @@ export class UnitView {
                 team[1],
                 team[2],
                 seed,
+                d2 >= block2,
               )
             ) {
               if (serving) serve(soldiers, weapon, k - 1, since, reload);
@@ -2139,6 +2156,13 @@ export class UnitView {
       );
     } else if (lodCount[0] < this.nearBudget * 0.7)
       this.nearScale = Math.min(1, this.nearScale * 1.03);
+    if (fullCount > this.fullBudget) {
+      this.fullScale = Math.max(
+        0.2,
+        this.fullScale * Math.max(0.5, Math.sqrt(this.fullBudget / fullCount)),
+      );
+    } else if (fullCount < this.fullBudget * 0.7)
+      this.fullScale = Math.min(1, this.fullScale * 1.03);
     // And the number posed in pieces at the middle level near its own budget.
     const jointed = jointedCount;
     if (jointed > this.midBudget) {

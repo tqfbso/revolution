@@ -281,6 +281,91 @@ export function fuselage(
   return g;
 }
 
+/**
+ * A shape reduced to the boxes round it: what it is from so far off that only its mass and
+ * its colour reach the eye. `cuts` (along y) split it into slabs boxed one by one, and
+ * `gun` boxes anything long and thin sticking out ahead (+z) on its own, so a tank's far
+ * turret is not a block the length of its barrel. Colour and team marking are the average
+ * of what each box replaces, or `team` if given.
+ */
+export function boxed(
+  g: THREE.BufferGeometry,
+  o: { cuts?: number[]; gun?: boolean; team?: number } = {},
+): THREE.BufferGeometry[] {
+  const pos = g.getAttribute('position');
+  const col = g.getAttribute('color');
+  const mask = g.getAttribute('teamMask');
+  const n = pos.count;
+  const out: THREE.BufferGeometry[] = [];
+  const colour = new THREE.Color();
+  const slab = (pick: (i: number) => boolean, zMax = Infinity) => {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    let r = 0;
+    let gr = 0;
+    let b = 0;
+    let t = 0;
+    let c = 0;
+    for (let i = 0; i < n; i++) {
+      if (!pick(i)) continue;
+      const v = [pos.getX(i), pos.getY(i), Math.min(pos.getZ(i), zMax)];
+      for (let a = 0; a < 3; a++) {
+        if (v[a] < lo[a]) lo[a] = v[a];
+        if (v[a] > hi[a]) hi[a] = v[a];
+      }
+      r += col.getX(i);
+      gr += col.getY(i);
+      b += col.getZ(i);
+      t += mask.getX(i);
+      c++;
+    }
+    if (c === 0) return;
+    colour.setRGB(r / c, gr / c, b / c);
+    const made = box(
+      Math.max(hi[0] - lo[0], 0.02),
+      Math.max(hi[1] - lo[1], 0.02),
+      Math.max(hi[2] - lo[2], 0.02),
+      {
+        at: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2],
+        color: colour.getHex(),
+        team: o.team ?? t / c,
+      },
+    );
+    // No worn edges: a box this small would be edge all over, and chip to bare metal.
+    const h = made.getAttribute('aBoxH');
+    for (let i = 0; i < h.count; i++) h.setXYZW(i, 1e4, 1e4, 1e4, 0);
+    out.push(made);
+  };
+  // Where the body ends and a gun begins: the furthest forward the shape is still wide.
+  let front = Infinity;
+  if (o.gun) {
+    g.computeBoundingBox();
+    const bb = g.boundingBox!;
+    const bins = 16;
+    const z0 = bb.min.z;
+    const dz = (bb.max.z - z0) / bins || 1;
+    const wide = new Float32Array(bins);
+    for (let i = 0; i < n; i++) {
+      const k = Math.min(bins - 1, Math.floor((pos.getZ(i) - z0) / dz));
+      wide[k] = Math.max(wide[k], Math.abs(pos.getX(i)));
+    }
+    const most = Math.max(...wide);
+    let last = bins - 1;
+    while (last > 0 && wide[last] < most * 0.4) last--;
+    if (last < bins - 2) {
+      front = z0 + (last + 1) * dz;
+      slab((i) => pos.getZ(i) > front && Math.abs(pos.getX(i)) < most * 0.4);
+    }
+  }
+  const cuts = [-Infinity, ...(o.cuts ?? []), Infinity];
+  for (let k = 0; k + 1 < cuts.length; k++)
+    slab(
+      (i) => pos.getY(i) >= cuts[k] && pos.getY(i) < cuts[k + 1] && pos.getZ(i) <= front + 1e-6,
+      front,
+    );
+  return out;
+}
+
 /** Join the parts of a model into one mesh, marking the creases where parts meet. */
 export const merge = (parts: THREE.BufferGeometry[]) => {
   creases(parts);

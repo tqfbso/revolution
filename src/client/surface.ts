@@ -125,6 +125,12 @@ export function fieldPaint(
   let c: V3 = mix(base, base.mul(vec3(0.5, 0.58, 0.5)), dark.mul(isPaint).mul(0.85));
   c = mix(c, vec3(0.03, 0.027, 0.022), black.mul(isPaint).mul(0.75));
   c = c.mul(wear.z.mul(0.45).add(0.78));
+  // Glass (the one dark colour that is clearly blue): it shows the sky, more the flatter it
+  // lies, so a canopy or a windscreen is not one more dark panel.
+  const isGlass = step(base.x.mul(1.7), base.z)
+    .mul(float(1).sub(smoothstep(0.034, 0.05, base.y)))
+    .mul(float(1).sub(marking));
+  c = mix(c, vec3(0.07, 0.105, 0.14), isGlass.mul(normalWorld.y.mul(0.3).add(0.45)));
   // Mud thrown up over the running gear, dust settled on what faces the sky.
   const mud = float(1)
     .sub(smoothstep(0.08, 0.62, p.y))
@@ -166,7 +172,11 @@ export function fieldPaint(
   return {
     colour: mix(c, wreck, burn),
     roughness: mix(
-      mix(wear.w.add(mud.mul(0.3)).min(1), float(0.42), chipped.mul(0.8)).max(cloth.mul(0.9)),
+      mix(
+        mix(wear.w.add(mud.mul(0.3)).min(1), float(0.42), chipped.mul(0.8)).max(cloth.mul(0.9)),
+        float(0.18),
+        isGlass,
+      ),
       float(0.95),
       burn,
     ),

@@ -6,9 +6,9 @@
 //
 // Written in metres (kit.ts), each model once for all three levels of detail.
 import * as THREE from 'three/webgpu';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   atLevels,
+  boxed,
   CANVAS,
   GLASS,
   LAMP,
@@ -48,20 +48,39 @@ export function vehicle(
     return { hull, turret, ...build(lod, hull, turret) };
   });
   const [a, b, c] = levels;
-  const farTurret = c.turret.list.length > 0 ? c.turret.done(1) : null;
-  farTurret?.translate(0, c.turretY, c.turretZ);
-  const farHull = c.hull.done(1);
-  const plain = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
-  // At this distance a vehicle is a few pixels: silhouette and team colour are all that
-  // count, so the far model wears the army's colour over its paint, most on the turret.
-  showTeam(farHull, 0.42);
-  if (farTurret) showTeam(farTurret, 0.75);
-  const far = farTurret ? mergeGeometries([plain(farHull), plain(farTurret)]) : farHull;
-  far.scale(M, M, M);
+  // Three levels with a turret that turns: all of it close to, its masses from across a
+  // street, and its outline from the middle distance. Beyond that a vehicle is a few pixels:
+  // boxes in the army's colour (decision 161).
+  const lowTurret = c.turret.list.length > 0 ? c.turret.done(1) : null;
+  const lowHull = c.hull.done(1);
+  lowHull.computeBoundingBox();
+  const bb = lowHull.boundingBox!;
+  const far = new Parts(2);
+  far.add(boxed(lowHull, { cuts: [bb.min.y + (bb.max.y - bb.min.y) * 0.45], team: 0.42 }));
+  if (lowTurret) {
+    const t = lowTurret.clone().translate(0, c.turretY, c.turretZ);
+    far.add(boxed(t, { gun: true, team: 0.75 }));
+    t.dispose();
+  }
+  // From the middle distance the army's colour has to carry what the detail no longer can.
+  // Its decks most of all, since that is the side an army is seen from.
+  for (const [g, sides, top] of [
+    [lowHull, 0, 0.16],
+    [lowTurret, 0.1, 0.5],
+  ] as const) {
+    if (!g) continue;
+    const mask = g.getAttribute('teamMask');
+    const col = g.getAttribute('color');
+    const up = g.getAttribute('normal');
+    for (let i = 0; i < mask.count; i++)
+      if (Math.max(col.getX(i), col.getY(i), col.getZ(i)) > 0.05)
+        mask.setX(i, Math.max(mask.getX(i), up.getY(i) > 0.6 ? top : sides));
+  }
+  const low = (g: THREE.BufferGeometry) => g.scale(M, M, M);
   return {
-    hull: [a.hull.done(), b.hull.done()],
-    turret: a.turret.list.length > 0 ? [a.turret.done(), b.turret.done()] : [],
-    far,
+    hull: [a.hull.done(), b.hull.done(), low(lowHull)],
+    turret: lowTurret ? [a.turret.done(), b.turret.done(), low(lowTurret)] : [],
+    far: far.done(),
     turretY: a.turretY * M,
     turretZ: a.turretZ * M,
     muzzleY: a.muzzleY * M,
