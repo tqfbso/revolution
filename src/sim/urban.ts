@@ -3,7 +3,15 @@
 import { FIRE_OUT } from './collapse';
 import { CMD_ENTRENCH, type Command } from './commands';
 import { fx } from './fixed';
-import { CELL_FX, MAP_CELLS, S_BUILDING, STAGE_INTACT, groundMax, wallMax } from './map';
+import {
+  CELL_FX,
+  MAP_CELLS,
+  MAX_STRUCTS,
+  S_BUILDING,
+  STAGE_INTACT,
+  groundMax,
+  wallMax,
+} from './map';
 import { nextInt } from './rng';
 import { clearScars } from './scars';
 import { leaveHouse, sendTo, stageOf, structDist2, validUnits } from './sim';
@@ -33,7 +41,8 @@ const MEND_COST_EVERY = 8;
 const REACH = fx(7);
 const MAX_CREW = 3;
 
-const crew = new Uint8Array(1024);
+/** Builders at each structure this tick (every structure: Kowloon has more than 1,024). */
+const crew = new Uint8Array(MAX_STRUCTS);
 
 const isEngineer = (kind: number): boolean => KINDS[kind].engineer;
 const isBuilder = (kind: number): boolean => kind === KIND_TRUCK || isEngineer(kind);

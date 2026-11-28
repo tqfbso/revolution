@@ -14,7 +14,7 @@ import { kindOf } from './factions';
 import { BUILDINGS } from './economy';
 import { FP_SHIFT, fx } from './fixed';
 import { CLASS_AIR, MAP_SIZE, MAX_TEAMS } from './map';
-import { KINDS, KIND_TRUCK, POINTS } from './units';
+import { KINDS, KIND_HELI, KIND_LIFT, KIND_TRUCK, POINTS } from './units';
 import { NO_TEAM, STATE_ALIVE, TICK_RATE, type World } from './world';
 
 /** The supply map is in squares of 16 world units. */
@@ -46,6 +46,12 @@ export const UPKEEP_TICKS = 3 * TICK_RATE;
 
 /** Units that neither eat nor go hungry: aircraft (they are their own logistics) and trucks. */
 export const NEEDS_SUPPLY = KINDS.map((k, i) => k.cls !== CLASS_AIR && i !== KIND_TRUCK);
+
+/**
+ * Of those, the ones that still mend in supply out of the fight: trucks at their own
+ * depots, helicopters over their own ground. (Drones and the transport plane do not last.)
+ */
+const MENDS_ONLY = KINDS.map((_, i) => i === KIND_TRUCK || i === KIND_HELI || i === KIND_LIFT);
 
 /** What an army of `pop` points costs per minute. */
 export function upkeepPerMinute(pop: number): number {
@@ -146,7 +152,7 @@ export function updateLogistics(w: World): void {
   for (let i = tick % TICK_RATE; i < n; i += TICK_RATE) {
     if (w.state[i] !== STATE_ALIVE || w.carrier[i] >= 0) continue;
     const kindId = w.kind[i];
-    if (!NEEDS_SUPPLY[kindId]) continue;
+    if (!NEEDS_SUPPLY[kindId] && !MENDS_ONLY[kindId]) continue;
     const here =
       w.supplyMap[
         w.team[i] * SUPPLY_CELLS +
@@ -154,6 +160,15 @@ export function updateLogistics(w: World): void {
           (w.posX[i] >> SUPPLY_SHIFT)
       ];
     if (here === OFF_SYSTEM) continue;
+    if (!NEEDS_SUPPLY[kindId]) {
+      // No rations to wait for: in supply and quiet is enough.
+      const max = kindOf(w, i).hp;
+      if (here !== 0 && w.hp[i] < max && w.attack[i] < 0) {
+        const hp = w.hp[i] + Math.max(1, Math.trunc(max / MEND_SECONDS));
+        w.hp[i] = hp > max ? max : hp;
+      }
+      continue;
+    }
     if (here !== 0) {
       const r = w.ration[i] + RATION_GAIN;
       w.ration[i] = r > RATION_MAX ? RATION_MAX : r;
