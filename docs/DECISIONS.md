@@ -3895,7 +3895,32 @@ box-selects the opening force with the mouse, right clicks and checks that it mo
 page error; CI runs it (job `orders`). A lint rule (`no-use-before-define`) was tried and
 left out: 46 hits, all module constants read from functions, which are safe.
 
-## 164. Bugs from an outside code audit: sim part (2026-11-28)
+## 164. Who spent what in a shared army (2026-11-28)
+
+The last missing piece of deeper co-op (146). The money stays the army's and anyone may
+spend it on anything (Fabio's rule: nothing locked); the sim now keeps the books, so the
+team panel and the end screen can say who put it where.
+
+- `World.spent` (src/sim/spend.ts): a row per player and one per army for what nobody in
+  particular paid for: supplies, fuel and credits paid out, units bought, buildings put
+  up, and how much went on units, on buildings and on everything else (research, air
+  strikes, field works, cameras). It follows from the orders, so every machine keeps the
+  same books, and it is not in the hash (a test wipes it every tick and the hash holds).
+- Who pays: the player whose order spent it (`w.payer`, set around each command in
+  `step`). Spending that comes later is booked to whoever set it going: a factory on
+  repeat to whoever turned repeat on, a bulk order to whoever ordered those units (the
+  player with most of that kind still on order goes first; cutting an order comes off
+  your own first), a standing order to whoever set it. A refund from a queue goes back to
+  the player who paid for that place on it (`sQueueBy`). Commanders' reinforcements are
+  nobody's until commanders belong to a player; the end screen shows them on a line of
+  their own.
+- Team panel: a line under each player, "spent 1.2k supplies · 300 fuel · 800 credits ·
+  14 units, 2 buildings", with where it went in the tooltip. End screen: a Spent table
+  (supplies, fuel, credits, units, buildings) under the per-player score.
+- Checked with two headless players over `?net=local`: both screens showed the same books
+  through 40+ hash checks, no desync. The real broker cannot be reached from the cloud.
+
+## 165. Bugs from an outside code audit: sim part (2026-11-28)
 
 Fabio passed on a code audit written by another model. Every bug claim in it was checked
 against the code before anything changed. Fixed, each with a test in `tests/audit.test.ts`
@@ -3927,6 +3952,7 @@ that fails on the old code:
   searched nearest first, for direct fire and for guns.
 
 Checked and left as it is:
+
 - When no route can be drawn this tick, a unit walks straight (documented in
   `acquireField`). Making it wait instead was tried: the computer laid half the field works
   it used to (the AI test caught it), because units with new goals every second starved.

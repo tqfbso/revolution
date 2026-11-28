@@ -1,4 +1,4 @@
-// Bugs found by the code audit of 2026-11-28 (decision 164): each test fails on the code
+// Bugs found by the code audit of 2026-11-28 (decision 165): each test fails on the code
 // before the fix.
 import { describe, expect, it } from 'vitest';
 import { createAi, ceaseFire, follow } from '../src/sim/ai';
