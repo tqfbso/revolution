@@ -3919,3 +3919,34 @@ team panel and the end screen can say who put it where.
   (supplies, fuel, credits, units, buildings) under the per-player score.
 - Checked with two headless players over `?net=local`: both screens showed the same books
   through 40+ hash checks, no desync. The real broker cannot be reached from the cloud.
+
+## 165. Speed pass from the outside code audit (2026-11-28)
+
+Fabio had another model audit the code. Every performance claim was checked against the
+code and measured before anything changed. Findings that held and were worth it went in;
+the look and the sim are unchanged (same world hashes on Kowloon and on four armies, golden
+games pass).
+
+- Buildings: the cutaway's dots (Y) used `alphaTest` on the one building material, so every
+  wall in every city had a discard in its shader, which stops the GPU from rejecting hidden
+  pixels before shading them, in the shadow pass too. Now there are two materials sharing
+  every node; the buildings wear the dotted one only while the cutaway actually shows.
+- Far facades: frame columns and drainpipes (thin both ways, mullions 7 cm wide) were kept
+  in the far version because they are long. They are now left out like everything else
+  smaller than a car. Kowloon from 800 m: 28% fewer triangles.
+- Ambient occlusion fades out between 260 and 360 m and its passes are skipped beyond: its
+  reach is 0.9 m, under a pixel from there. A second pipeline without it shares the scene pass.
+- Worker: every typed array of a snapshot is handed over, not copied (a snapshot field must
+  never be one of the world's own arrays). The world hash is worked out once a tick even
+  when both the shared game and the overlay ask for it.
+- Models only for the armies in the battle: a two-army game built a third arsenal for the
+  empty slots (`armyCount()` in army.ts; other slots still build lazily if ever needed).
+- Bodies: while men are thrown and the camera is still, only the flights are redrawn and
+  uploaded, not every body on the ground. Fog texture one byte a cell and uploaded only
+  when it changed. Minimap redraws fast only while a ring runs (3.6 s, not 9 s) and
+  allocates nothing per unit. Tracers allocate nothing. Ruin smoke beyond 700 m is not
+  made (as for fires). The air's paths are worked out once, not on every collapse.
+- Checked and left: hashing costs 0.65 ms a second; the sim is 0.3 ms a tick on Kowloon and
+  1.2 ms with four armies (the 50 ms budget is nowhere near), so its O(n²) loops are not
+  where frame rate goes; moving unit culling earlier saves a few atan2 calls; tiny props'
+  shadows and window back faces would change the look or need per-part facing.
