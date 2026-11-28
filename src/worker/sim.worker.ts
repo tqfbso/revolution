@@ -417,6 +417,7 @@ function postSnapshot(w: World, simMs: number): void {
     structScar,
     cameras: Float32Array.from(cams),
     townOwner: w.townOwner.slice(0, map.townCount),
+    townFolk: w.townFolk.slice(0, map.townCount),
     townCapturer: w.townCapturer.slice(0, map.townCount),
     townProgress,
     credits: Array.from(w.credits),

@@ -78,7 +78,14 @@ export const SHAPES: readonly { name: string; tip: string }[] = [
  * 1 Western alliance, 2 Russia, 3 China). No faction keeps the old block everywhere, so a
  * game without factions plays to the bit as it did before there were shapes.
  */
-export const DOCTRINE: readonly number[] = [SHAPE_BLOCK, SHAPE_WEDGE, SHAPE_LINE, SHAPE_VEE];
+export const DOCTRINE: readonly number[] = [
+  SHAPE_BLOCK,
+  SHAPE_WEDGE,
+  SHAPE_LINE,
+  SHAPE_VEE,
+  // The rebels (I8) cross open ground strung out in a line, like Russia.
+  SHAPE_LINE,
+];
 
 /** How a unit keeps station on its lead. */
 export const BERTH_NONE = 0;

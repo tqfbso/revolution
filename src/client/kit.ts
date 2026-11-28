@@ -42,6 +42,8 @@ export const COATS: readonly (readonly [number, number, number])[] = [
   [1, 1, 1],
   [0.66, 0.9, 0.62],
   [1.55, 1.38, 1.02],
+  // The rebels: whatever olive they have, sun-faded and dusty.
+  [1.18, 1.06, 0.86],
 ];
 
 /**

@@ -11,7 +11,8 @@ import { openMenu, toMenu, wantsMenu } from './client/menu';
 import { matchFromParams, matchLabel, matchToParams } from './client/setup';
 import { isVersus } from './sim/match';
 import { runTickers, tickHtml, wireTickers } from './client/ticker';
-import { FACTIONS } from './sim/factions';
+import { FACTIONS, FACTION_REBEL } from './sim/factions';
+import { TOWN_FOLK, VOLUNTEER_TICKS } from './sim/rebels';
 import * as THREE from 'three/webgpu';
 import { CMD_AIRSTRIKE, CMD_ASSIGN, CMD_PARADROP, CMD_SPAWN, type Command } from './sim/commands';
 import { fx } from './sim/fixed';
@@ -682,6 +683,7 @@ async function start(): Promise<void> {
   setInterval(() => {
     if (!townsEl) return;
     const me = units.playerTeam;
+    const rebel = factionOf(me) === FACTION_REBEL;
     let held = 0;
     let squares = '';
     const taking: string[] = [];
@@ -691,7 +693,15 @@ async function start(): Promise<void> {
       if (owner === me) held++;
       const colour = TEAM_CSS[owner] ?? '#b9c4cf';
       const who = TEAM_NAME[owner] ?? 'nobody';
-      squares += `<i style="background:${colour}" title="${map.townName[t]}: held by ${who}"></i>`;
+      // The rebels (I8) live off the people: say how many are still at home in each town.
+      const folk = rebel ? (structures.townFolk[t] ?? 0) : -1;
+      const people =
+        folk < 0
+          ? ''
+          : folk >= TOWN_FOLK
+            ? `. ${folk} people at home: they hide your fighters and report the enemy${owner === me ? ', and send you volunteers' : ''}`
+            : `. ${folk} people at home: too few to help you`;
+      squares += `<i style="background:${colour}" title="${map.townName[t]}: held by ${who}${people}"></i>`;
       if (TEAM_NAME[by] !== undefined) {
         taking.push(
           `<span style="color:${TEAM_CSS[by]}">${map.townName[t]} ${structures.townProgress[t]}%</span>`,
@@ -701,7 +711,7 @@ async function start(): Promise<void> {
     let html = '';
     if (map.townCount > 0) {
       html +=
-        `<span title="Each flag you hold pays ${TOWN_INCOME} credits a second">Flags <b>${held}</b> of ${map.townCount}</span>` +
+        `<span title="Each flag you hold pays ${TOWN_INCOME} credits a second${rebel ? `. A town of yours with people still at home sends a band of volunteers every ${VOLUNTEER_TICKS / 20} seconds` : ''}">Flags <b>${held}</b> of ${map.townCount}</span>` +
         `<span class="flags">${squares}</span>`;
       if (taking.length > 0) html += tickHtml('taking', taking.join(' · '));
     }

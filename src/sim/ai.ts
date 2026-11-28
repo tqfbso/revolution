@@ -11,7 +11,7 @@
 //   production what to build next, from the army it wants and the enemy it has seen
 //   military   town garrisons, scouts, a reserve that answers alarms, and a field army
 //              that picks an objective, picks the crossing to reach it by, and assaults
-import { FACTIONS, kindOf } from './factions';
+import { FACTIONS, FACTION_REBEL, kindOf, pointsOf } from './factions';
 import { hungryPoints } from './logistics';
 import { AIR_STICK, AIR_SWARM, STRIKE_READY, strikeOf, strikeStatus } from './air';
 import {
@@ -83,6 +83,7 @@ import {
 import { seedRng, nextInt } from './rng';
 import {
   WORKS,
+  WORK_BOMB,
   WORK_SANDBAG,
   WORK_TRAP,
   WORK_TRENCH,
@@ -118,7 +119,6 @@ import {
   KIND_STRIKE,
   KIND_TANK,
   KIND_TRUCK,
-  POINTS,
 } from './units';
 import {
   FLAG_BOARD,
@@ -617,6 +617,8 @@ export interface Ai {
   foeWorks: number;
   /** Per town, then per crossing: no new look at its field works before this tick. */
   fortAt: Int32Array;
+  /** The rebels (I8): when it next looks for roads to lay bombs on. */
+  bombAt: number;
   /** Per town: a cell of the sandbags it put up there, or -1. */
   nest: Int32Array;
   /** Field works it has ordered so far. */
@@ -758,6 +760,7 @@ export function createAi(team: number, level: AiLevel = 'normal', seed = 1, huma
     grudge: new Int32Array(MAX_TOWNS + 1),
     foeWorks: 0,
     fortAt: new Int32Array(MAX_TOWNS + 16),
+    bombAt: 0,
     nest: new Int32Array(MAX_TOWNS).fill(-1),
     laid: 0,
     loaded: [],
@@ -1413,7 +1416,7 @@ function economy(ai: Ai, w: World, out: Command[]): void {
     hqDone &&
     trucksAll < truckTarget &&
     w.sQueueLen[ai.hq] < 2 &&
-    w.pop[team] + POINTS[KIND_TRUCK] <= w.popCap[team] &&
+    w.pop[team] + pointsOf(w, team, KIND_TRUCK) <= w.popCap[team] &&
     canPay(w, team, unitPrice(w, team, KIND_TRUCK), 0, 0, 0)
   ) {
     out.push({ type: CMD_TRAIN, structure: ai.hq, kind: KIND_TRUCK });
@@ -1497,7 +1500,13 @@ function economy(ai: Ai, w: World, out: Command[]): void {
   } else if (count[B_WORKS] === 0 && ai.trucks.length >= 7) type = B_WORKS;
   else if (w.tier[team] >= 2 && count[B_DRONES] === 0) type = B_DRONES;
   else if (count[B_BARRACKS] < 2 && minute >= 4 && factories < tune.factories) type = B_BARRACKS;
-  else if (tune.helis > 0 && count[B_HELIPAD] === 0 && count[B_DRONES] > 0 && minute >= 10)
+  else if (
+    tune.helis > 0 &&
+    FACTIONS[w.faction[team]].roster[KIND_HELI] &&
+    count[B_HELIPAD] === 0 &&
+    count[B_DRONES] > 0 &&
+    minute >= 10
+  )
     type = B_HELIPAD;
   else if (factories < tune.factories && busy && w.supplies[team] >= 500) {
     // More of whatever it can keep fed: a motor pool only where there is fuel for it.
@@ -1650,7 +1659,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
       const item = w.sQueue[s * QUEUE_MAX + q];
       if (item === TIER_ITEM) continue;
       have[item]++;
-      queued += POINTS[item];
+      queued += pointsOf(w, team, item);
     }
     if (w.sType[s] !== B_HQ && w.sType[s] !== B_DEPOT) lines.push(s);
   }
@@ -1683,7 +1692,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
     for (let k = 0; k < KIND_COUNT; k++) {
       const p = unitPrice(w, team, k);
       if (p.from !== w.sType[s] || p.tier > tier || !canPay(w, team, p, s0, f0, c0)) continue;
-      if (POINTS[k] > room) continue;
+      if (pointsOf(w, team, k) > room) continue;
       let score = want[k] * (total + 10) - have[k] * sumWant;
       if (k === KIND_RECON || k === KIND_DRONE) {
         // Eyes are bought by the head, not as a share of the army.
@@ -1714,7 +1723,7 @@ function production(ai: Ai, w: World, out: Command[]): void {
     c0 += p.credits;
     have[best]++;
     total++;
-    room -= POINTS[best];
+    room -= pointsOf(w, team, best);
   }
   // New units report to the staging area.
   for (const s of lines) {
@@ -1895,6 +1904,70 @@ function belt(
   return gaps >= 2;
 }
 
+/** Roadside bombs the rebels' computer keeps laid at once, and how many it lays at a time. */
+const BOMBS_KEPT = 12;
+const BOMBS_AT_ONCE = 3;
+
+/**
+ * The rebels (I8): a sapper squad lays a few bombs on the roads just outside a town its
+ * army holds, a different town and different stretches of road each time. True if it
+ * gave the order.
+ */
+function roadBombs(ai: Ai, w: World, out: Command[], free: number[], purse: number): boolean {
+  const map = w.map;
+  if (w.tick < ai.bombAt || ai.level === 'recruit') return false;
+  ai.bombAt = w.tick + MINUTE;
+  const price = WORKS[WORK_BOMB].supplies;
+  let laid = 0;
+  for (let k = 0; k < w.workCount; k++) {
+    const c = w.workCells[k];
+    if (w.wKind[c] === WORK_BOMB && w.wTeam[c] === ai.team) laid++;
+  }
+  const want = Math.min(BOMBS_AT_ONCE, BOMBS_KEPT - laid, Math.trunc(purse / price));
+  if (want <= 0) return false;
+  const held: number[] = [];
+  for (let t = 0; t < map.townCount; t++) if (w.townOwner[t] === ai.team) held.push(t);
+  if (held.length === 0) return false;
+  const t = held[nextInt(ai.rng, held.length)];
+  const cx = map.townX[t] >> CELL_SHIFT;
+  const cy = map.townY[t] >> CELL_SHIFT;
+  const inner = (map.townR[t] >> CELL_SHIFT) + 1;
+  const outer = inner + 6;
+  const roads: number[] = [];
+  for (let y = cy - outer; y <= cy + outer; y++) {
+    if (y < 3 || y >= MAP_CELLS - 3) continue;
+    for (let x = cx - outer; x <= cx + outer; x++) {
+      if (x < 3 || x >= MAP_CELLS - 3) continue;
+      const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+      if (d2 < inner * inner || d2 > outer * outer) continue;
+      const c = y * MAP_CELLS + x;
+      if (map.road[c] !== 0 && w.wKind[c] === 0 && canFortify(map, WORK_BOMB, c)) roads.push(c);
+    }
+  }
+  if (roads.length === 0) return false;
+  const cells: number[] = [];
+  for (let n = 0; n < want * 4 && cells.length < want; n++) {
+    const c = roads[nextInt(ai.rng, roads.length)];
+    // Not two side by side: one vehicle would set off both.
+    if (cells.every((o) => Math.abs((o & 255) - (c & 255)) + Math.abs((o >> 8) - (c >> 8)) > 3))
+      cells.push(c);
+  }
+  // Whichever idle squad is nearest the town.
+  let who = free[0];
+  let best = Infinity;
+  for (const i of free) {
+    const dx = (w.posX[i] - map.townX[t]) >> 4;
+    const dy = (w.posY[i] - map.townY[t]) >> 4;
+    const d = dx * dx + dy * dy;
+    if (d < best) {
+      best = d;
+      who = i;
+    }
+  }
+  out.push({ type: CMD_FORTIFY, units: [who], work: WORK_BOMB, cells });
+  return true;
+}
+
 /**
  * Field works: the towns it holds get a belt of wire and obstacles on the side the enemy
  * comes from, and so does its bank of a bare ford. Its sappers put them up when nothing is
@@ -1912,6 +1985,8 @@ function fortify(ai: Ai, w: World, out: Command[]): void {
   if (strongHouses(ai, w, out, free)) return;
   let purse = w.supplies[ai.team] - ai.resS - 120;
   if (purse < 60) return;
+  // The rebels mine the roads into their towns before they string any wire.
+  if (w.faction[ai.team] === FACTION_REBEL && roadBombs(ai, w, out, free, purse)) return;
   const sites = map.townCount + ai.crossings.length;
   for (let k = 0; k < sites && k < ai.fortAt.length; k++) {
     if (ai.fortAt[k] > tick) continue;

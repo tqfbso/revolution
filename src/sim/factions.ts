@@ -1,4 +1,4 @@
-// The three armies (M10). A faction is the same seventeen kinds of unit with its own version
+// The armies (M10, and the rebels of I8). A faction is the same seventeen kinds of unit with its own version
 // of each: different toughness, reach, rate of fire, price and time to build, its own
 // names, and one kind it does not field at all. Nothing else in the sim knows about
 // factions: it asks `kindOf` for a unit's numbers where it used to read the one table.
@@ -26,6 +26,11 @@ import {
   KIND_STRIKE,
   KIND_TANK,
   KIND_TRUCK,
+  POINTS,
+  PROFILE_DRONE,
+  PROFILE_HELI,
+  PROFILE_PLANE,
+  PROFILE_STRIKE,
   type UnitKind,
 } from './units';
 
@@ -36,7 +41,12 @@ export const FACTION_NATO = 1;
 export const FACTION_RUSSIA = 2;
 /** China: numbers, drones by the swarm, engineers, everything on wheels. */
 export const FACTION_CHINA = 3;
-export const FACTION_COUNT = 4;
+/**
+ * The rebels (I8, decision 162): the army of an invaded country. Fighters by the hundred,
+ * pickups with guns on them, no aircraft at all. At home in the towns (see rebels.ts).
+ */
+export const FACTION_REBEL = 4;
+export const FACTION_COUNT = 5;
 
 /** How one faction's version of a kind differs from the table. Percentages are of 100. */
 interface Tweak {
@@ -49,6 +59,8 @@ interface Tweak {
   /** Percent of the time between shots: under 100 fires faster. */
   reload?: number;
   damage?: number;
+  /** Percent of what it does to helicopters, planes and drones (on top of `damage`). */
+  air?: number;
   siege?: number;
   blast?: number;
   jam?: number;
@@ -58,6 +70,8 @@ interface Tweak {
   time?: number;
   /** How much of its army the computer makes of this kind, percent of its usual share. */
   share?: number;
+  /** Army points it counts for, where that is not the table's (see POINTS). */
+  points?: number;
 }
 
 interface Spec {
@@ -167,7 +181,106 @@ const SPECS: readonly Spec[] = [
       [KIND_MORTAR]: { name: 'Mortar team', cost: 85, time: 85 },
     },
   },
+  {
+    // An invaded country's own: what the people could arm, what they took from the invader,
+    // and what a workshop can bolt onto a pickup. Man for man and gun for gun it is worse
+    // than any regular army; it is cheaper, quicker to raise and to move, and there is more
+    // of it. No helicopters, no paratroops, no strike aircraft: it has no air force.
+    name: 'Rebels',
+    short: 'rebels',
+    line: 'The army of an invaded country: fighters raised fast and cheap, volunteers from every town it holds, pickups with guns on them, rocket teams, home-made drones. Hard to see and quick on its feet in towns where people still live. No aircraft at all, and few tanks, all captured.',
+    without: [KIND_HELI, KIND_LIFT, KIND_PARA],
+    tweaks: {
+      [KIND_TANK]: { name: 'Captured tank', hp: 90, cost: 125, time: 150, share: 40 },
+      // Every band has a shoulder-launched missile or two: its only answer to a gunship
+      // besides the gun trucks.
+      [KIND_INFANTRY]: {
+        name: 'Rebel fighters',
+        hp: 72,
+        air: 250,
+        cost: 70,
+        time: 60,
+        share: 125,
+      },
+      // Rocket-propelled grenades, not guided missiles: half the reach, twice the rate, and
+      // a team for the price of a rifle squad. Hunter-killer teams, from close in.
+      [KIND_ATGM]: {
+        name: 'Rocket team',
+        range: -9,
+        reload: 55,
+        damage: 65,
+        cost: 60,
+        time: 60,
+        share: 150,
+      },
+      [KIND_IFV]: {
+        name: 'Technical',
+        hp: 42,
+        speed: 140,
+        damage: 90,
+        carry: 1,
+        cost: 50,
+        time: 50,
+        share: 190,
+        points: 1,
+      },
+      [KIND_ARTILLERY]: {
+        name: 'Rocket truck',
+        hp: 60,
+        speed: 150,
+        range: -40,
+        reload: 75,
+        blast: 105,
+        damage: 75,
+        cost: 55,
+        time: 60,
+        share: 130,
+        points: 2,
+      },
+      [KIND_RECON]: { name: 'Lookouts', cost: 50, time: 50, share: 130 },
+      [KIND_DRONE]: { name: 'Hobby drone', sight: -8, cost: 50, time: 50 },
+      [KIND_STRIKE]: {
+        name: 'Racing drone',
+        damage: 80,
+        cost: 55,
+        time: 55,
+        share: 150,
+      },
+      [KIND_AD]: {
+        name: 'Gun truck',
+        hp: 55,
+        speed: 130,
+        range: -5,
+        cost: 55,
+        time: 60,
+        share: 140,
+        points: 1,
+      },
+      [KIND_EW]: {
+        name: 'Jammer van',
+        hp: 60,
+        speed: 120,
+        jam: 70,
+        cost: 60,
+        time: 70,
+        share: 130,
+        points: 1,
+      },
+      [KIND_TRUCK]: { name: 'Supply lorry', hp: 85, speed: 110 },
+      [KIND_ENGINEER]: { name: 'Sappers', cost: 70, time: 70 },
+      [KIND_MORTAR]: { name: 'Mortar crew', cost: 75, time: 70, share: 130 },
+    },
+  },
 ];
+
+/** Kinds that are shot at in the air: what a tweak's `air` applies to. */
+const IS_FLYER = KINDS.map(
+  (k) =>
+    k.profile === PROFILE_HELI ||
+    k.profile === PROFILE_PLANE ||
+    k.profile === PROFILE_DRONE ||
+    k.profile === PROFILE_STRIKE,
+);
 
 const pct = (n: number, p: number | undefined): number =>
   p === undefined || n === 0 ? n : Math.max(1, Math.round((n * p) / 100));
@@ -183,7 +296,10 @@ function derive(k: UnitKind, t: Tweak | undefined): UnitKind {
     range: k.range === 0 ? 0 : Math.max(fx(1), k.range + fx(t.range ?? 0)),
     sight: k.sight + fx(t.sight ?? 0),
     reload: pct(k.reload, t.reload),
-    damage: t.damage === undefined ? k.damage : k.damage.map((d) => pct(d, t.damage)),
+    damage:
+      t.damage === undefined && t.air === undefined
+        ? k.damage
+        : k.damage.map((d, target) => pct(pct(d, t.damage), IS_FLYER[target] ? t.air : undefined)),
     siege: pct(k.siege, t.siege),
     blast: pct(k.blast, t.blast),
     jam: pct(k.jam, t.jam),
@@ -204,6 +320,8 @@ export interface Faction {
   time: readonly number[];
   /** Percent of the computer's usual share of each kind in its army. */
   share: readonly number[];
+  /** Army points per kind (the table's POINTS, but for what a tweak says). */
+  points: readonly number[];
 }
 
 export const FACTIONS: readonly Faction[] = SPECS.map((s, f) => ({
@@ -215,7 +333,13 @@ export const FACTIONS: readonly Faction[] = SPECS.map((s, f) => ({
   cost: KINDS.map((_, i) => s.tweaks[i]?.cost ?? 100),
   time: KINDS.map((_, i) => s.tweaks[i]?.time ?? 100),
   share: KINDS.map((_, i) => s.tweaks[i]?.share ?? 100),
+  points: KINDS.map((_, i) => s.tweaks[i]?.points ?? POINTS[i]),
 }));
+
+/** What a unit of `kind` counts for against the army limit of `team`. */
+export function pointsOf(w: World, team: number, kind: number): number {
+  return FACTIONS[w.faction[team]].points[kind];
+}
 
 /** The numbers of unit `i`: its faction's version of its kind. */
 export function kindOf(w: World, i: number): UnitKind {
