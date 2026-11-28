@@ -1066,7 +1066,7 @@ export class CommandCard {
         }
         if (
           factionOf(ME) === FACTION_REBEL &&
-          this.builders().some((id) => KINDS[u.kindOf(id)].engineer)
+          this.builders().some((id) => KINDS[this.units.kindOf(id)].engineer)
         ) {
           // The rebels' own (I8): laid by sappers, sprung by the first enemy vehicle over it.
           const w = WORKS[WORK_BOMB];

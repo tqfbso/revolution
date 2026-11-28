@@ -3882,3 +3882,15 @@ Not done: informants use the army-wide "spotted" mark, so in a free-for-all the 
 armies see what the rebels are told; tunnels as such; the story; the game's title still
 reads Revolution though Fabio called it Rebellion here; a 108 game round (36 played).
 Real frame rate cannot be measured from the cloud.
+
+## 163. Orders lost when playing the Rebels: the command card crash (2026-11-28)
+
+Playing the Rebels, any selection with a truck or sappers in it made the command card throw
+on every redraw ("Cannot access before initialization": the new roadside bomb button read
+`u` inside a callback a few lines above `const u` in the same block). The card went blank
+and the pointer handler stopped before the order was sent, so units could be selected but
+not ordered. TypeScript does not flag a const read from a closure before its line. Fixed by
+reading `this.units` there. `tools/ordercheck.mjs` now starts a battle as each army,
+box-selects the opening force with the mouse, right clicks and checks that it moves with no
+page error; CI runs it (job `orders`). A lint rule (`no-use-before-define`) was tried and
+left out: 46 hits, all module constants read from functions, which are safe.
