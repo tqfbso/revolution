@@ -3898,6 +3898,7 @@ left out: 46 hits, all module constants read from functions, which are safe.
 ## Audit UX 1. Rings on the ground, coloured order marks, the fourth army's colour, a layout number (2026-11-28)
 
 From the code audit Fabio passed on (section 3B and 4.3):
+
 - Range rings: selecting mortars or guns draws an amber ring at their reach and a broken red
   ring inside it where they cannot fire (too close); air defence and missile teams their
   reach; scouts and drones a pale blue ring of how far they see; jammers a broken blue ring of
