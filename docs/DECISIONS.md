@@ -3971,3 +3971,16 @@ From the code audit (section 3C), all synthesised like the rest (src/client/soun
   on a clear night. The jet's whine used a fixed 48 kHz rate; it now uses the device's.
 - Event log: the Log button (top right) or Shift+Backspace lists every alert and report of
   the battle (80 kept) with the battle clock and grid square; a click looks there.
+
+## 165. Road speed: wheels +30%, tracks +15% (2026-11-28)
+
+Fabio approved it from the code audit. A ground vehicle on a road or paved square
+(`map.road` not 0) moves 30% faster on wheels and 15% faster on tracks; men on foot and
+aircraft gain nothing. Wheels or tracks follow each army's real kit (`src/sim/roads.ts`):
+trucks and jammers are wheeled everywhere; carriers are tracked in the alliance and Russia,
+wheeled in China and for the rebels (technicals); artillery is tracked except China's truck
+gun and the rebels' rocket truck; air defence is tracked except Russia's Pantsir and the
+rebels' gun truck. A captured tank stays tracked. A convoy's pace is raised on the road too.
+Hungry and pinned vehicles get no bonus. Route finding does not yet prefer roads (cell costs
+are 1 or 2, too coarse for a 15% preference); on the city maps vehicles drive the streets
+anyway. Golden hashes moved (city and four corners).

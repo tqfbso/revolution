@@ -1,6 +1,7 @@
 import { ON_OTHER, book } from './spend';
 import { FACTIONS, FACTION_COUNT, SIGHT_SQ, kindFor, kindOf } from './factions';
 import { amongFolk, isRebel, townPace, updateRebels } from './rebels';
+import { roadPace } from './roads';
 import { civiliansBuried, civiliansShelled, civiliansShot, updateCivilians } from './civilians';
 import {
   HUNGRY_RELOAD,
@@ -3417,9 +3418,7 @@ function steer(w: World): void {
         ? (w.speed[i] * HUNGRY_SPEED) >> 8
         : w.pinned[i] > tick
           ? (w.speed[i] * PIN_SPEED) >> 8
-          : isRebel(w, w.team[i])
-            ? townPace(w, i, w.speed[i])
-            : w.speed[i];
+          : roadPace(w, i, cell, isRebel(w, w.team[i]) ? townPace(w, i, w.speed[i]) : w.speed[i]);
     let vx = 0;
     let vy = 0;
     let busy = false;
@@ -3534,7 +3533,13 @@ function steer(w: World): void {
     }
     if (!busy && (flags & FLAG_MOVING) !== 0) {
       // The pace of its group, which rebels in a town beat like their own (I8).
-      const group = isRebel(w, w.team[i]) ? townPace(w, i, w.orderSpeed[i]) : w.orderSpeed[i];
+      // On a road it is the road's pace too (decision 165).
+      const group = roadPace(
+        w,
+        i,
+        cell,
+        isRebel(w, w.team[i]) ? townPace(w, i, w.orderSpeed[i]) : w.orderSpeed[i],
+      );
       const pace = group < s ? group : s;
       // On a march that keeps a shape, its place in it comes before the route.
       const kept = w.lead[i] >= 0 ? keepStation(w, i, cls, s, pace) : 0;
