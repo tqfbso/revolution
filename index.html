@@ -1037,6 +1037,12 @@
         opacity: 0.35;
         cursor: default;
       }
+      #team .spent {
+        margin: -2px 0 3px 18px;
+        font-size: 11px;
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
       #team .foot {
         display: flex;
         gap: 14px;
@@ -1508,6 +1514,9 @@
       }
       .screen .seat.stat > :nth-child(n + 3) {
         text-align: right;
+      }
+      .screen .seat.stat.spend {
+        grid-template-columns: minmax(0, 1fr) 72px 56px 64px 48px 64px;
       }
       .screen .seat.stat.h {
         min-height: 20px;

@@ -1,3 +1,4 @@
+import { ON_OTHER, book } from './spend';
 import { FACTIONS, FACTION_COUNT, SIGHT_SQ, kindFor, kindOf } from './factions';
 import { amongFolk, isRebel, townPace, updateRebels } from './rebels';
 import { civiliansBuried, civiliansShelled, civiliansShot, updateCivilians } from './civilians';
@@ -465,11 +466,15 @@ export function step(w: World, commands: readonly Command[]): void {
     // A signed order goes in only as far as it is its army's to give.
     const cmd = admit(w, given);
     if (cmd === null) continue;
+    // Whatever the order spends is booked to the player who gave it (src/sim/spend.ts).
+    const by = cmd.by;
+    w.payer = by !== undefined && by >= 0 && by < STAT_SEATS ? by : NO_SEAT;
     try {
       applyCommand(w, cmd);
     } catch (e) {
       console.warn('order skipped:', e);
     }
+    w.payer = NO_SEAT;
   }
   updateRoutes(w);
   updateWander(w);
@@ -2360,6 +2365,7 @@ function placeCameras(w: World, ids: readonly number[]): void {
     w.camSeen[free] = 0;
     w.camBlind[free] = 0;
     w.supplies[team] -= CAMERA_COST;
+    book(w, team, w.payer, { supplies: CAMERA_COST, fuel: 0, credits: 0 }, ON_OTHER);
     w.events.push(EV_CAMERA, free, team);
   }
 }

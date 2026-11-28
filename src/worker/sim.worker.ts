@@ -457,6 +457,7 @@ function postSnapshot(w: World, simMs: number): void {
     task,
     routes: Float32Array.from(routes),
     stats: w.stats.slice(),
+    spent: w.spent.slice(),
     civilians: Float32Array.from(civs),
     civStats: Int32Array.from([w.civCount, civHome, w.civEscaped, ...w.civKilled]),
     siteStock: w.siteStock.slice(0, map.siteCount),

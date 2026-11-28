@@ -10,7 +10,15 @@ import {
   STAT_SEAT0,
   STAT_STRIDE,
   STAT_TEAMS,
+  SPENT_BUILDINGS,
+  SPENT_CREDITS,
+  SPENT_FUEL,
+  SPENT_NOBODY,
+  SPENT_STRIDE,
+  SPENT_SUPPLIES,
+  SPENT_UNITS,
 } from '../sim/world';
+import { spentLine } from './team';
 import { saveLastBattle } from './menu';
 import type { Snapshot } from '../worker/protocol';
 
@@ -151,7 +159,9 @@ export class Debrief {
           })
           .join('') +
         `<p class="small">A unit fights for the player who last ordered it directly. ` +
-        `Units nobody has ordered count for the army only.</p></div>`;
+        `Units nobody has ordered count for the army only.</p>` +
+        this.spending(s.spent, players) +
+        `</div>`;
     }
     html +=
       `</div><div class="bar"><button id="debrief-close">Keep watching</button>` +
@@ -161,5 +171,34 @@ export class Debrief {
       this.html = html;
       this.el.innerHTML = html;
     }
+  }
+
+  /** Who spent what of the army's money (src/sim/spend.ts), a line a player. */
+  private spending(spent: Int32Array | undefined, players: DebriefPlayer[]): string {
+    if (!spent) return '';
+    const rows: { name: string; row: number }[] = players.map((p, k) => ({ name: p.name, row: k }));
+    const nobody = SPENT_NOBODY(this.me);
+    const o = nobody * SPENT_STRIDE;
+    if (spent[o + SPENT_SUPPLIES] + spent[o + SPENT_FUEL] + spent[o + SPENT_CREDITS] !== 0) {
+      rows.push({ name: "Commanders' reinforcements", row: nobody });
+    }
+    const n = (v: number) => (v ?? 0).toLocaleString('en-US');
+    return (
+      `<div class="seat stat spend h" style="margin-top:8px"><b>Spent</b><span>Supplies</span>` +
+      `<span>Fuel</span><span>Credits</span><span>Units</span><span>Buildings</span></div>` +
+      rows
+        .map(({ name, row }) => {
+          const b = row * SPENT_STRIDE;
+          return (
+            `<div class="seat stat spend" title="${spentLine(spent, row).title}"><b>${name}</b>` +
+            `<span>${n(spent[b + SPENT_SUPPLIES])}</span><span>${n(spent[b + SPENT_FUEL])}</span>` +
+            `<span>${n(spent[b + SPENT_CREDITS])}</span><span>${n(spent[b + SPENT_UNITS])}</span>` +
+            `<span>${n(spent[b + SPENT_BUILDINGS])}</span></div>`
+          );
+        })
+        .join('') +
+      `<p class="small">The money is the army's and anyone may spend it. Each order is booked ` +
+      `to the player who gave it; bulk and standing orders to the player who set them.</p>`
+    );
   }
 }
