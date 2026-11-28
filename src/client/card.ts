@@ -26,6 +26,8 @@ import {
   CMD_LOAD,
   CMD_UNLOAD,
   CMD_ROOF,
+  CMD_MOUSEHOLE,
+  CMD_BLOCK,
   CMD_AMBUSH,
   type Command,
 } from '../sim/commands';
@@ -481,6 +483,8 @@ export class CommandCard {
     else if (act === 'entrench') this.armEntrench();
     else if (act === 'demolish') this.armDemolish();
     else if (act === 'roof') this.armRoof();
+    else if (act === 'mousehole') this.armMousehole();
+    else if (act === 'block') this.armBlock();
     else if (act === 'down') this.comeDown();
     else if (act === 'ambush') this.armAmbush();
     else if (act === 'amove') this.arm(this.armed === 'attack' ? '' : 'attack');
@@ -537,6 +541,28 @@ export class CommandCard {
     this.roof = !this.roof && this.climbers().length > 0;
     this.entrench = this.demolish = false;
     this.cancelAmbush();
+    this.html = '';
+  }
+
+  /**
+   * Mouseholes (decision 166) or Garrison block is in hand: the next right click on a
+   * building sends the selected engineers to knock through its block, or spreads the
+   * selected squads over the houses of its block.
+   */
+  mousehole = false;
+  block = false;
+
+  armMousehole(): void {
+    const on = !this.mousehole && this.sappers().length > 0;
+    this.roof = this.entrench = this.demolish = this.block = false;
+    this.mousehole = on;
+    this.html = '';
+  }
+
+  armBlock(): void {
+    const on = !this.block && this.climbers().length > 0;
+    this.roof = this.entrench = this.demolish = this.mousehole = false;
+    this.block = on;
     this.html = '';
   }
 
@@ -871,6 +897,20 @@ export class CommandCard {
       const rx = site >= 0 ? this.map.siteX[site] : fx(x);
       const ry = site >= 0 ? this.map.siteY[site] : fx(z);
       this.send({ type: CMD_RALLY, structure: this.building, x: rx, y: ry });
+      return true;
+    }
+    if (this.mousehole || this.block) {
+      // Stays in hand until a building is clicked.
+      if (structure < 0 || this.map.sKind[structure] !== S_BUILDING) return true;
+      if (this.mousehole) {
+        const units = this.sappers();
+        if (units.length > 0) this.send({ type: CMD_MOUSEHOLE, units, structure });
+      } else {
+        const units = this.climbers();
+        if (units.length > 0) this.send({ type: CMD_BLOCK, units, structure });
+      }
+      this.mousehole = this.block = false;
+      this.html = '';
       return true;
     }
     if (this.roof) {
@@ -1248,7 +1288,29 @@ export class CommandCard {
           'Right click a building: the selected squads go up on its roof (those inside it climb up, the rest walk there first). From a roof they see and reach further, a mortar can fire, and rockets hit a vehicle on its thin top plate. But there are no walls round them: they are seen, splinters reach them and machine guns pin them. A roof goes when the building is gutted.',
           'Shift R',
         );
-      } else this.roof = false;
+        special += this.button(
+          'block',
+          0,
+          'Garrison block',
+          null,
+          this.block ? 'right click a building' : 'then right click',
+          this.block,
+          'Right click a building: the selected squads spread out over the houses of its block, three to a house before any house fills, the houses nearest it first. Where engineers have knocked mouseholes through, squads go from house to house inside; otherwise they cross by the street.',
+          'Shift G',
+        );
+      } else this.roof = this.block = false;
+      if (has((k) => KINDS[k].engineer)) {
+        special += this.button(
+          'mousehole',
+          0,
+          'Mouseholes',
+          null,
+          this.mousehole ? 'right click a building' : 'then right click',
+          this.mousehole,
+          'Right click a building: the selected engineers go in and knock holes through its walls into the houses beside it, then on through the whole block, about eight seconds a hole. Squads in the block then move from house to house without stepping into the street: order them into another house as usual. A hole is open to anyone, the enemy too, once he has a house of the block.',
+          'Shift B',
+        );
+      } else this.mousehole = false;
       if (ids.some((id) => u.isMine(id) && (u.task[id] & TASK_ROOF) !== 0)) {
         special += this.button(
           'down',

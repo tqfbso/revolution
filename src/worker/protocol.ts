@@ -134,6 +134,8 @@ export interface Snapshot {
   structStage: Uint8Array;
   /** Per structure: fire and how it fell, see STRUCT_ALIGHT. */
   structFire: Uint8Array;
+  /** Mouseholes knocked through (decision 166): the pairs of holes.ts, in order. */
+  holes?: number[];
   /** Per building: what is left of its ground floor as 0..255 of that floor's own health. */
   structGround: Uint8Array;
   /**

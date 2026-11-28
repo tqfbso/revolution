@@ -2,6 +2,7 @@ import { ON_OTHER, book } from './spend';
 import { FACTIONS, FACTION_COUNT, SIGHT_SQ, kindFor, kindOf } from './factions';
 import { amongFolk, isRebel, townPace, updateRebels } from './rebels';
 import { roadPace } from './roads';
+import { applyHoleCommand, holedInto, startHop, updateHoles } from './holes';
 import { civiliansBuried, civiliansShelled, civiliansShot, updateCivilians } from './civilians';
 import {
   HUNGRY_RELOAD,
@@ -489,6 +490,7 @@ export function step(w: World, commands: readonly Command[]): void {
   updateLogistics(w);
   updateWorks(w);
   updateEntrench(w);
+  updateHoles(w);
   updateFelling(w);
   updateEyes(w);
   updateJamming(w);
@@ -636,6 +638,7 @@ function applyCommand(w: World, cmd: Command): void {
   }
   if (applyEconomyCommand(w, cmd) || applyWorkCommand(w, cmd)) return;
   if (applyUrbanCommand(w, cmd)) return;
+  if (applyHoleCommand(w, cmd, applyCommand)) return;
   if (applyDemolishCommand(w, cmd)) return;
   if (applyAirCommand(w, cmd)) return;
   if (applyAmbushCommand(w, cmd)) return;
@@ -648,7 +651,11 @@ function applyCommand(w: World, cmd: Command): void {
   if ('units' in cmd) {
     for (let k = 0; k < cmd.units.length; k++) {
       const id = cmd.units[k];
-      if (Number.isInteger(id) && id >= 0 && id < w.count) w.job[id] = JOB_NONE;
+      if (Number.isInteger(id) && id >= 0 && id < w.count) {
+        w.job[id] = JOB_NONE;
+        w.hopTo[id] = -1;
+        w.hopTo[id] = -1;
+      }
     }
   }
   switch (cmd.type) {
@@ -670,7 +677,9 @@ function applyCommand(w: World, cmd: Command): void {
       const all = validUnits(w, cmd.units);
       const units = all.filter((id) => {
         const kind = kindOf(w, id);
-        return garrison ? kind.garrison && w.inside[id] !== st : kind.siege > 0;
+        if (!garrison) return kind.siege > 0;
+        // From a house it can reach through mouseholes: from house to house (decision 166).
+        return kind.garrison && w.inside[id] !== st && !startHop(w, id, st);
       });
       // Everyone heads for the middle of the structure; they stop (or go in) on the way.
       const gx = ((2 * map.sX[st] + map.sW[st]) << CELL_SHIFT) >> 1;
@@ -1316,7 +1325,7 @@ function garrisonCapacity(w: World, s: number): number {
   return cells < GARRISON_MAX ? cells : GARRISON_MAX;
 }
 
-function hasRoom(w: World, s: number, team: number): boolean {
+export function hasRoom(w: World, s: number, team: number): boolean {
   return (
     w.sHp[s] > 0 &&
     (w.sOcc[s] === 0 || w.sOccTeam[s] === team) &&
@@ -1325,7 +1334,7 @@ function hasRoom(w: World, s: number, team: number): boolean {
   );
 }
 
-function enterBuilding(w: World, i: number, s: number): void {
+export function enterBuilding(w: World, i: number, s: number): void {
   const map = w.map;
   // One squad per room, so to speak: occupants sit on the centres of the building's cells.
   const k = w.sOcc[s] % (map.sW[s] * map.sH[s]);
@@ -1443,7 +1452,9 @@ function resolveStorms(w: World): void {
     if (stormAtk[s] === 0) stormBy[s] = i;
     stormAtk[s] += power;
     stormHp[s] += w.hp[i];
-    if (w.sWall[4 * s + faceToward(map, s, w.posX[i], w.posY[i])] <= 0) stormBreach[s] += power;
+    // Through a breached face, or through a mousehole from a house next door (decision 166).
+    if (w.sWall[4 * s + faceToward(map, s, w.posX[i], w.posY[i])] <= 0 || holedInto(w, s, team))
+      stormBreach[s] += power;
   }
   if (!any) return;
   for (let i = 0; i < n; i++) {

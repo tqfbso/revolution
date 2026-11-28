@@ -56,6 +56,8 @@ import {
   CMD_RESEARCH,
   CMD_SHAPE,
   CMD_ROOF,
+  CMD_MOUSEHOLE,
+  CMD_BLOCK,
   CMD_AMBUSH,
   CMD_SPAWN,
   CMD_STANCE,
@@ -118,6 +120,8 @@ const LISTS: Record<number, readonly string[]> = {
   [CMD_MARCH]: [],
   [CMD_ROOF]: ['units'],
   [CMD_AMBUSH]: ['units'],
+  [CMD_MOUSEHOLE]: ['units'],
+  [CMD_BLOCK]: ['units'],
 };
 
 /** Fields that, when present, must be numbers; and those that must be true or false. */

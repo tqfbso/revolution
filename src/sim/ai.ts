@@ -11,6 +11,7 @@
 //   production what to build next, from the army it wants and the enemy it has seen
 //   military   town garrisons, scouts, a reserve that answers alarms, and a field army
 //              that picks an objective, picks the crossing to reach it by, and assaults
+import { closedPair } from './holes';
 import { FACTIONS, FACTION_REBEL, kindOf, pointsOf } from './factions';
 import { hungryPoints } from './logistics';
 import { AIR_STICK, AIR_SWARM, STRIKE_READY, strikeOf, strikeStatus } from './air';
@@ -36,6 +37,7 @@ import {
   CMD_STOP,
   CMD_UNLOAD,
   CMD_ROOF,
+  CMD_MOUSEHOLE,
   CMD_AMBUSH,
   type Command,
 } from './commands';
@@ -1976,13 +1978,19 @@ function roadBombs(ai: Ai, w: World, out: Command[], free: number[], purse: numb
 function fortify(ai: Ai, w: World, out: Command[]): void {
   const map = w.map;
   const tick = w.tick;
-  if (ai.sappers.length === 0 || ai.alarm !== null) return;
+  if (ai.sappers.length === 0) return;
   const free = ai.sappers.filter(
     (i) => w.job[i] === JOB_NONE && (w.flags[i] & FLAG_MOVING) === 0 && w.attack[i] === NO_TARGET,
   );
   if (free.length === 0) return;
+  // Under attack, the one thing still worth doing is opening the way between the houses.
+  if (ai.alarm !== null) {
+    knockThrough(ai, w, out, free, true);
+    return;
+  }
   // The houses first: there are few of them, and sandbags cost nothing but time.
   if (strongHouses(ai, w, out, free)) return;
+  if (knockThrough(ai, w, out, free)) return;
   let purse = w.supplies[ai.team] - ai.resS - 120;
   if (purse < 60) return;
   // The rebels mine the roads into their towns before they string any wire.
@@ -2073,6 +2081,28 @@ function strongHouses(ai: Ai, w: World, out: Command[], free: number[]): boolean
       const held = w.sHp[s] > 0 ? w.sOcc[s] > 0 && w.sOccTeam[s] === ai.team : lying.has(s);
       if (!held) continue;
       out.push({ type: CMD_ENTRENCH, units: free.slice(0, 3), structure: s });
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Mouseholes in the towns it holds (decision 166): sappers knock through from a house its
+ * garrison is in to the houses beside it, and on through the block, so that the garrison
+ * can shift from house to house under fire. One block at a time. True if there was one.
+ */
+function knockThrough(ai: Ai, w: World, out: Command[], free: number[], alarm = false): boolean {
+  const map = w.map;
+  if (ai.tune.forts === 0) return false;
+  for (let t = 0; t < map.townCount; t++) {
+    if (w.townOwner[t] !== ai.team || ai.garr[t].length === 0) continue;
+    // (Under attack: only with the town not in the thick of it.)
+    if (expect(ai, w, map.townX[t], map.townY[t], 1, 0) > (alarm ? 24 : 12)) continue;
+    for (const s of ai.houses[t]) {
+      if (w.sHp[s] <= 0 || w.sOcc[s] === 0 || w.sOccTeam[s] !== ai.team) continue;
+      if (closedPair(w, s, ai.team) < 0) continue;
+      out.push({ type: CMD_MOUSEHOLE, units: free.slice(0, 2), structure: s });
       return true;
     }
   }
@@ -2250,6 +2280,8 @@ export function billet(
         continue;
       }
     } else if ((w.flags[i] & FLAG_GARRISON) !== 0) continue;
+    // On its way through the mouseholes already (decision 166).
+    if (w.hopTo[i] >= 0) continue;
     let best = -1;
     for (let pass = 0; pass < 2 && best < 0; pass++) {
       for (const s of houses) {

@@ -8,6 +8,7 @@
 //
 // Deterministic like the rest of the sim: integer maths, no clocks, no Math.random. Two
 // machines that run the same world run the same staff, which is what co-op will need.
+import { closedPair } from './holes';
 import { kindOf } from './factions';
 import {
   DISMOUNT,
@@ -51,6 +52,7 @@ import {
   CMD_ATTACK_MOVE,
   CMD_BOMBARD,
   CMD_ENTRENCH,
+  CMD_MOUSEHOLE,
   CMD_MOVE,
   CMD_UNLOAD,
   type Command,
@@ -1419,6 +1421,13 @@ function dig(w: World, out: Command[], p: Post, foot: readonly number[]): void {
     }
     if (holed) continue;
     out.push({ type: CMD_ENTRENCH, units: free.slice(0, 3), structure: s });
+    return;
+  }
+  // All done: mouseholes from the houses it holds through the rest of their blocks
+  // (decision 166), so that its squads can shift from house to house.
+  for (const s of p.houses) {
+    if (!held.has(s) || w.sHp[s] <= 0 || closedPair(w, s, w.team[free[0]]) < 0) continue;
+    out.push({ type: CMD_MOUSEHOLE, units: free.slice(0, 2), structure: s });
     return;
   }
 }

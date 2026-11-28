@@ -481,6 +481,30 @@ export interface AmbushCommand {
   radius: number;
 }
 
+/**
+ * Mouseholes (decision 166). Engineers go into `structure` and knock holes through its
+ * walls into the buildings next to it, then on through the rest of its block, one hole
+ * at a time. Squads then move from house to house without going into the street.
+ */
+export const CMD_MOUSEHOLE = 51;
+export interface MouseholeCommand {
+  type: typeof CMD_MOUSEHOLE;
+  units: number[];
+  structure: number;
+}
+
+/**
+ * Garrison block (decision 166): the squads spread out over the houses of the block that
+ * `structure` stands in, a few to a house, the nearest houses first; through mouseholes
+ * where they can, by the street where they cannot.
+ */
+export const CMD_BLOCK = 52;
+export interface BlockCommand {
+  type: typeof CMD_BLOCK;
+  units: number[];
+  structure: number;
+}
+
 /** The battle is fought at night (or, off, by day). Given once, when the game is set up. */
 export const CMD_NIGHT = 37;
 export interface NightCommand {
@@ -564,6 +588,8 @@ export interface Sender {
 export type Command = (
   | RoofCommand
   | AmbushCommand
+  | MouseholeCommand
+  | BlockCommand
   | ShapeCommand
   | MarchCommand
   | GiveCommand

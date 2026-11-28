@@ -1,4 +1,5 @@
 import { weathered } from './weather';
+import { HoleMarks } from './holes';
 import { ME } from './me';
 import { factionOf } from './army';
 import { FACTION_REBEL } from '../sim/factions';
@@ -3340,6 +3341,10 @@ export class StructureView {
     const flag = new THREE.BoxGeometry(2.6, 1.5, 0.08).translate(1.3, 0, 0);
     this.flags = new Batch(flag, ui, 16);
     this.group.add(this.pips.mesh, this.flags.mesh);
+    this.holes = new HoleMarks(map, fog, (s) =>
+      this.hp[s] === 0 ? -1 : fromFx(map.sBase[s]) + this.standing(s) * FLOOR,
+    );
+    this.group.add(this.holes.group);
 
     // Flagpoles at the heart of each town.
     const poles: Part[] = [];
@@ -3644,7 +3649,10 @@ export class StructureView {
     }
   }
 
+  private holes: HoleMarks;
+
   applySnapshot(s: Snapshot, seconds: number): void {
+    this.holes.update(s.holes);
     // Base buildings appear during the game: add each to this copy of the map, in the
     // order the sim did, so structure ids agree.
     const map = this.map;

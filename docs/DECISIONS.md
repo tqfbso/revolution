@@ -3984,3 +3984,44 @@ rebels' gun truck. A captured tank stays tracked. A convoy's pace is raised on t
 Hungry and pinned vehicles get no bonus. Route finding does not yet prefer roads (cell costs
 are 1 or 2, too coarse for a 15% preference); on the city maps vehicles drive the streets
 anyway. Golden hashes moved (city and four corners).
+
+## 166. Mouseholes and Garrison block (2026-11-28)
+
+Approved by Fabio from the code audit. URBAN.md 4.4, built.
+
+- Neighbours: two buildings that share a wall (at least a cell of it). Houses apart, even
+  across a narrow yard, are not: crossing a yard is crossing open ground. A block is the
+  buildings joined by neighbours (`src/sim/holes.ts`, worked out once per map). The city
+  has 88 such walls, the European city 364, Kowloon 659; ridge and river have none.
+- Mouseholes (engineers, Shift+B then right click a building, or the button): they go in
+  and knock through every wall of that house into the houses beside it, then hop on
+  through the block and do the same, 8 seconds a hole per squad. They only knock into a
+  house that is standing and not held by the enemy. A hole is nobody's: the enemy uses it
+  too once he holds a house of the block.
+- Moving through: a squad inside a house ordered into another house it can reach through
+  open holes goes from house to house inside, 3 seconds a house, never in the street,
+  firing from each house it passes. Only through houses that stand, do not burn and are
+  not held by the enemy. Without a way through it walks, as before.
+- Garrison block (Shift+G then right click, or the button): the selected squads spread
+  over the block, three to a house before any house fills, outward from the house
+  clicked; each walks to the house nearest it from which the holes lead on to its own.
+- Storming: an assault on a house next to one the attacker holds, with an open hole
+  between them, comes in through the wall, which takes away the defender's edge as a
+  breach does (URBAN.md 4.5).
+- The computer and commanders: sappers of a computer army, and engineers under a
+  commander holding a place, knock through the blocks of the houses their squads hold once
+  the houses are fortified; a computer army does it under attack too (the only sapper job
+  it still does then). Their squads use the holes by themselves whenever they move house.
+- On screen: a dark opening at the foot of the wall (seen across the cutaway), and a thin
+  pale bar over the top of each wall knocked through, so the joined houses read from the
+  usual camera height. Drawn once seen.
+- Determinism: holes and hops are world state and hashed only once there is one, so games
+  without them hash as before. New command numbers 51 (mousehole) and 52 (block), event 40,
+  job 8. Golden hashes moved (city, four corners) because the computer now knocks through.
+- Balance (the rebels rely on towns): 36 computer games, rebels against each army on the
+  city, European city and ridge maps, two seeds, both corners. Before road speed and
+  mouseholes the rebels won 20; with both, 22 (city 8 of 12, European city 8 of 12, ridge
+  6 of 12). Two games in 36 is within the spread of such a run, so nothing was retuned;
+  watch the European city against Russia (4 of 4).
+- Not built: ordinary squads cannot knock holes (URBAN.md 4.4 had 20 seconds for them);
+  holes are hidden only until first seen, not refreshed by the fog.

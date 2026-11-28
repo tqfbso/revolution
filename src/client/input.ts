@@ -183,7 +183,7 @@ export class Input {
       } else if (e.code === 'Escape') {
         card.arm('');
         card.cancelAmbush();
-        card.roof = false;
+        card.roof = card.mousehole = card.block = false;
         this.drawing = false;
         if (card.placing >= 0) card.cancelPlacing();
         else if (card.tool !== 0) card.cancelTool();
@@ -193,9 +193,11 @@ export class Input {
         }
       } else if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && units.selectedCount > 0) {
         this.armAttackMove(!this.attackMoveArmed);
-      } else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
+      } else if (e.code === 'KeyG' && e.shiftKey && units.selectedCount > 0) card.armBlock();
+      else if (e.code === 'KeyG' && units.selectedCount > 0) card.toggleFire();
       else if (e.code === 'Comma' && units.selectedCount > 0) card.cycleShape();
       else if (e.code === 'KeyV' && units.selectedCount > 0) card.placeCamera();
+      else if (e.code === 'KeyB' && e.shiftKey && units.selectedCount > 0) card.armMousehole();
       else if (e.code === 'KeyB' && units.selectedCount > 0) card.armEntrench();
       else if (e.code === 'KeyO' && units.selectedCount > 0) card.armDemolish();
       else if (e.code === 'Period') card.selectIdle();

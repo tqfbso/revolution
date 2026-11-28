@@ -123,6 +123,12 @@ export const JOB_WORK = 5;
 export const JOB_ENTRENCH = 6;
 /** Engineers felling the trees round the cell `jobCell` (see src/sim/demolish.ts). */
 export const JOB_FELL = 7;
+/** Engineers knocking mouseholes through the walls of a block (holes.ts). */
+export const JOB_HOLE = 8;
+/** Pairs of neighbouring buildings a map may have (holes.ts): room for Kowloon's twice over. */
+export const MAX_HOLES = 8192;
+/** a = the pair's first building, b = its second: a mousehole was knocked through. */
+export const EV_HOLE = 40;
 /** Field works (planned and standing) on the map at once. */
 export const MAX_WORKS = 4096;
 /** Stances: fire at will (the default), or hold fire until told otherwise. */
@@ -469,6 +475,12 @@ export interface World {
    * order). Counts only while the building still has a roof (see onRoof in the sim).
    */
   roof: Uint8Array;
+  /**
+   * Mouseholes (decision 166, holes.ts): the building a squad is making for from house to
+   * house without going into the street (-1 for none), and the tick of its next step.
+   */
+  hopTo: Int16Array;
+  hopAt: Int32Array;
   /** The circle an ambush waits on (STANCE_AMBUSH): centre and radius. */
   ambX: Int32Array;
   ambY: Int32Array;
@@ -533,6 +545,9 @@ export interface World {
   /** Cells whose trees engineers have felled, in the order they came down. */
   felled: Int32Array;
   felledCount: number;
+  /** Mouseholes: per pair of neighbouring buildings (holes.ts), 1 once knocked through. */
+  holes: Uint8Array;
+  holeCount: number;
   /**
    * Civilians (see src/sim/civilians.ts): where each is, what it is doing, the house it
    * lives in; how many each army has killed and how many got away; per square of the map
@@ -733,6 +748,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     ration: new Uint8Array(MAX_UNITS),
     pinned: new Int32Array(MAX_UNITS),
     roof: new Uint8Array(MAX_UNITS),
+    hopTo: new Int16Array(MAX_UNITS).fill(-1),
+    hopAt: new Int32Array(MAX_UNITS),
     ambX: new Int32Array(MAX_UNITS),
     ambY: new Int32Array(MAX_UNITS),
     ambR: new Int32Array(MAX_UNITS),
@@ -768,6 +785,8 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     worksRev: 0,
     felled: new Int32Array(CELL_COUNT),
     felledCount: 0,
+    holes: new Uint8Array(MAX_HOLES),
+    holeCount: 0,
     civCount: 0,
     civX: new Int32Array(MAX_CIVILIANS),
     civY: new Int32Array(MAX_CIVILIANS),
@@ -960,6 +979,11 @@ export function hashWorld(w: World): number {
   }
   // Only once something was felled, so that worlds without it hash as they always did.
   if (w.felledCount > 0) mix(w.felledCount ^ (w.felled[w.felledCount - 1] << 12));
+  // Only once a mousehole was knocked through (decision 166): older hashes hold.
+  if (w.holeCount > 0) {
+    mix(0x401e ^ w.holeCount);
+    for (let k = 0; k < MAX_HOLES; k++) if (w.holes[k] !== 0) mix(k);
+  }
   // Only in a game with rebels in it, so that the others hash as they always did.
   for (let t = 0; t < MAX_TOWNS; t++)
     if (w.townFolk[t] !== 0) mix(0xf01c ^ (t << 16) ^ w.townFolk[t]);
@@ -1034,6 +1058,8 @@ export function hashWorld(w: World): number {
     if (w.shape[i] !== 0) mix(0x5a9e00 ^ w.shape[i]);
     // (Only on a roof or in an ambush (I6): older hashes hold.)
     if (w.roof[i] !== 0) mix(0x7e0f00 ^ w.roof[i]);
+    // (Only on the way from house to house through mouseholes: older hashes hold.)
+    if (w.hopTo[i] >= 0) mix(0x40b000 ^ w.hopTo[i] ^ (w.hopAt[i] << 12));
     if (w.stance[i] === STANCE_AMBUSH) {
       mix(w.ambX[i]);
       mix(w.ambY[i] ^ (w.ambR[i] << 16));

@@ -265,8 +265,8 @@ research behind it, the performance budget and the open questions, is in `URBAN.
   vehicles that blow up, the fight inside)
 - U2 Hold and take a block. BUILT 2026-11-13 (decision 086): storming an enemy-held
   building, with breaches and smoke taking away the defender's edge; the AI storms too.
-  Still to do (Fable 5.2 with Sonnet 5.5 for the interface): fortify, repair, barricades,
-  linked buildings with mouseholes, "garrison this block"
+  Fortify and repair came with U4; linked buildings with mouseholes and "garrison this
+  block" BUILT 2026-11-28 (decision 166). Still to do: barricades
 - U3 Streets. BUILT 2026-11-13 (decision 087): the city map, generated round nine flags,
   436 buildings, streets and street furniture, now the default map. Still to do (Fable
   5.2): columns in corridors, local map updates, rubble that shuts streets and engineers
