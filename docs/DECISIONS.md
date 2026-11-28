@@ -3939,7 +3939,6 @@ Checked and left as it is:
   are how separation and file marching work; the audit gives no case where either jams.
 - The computer does not count street rubble as enemy works: it is nobody's, and the count
   is of the enemy's wire and walls. Teaching the computer to clear rubble is new work.
-- Shot-down transports and storm power aside, the other "2A" items in the audit are new
-  features (healing on helipads specifically, formations that turn) rather than bugs.
+- Open-ground formations that turn with the route are a new feature, not a bug.
 
 The golden hashes moved on purpose.
