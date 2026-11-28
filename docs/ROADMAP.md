@@ -296,8 +296,9 @@ the partner's view on the minimap. Rejoining a game in progress is built (decisi
 by replaying the orders, not by sending the world). Built (decision 146): units that are
 a player's own (by role as they roll out, or by first order), hand-over (Give, Take), roles
 changed during the game, names, a team panel, teammates' units in their colour, and marks
-on the map with a meaning (Z, then 1 to 3). Next: who spent what (soft budgets per role),
-commanders that belong to a player, a role-first production screen.
+on the map with a meaning (Z, then 1 to 3). Built (decision 162): who spent what, in the
+team panel and on the end screen. Next: commanders that belong to a player, a role-first
+production screen, soft budgets per role if the books show they are wanted.
 
 ## Strategic command (built; a deliberate change of order)
 
