@@ -42,4 +42,17 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // The trailer's shot scripts run partly in Node and partly inside the game's page.
+    files: ['tools/trailer/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        window: 'readonly',
+        document: 'readonly',
+        console: 'readonly',
+        performance: 'readonly',
+      },
+    },
+  },
 );

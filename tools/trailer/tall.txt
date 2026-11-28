@@ -1,0 +1,5 @@
+collapse.mjs --cam wide --warm 27 --dur 5 --rate 2
+night.mjs --cam menu --warm 41 --dur 3
+ambush.mjs --cam side --warm 16 --dur 4
+kowloon.mjs --cam axis --warm 18 --dur 3.5
+clash.mjs --cam line --warm 13 --dur 3.5
