@@ -157,6 +157,8 @@ streets with indestructible architecture. What does happen in war, and goes in:
 
 ### 4.4 Blocks and mouseholes
 
+BUILT 2026-11-28 (decision 166), with engineers only opening holes (8 seconds each).
+
 - Buildings that share a wall are **linked** at map generation (a small neighbour table
   per structure).
 - A garrison ordered into a linked neighbour moves through the wall: it never appears

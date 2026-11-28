@@ -16,6 +16,7 @@ import { stageOf } from '../sim/sim';
 import { SCAR_CELLS } from '../sim/scars';
 import { onRoof } from '../sim/ambush';
 import { fortified } from '../sim/urban';
+import { openHoles } from '../sim/holes';
 import {
   FLAG_MOVING,
   MAX_TEAMS,
@@ -427,6 +428,7 @@ function postSnapshot(w: World, simMs: number): void {
     structHp,
     structStage,
     structFire,
+    holes: openHoles(w),
     structGround,
     structScar,
     cameras: Float32Array.from(cams),
