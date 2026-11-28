@@ -10,6 +10,7 @@
 //
 // Helicopters need none of this: they are ordinary units that happen to fly (see units.ts)
 // and are limited by their helipads (see economy.ts).
+import { ON_OTHER, book } from './spend';
 import { CMD_AIRSTRIKE, CMD_GRANT, CMD_PARADROP, type Command } from './commands';
 import { B_HQ, BUILDINGS } from './economy';
 import { FACTION_CHINA, FACTION_NATO, FACTION_RUSSIA, kindOf } from './factions';
@@ -375,6 +376,7 @@ function callStrike(w: World, team: number, cx: number, cy: number): number {
   w.supplies[team] -= p.supplies;
   w.fuel[team] -= p.fuel;
   w.credits[team] -= p.credits;
+  book(w, team, w.payer, p, ON_OTHER);
   w.airStrikeAt[team] = w.tick + AIR_STRIKE_COOLDOWN;
   w.posX[jet] = ex;
   w.posY[jet] = ey;

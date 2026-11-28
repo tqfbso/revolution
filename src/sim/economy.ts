@@ -20,6 +20,7 @@ import {
 } from './commands';
 import { claimReinforcement, joinCommander, reinforcementsWanted } from './commanders';
 import { clampInt, fx } from './fixed';
+import { ON_BUILDINGS, ON_OTHER, ON_UNITS, book } from './spend';
 import {
   CELL_FX,
   CELL_SHIFT,
@@ -63,6 +64,8 @@ import {
   DEST_TOWN,
   KIND_SLOTS,
   ORDER_MAX,
+  NO_SEAT,
+  STAT_SEATS,
   EV_BUILT,
   EV_RESERVE,
   EV_TIER,
@@ -440,6 +443,7 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       const s = place(w, team, type, cmd.x | 0, cmd.y | 0, false);
       if (s < 0) return true;
       pay(w, team, b, 1);
+      book(w, team, w.payer, b, ON_BUILDINGS);
       for (const id of crew) if (w.team[id] === team) build(w, id, s, cmd.queue === true);
       return true;
     }
@@ -463,12 +467,17 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
         return true;
       if (!canPay(w, team, p)) return true;
       pay(w, team, p, 1);
+      book(w, team, w.payer, p, ON_UNITS);
+      w.sQueueBy[s * QUEUE_MAX + w.sQueueLen[s]] = w.payer;
       w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = kind;
       w.sLast[s] = kind;
       return true;
     }
     case CMD_REPEAT: {
-      if (ownBase(w, cmd.structure, true)) w.sRepeat[cmd.structure] = cmd.on ? 1 : 0;
+      if (ownBase(w, cmd.structure, true)) {
+        w.sRepeat[cmd.structure] = cmd.on ? 1 : 0;
+        w.sRepeatBy[cmd.structure] = cmd.on ? w.payer : NO_SEAT;
+      }
       return true;
     }
     case CMD_RESEARCH: {
@@ -485,6 +494,8 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
         }
       }
       pay(w, team, p, 1);
+      book(w, team, w.payer, p, ON_OTHER);
+      w.sQueueBy[s * QUEUE_MAX + w.sQueueLen[s]] = w.payer;
       w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = TIER_ITEM;
       return true;
     }
@@ -492,8 +503,14 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       const s = cmd.structure;
       if (!ownBase(w, s, true) || w.sQueueLen[s] === 0) return true;
       const team = w.sTeam[s];
-      const p = priceOf(w, team, w.sQueue[s * QUEUE_MAX + --w.sQueueLen[s]]);
-      if (p !== null) pay(w, team, p, -1);
+      const slot = s * QUEUE_MAX + --w.sQueueLen[s];
+      const item = w.sQueue[slot];
+      const p = priceOf(w, team, item);
+      if (p !== null) {
+        pay(w, team, p, -1);
+        // The refund goes back to whoever paid for that place on the queue.
+        book(w, team, w.sQueueBy[slot], p, item === TIER_ITEM ? ON_OTHER : ON_UNITS, -1);
+      }
       if (w.sQueueLen[s] === 0) w.sProgress[s] = 0;
       return true;
     }
@@ -517,12 +534,18 @@ export function applyEconomyCommand(w: World, cmd: Command): boolean {
       if (!Number.isInteger(team) || team < 0 || team >= MAX_TEAMS) return true;
       if (!Number.isInteger(kind) || kind < 0 || kind >= KIND_COUNT) return true;
       const k = team * KIND_SLOTS + kind;
-      if (cmd.type === CMD_ORDER)
+      if (cmd.type === CMD_ORDER) {
+        const was = w.orders[k];
         w.orders[k] = clampInt(w.orders[k] + (cmd.count | 0), 0, ORDER_MAX);
-      else if (cmd.type === CMD_KEEP) {
+        noteOrder(w, team, kind, w.orders[k] - was);
+      } else if (cmd.type === CMD_KEEP) {
         w.keep[k] = clampInt(cmd.count | 0, 0, ORDER_MAX);
+        w.keepBy[k] = w.keep[k] > 0 ? w.payer : NO_SEAT;
         // Ending a standing order also drops what it had asked for and not yet started.
-        if (w.keep[k] === 0) w.orders[k] = 0;
+        if (w.keep[k] === 0) {
+          w.orders[k] = 0;
+          noteOrder(w, team, kind, 0);
+        }
       } else {
         const d = cmd.dest | 0;
         const town = d >= DEST_TOWN && d < DEST_TOWN + w.map.townCount;
@@ -703,7 +726,56 @@ function repeatTrain(w: World, s: number): void {
   if (p === undefined || p.from !== w.sType[s] || w.tier[team] < p.tier) return;
   if (!canPay(w, team, p)) return;
   pay(w, team, p, 1);
+  book(w, team, w.sRepeatBy[s], p, ON_UNITS);
+  w.sQueueBy[s * QUEUE_MAX + w.sQueueLen[s]] = w.sRepeatBy[s];
   w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = w.sLast[s];
+}
+
+/**
+ * Bulk orders of `kind` for `team` went up or down by `delta` with the command being
+ * carried out: up is the payer's; down comes off the payer's own first. However the
+ * total changed, the players' shares never add up to more than is still on order (the
+ * rest is a standing order's or a commander's).
+ */
+function noteOrder(w: World, team: number, kind: number, delta: number): void {
+  const by = w.payer;
+  const mine = by < STAT_SEATS && w.seatArmy[by] === team;
+  if (mine && delta !== 0) {
+    const o = by * KIND_SLOTS + kind;
+    w.orderBy[o] = clampInt(w.orderBy[o] + delta, 0, ORDER_MAX);
+  }
+  let total = 0;
+  for (let seat = 0; seat < STAT_SEATS; seat++) {
+    if (w.seatArmy[seat] === team) total += w.orderBy[seat * KIND_SLOTS + kind];
+  }
+  let over = total - w.orders[team * KIND_SLOTS + kind];
+  for (let seat = STAT_SEATS - 1; seat >= 0 && over > 0; seat--) {
+    if (w.seatArmy[seat] !== team) continue;
+    const o = seat * KIND_SLOTS + kind;
+    const cut = Math.min(over, w.orderBy[o]);
+    w.orderBy[o] -= cut;
+    over -= cut;
+  }
+}
+
+/**
+ * Who pays for the next unit of `kind` a factory takes off `team`'s bulk orders: the
+ * player with the most of that kind still on order (the first, if two have as many), else
+ * whoever set the standing order, else nobody in particular (a commander's reinforcement).
+ */
+function orderPayer(w: World, team: number, kind: number): number {
+  let best = -1;
+  for (let seat = 0; seat < STAT_SEATS; seat++) {
+    if (w.seatArmy[seat] !== team) continue;
+    const n = w.orderBy[seat * KIND_SLOTS + kind];
+    if (n > 0 && (best < 0 || n > w.orderBy[best * KIND_SLOTS + kind])) best = seat;
+  }
+  if (best >= 0) {
+    w.orderBy[best * KIND_SLOTS + kind]--;
+    return best;
+  }
+  const k = team * KIND_SLOTS + kind;
+  return w.keep[k] > 0 ? w.keepBy[k] : NO_SEAT;
 }
 
 /** Factories take orders from the centre only while their own queue is this short. */
@@ -759,6 +831,9 @@ function dispatchOrders(w: World): void {
         break;
       }
       pay(w, team, p, 1);
+      const by = orderPayer(w, team, kind);
+      book(w, team, by, p, ON_UNITS);
+      w.sQueueBy[s * QUEUE_MAX + w.sQueueLen[s]] = by;
       w.sQueue[s * QUEUE_MAX + w.sQueueLen[s]++] = kind;
       w.orders[base + kind]--;
       w.orderTurn[team] = (kind + 1) % KIND_COUNT;
@@ -853,6 +928,7 @@ function updateProduction(w: World): void {
     w.sQueueLen[s]--;
     for (let q = 0; q < w.sQueueLen[s]; q++) {
       w.sQueue[s * QUEUE_MAX + q] = w.sQueue[s * QUEUE_MAX + q + 1];
+      w.sQueueBy[s * QUEUE_MAX + q] = w.sQueueBy[s * QUEUE_MAX + q + 1];
     }
   }
 }

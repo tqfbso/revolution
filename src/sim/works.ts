@@ -1,6 +1,7 @@
 // Field works: what an army builds on the ground to hold it. One cell each. Walls and gates
 // stop everyone (a gate lets its owner through), wire stops men, obstacles stop vehicles,
 // trenches and sandbags are cover for infantry. See decisions 052 to 056.
+import { ON_OTHER, book } from './spend';
 import { FACTION_REBEL, kindOf } from './factions';
 import {
   CMD_BREACH,
@@ -430,6 +431,7 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
         const price = WORKS[kind].supplies;
         if (w.supplies[team] < price || !plan(w, team, kind, c)) break;
         w.supplies[team] -= price;
+        book(w, team, w.payer, { supplies: price, fuel: 0, credits: 0 }, ON_OTHER);
         sites.push(c);
       }
       if (sites.length === 0) return true;
@@ -458,7 +460,12 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
         const c = cmd.cells[k];
         if (!Number.isInteger(c) || c < 0 || c >= CELL_COUNT) continue;
         if (w.wKind[c] === 0 || w.wTeam[c] !== cmd.team) continue;
-        if (!workStands(w, c)) w.supplies[cmd.team] += WORKS[w.wKind[c]].supplies;
+        if (!workStands(w, c)) {
+          const price = WORKS[w.wKind[c]].supplies;
+          w.supplies[cmd.team] += price;
+          // Pulled down before it stood: the money back, off the books of who pulls it down.
+          book(w, cmd.team, w.payer, { supplies: price, fuel: 0, credits: 0 }, ON_OTHER, -1);
+        }
         remove(w, c, false);
       }
       return true;
