@@ -80,6 +80,8 @@ interface Setup {
   ai: string;
   army: string;
   foe: string;
+  /** The map's layout number: terrain, blocks and heights grow from it. */
+  seed: string;
 }
 
 const DEFAULTS: Setup = {
@@ -90,7 +92,13 @@ const DEFAULTS: Setup = {
   ai: 'easy',
   army: 'nato',
   foe: 'russia',
+  seed: '',
 };
+
+/** A fresh layout number, short enough to read out to a friend. */
+function rollSeed(): string {
+  return String(1 + Math.floor(Math.random() * 9999));
+}
 
 const MAP_CHOICES: Choice[] = MAPS.map((m) => [m.id, m.name, m.blurb]);
 const ARMIES: Choice[] = [
@@ -258,7 +266,7 @@ export function openMenu(params: URLSearchParams): void {
     const asked = new URLSearchParams({
       ...setup,
       armies: mode === 'versus' ? '2' : setup.armies,
-      seed: params.get('seed') ?? '1',
+      seed: params.get('seed') ?? (/^-?\d{1,9}$/.test(setup.seed) ? setup.seed : '1'),
     });
     const next = matchToParams(matchFromParams(asked), carried(params));
     if (mode === 'skirmish') next.set('play', '1');
@@ -313,6 +321,11 @@ export function openMenu(params: URLSearchParams): void {
       right += `<p class="small">The third and fourth armies take the powers that follow the enemy's.</p>`;
     }
     if (mode !== 'versus') right += seg('ai', 'Opponent', OPPONENTS, setup.ai);
+    right +=
+      `<div class="opt"><span>Layout</span><div class="seg seed">` +
+      `<input data-seed type="text" inputmode="numeric" maxlength="6" value="${esc(setup.seed)}" aria-label="Layout number">` +
+      `<button data-go="reroll">Randomise</button></div>` +
+      `<p>The same number gives the same ground, blocks and heights: tell a friend to fight on yours.</p></div>`;
     if (mode === 'coop') {
       right += `<p class="small">Two to four of you command one army against the computer. The next screen gives you one link to send to everyone.</p>`;
     } else if (mode === 'versus') {
@@ -412,6 +425,10 @@ export function openMenu(params: URLSearchParams): void {
     if (go === 'skirmish' || go === 'coop' || go === 'versus') {
       mode = go;
       view = 'setup';
+      // A new layout each time you sit down to a battle, unless you type one in.
+      setup.seed = rollSeed();
+    } else if (go === 'reroll') {
+      setup.seed = rollSeed();
     } else if (go === 'home' || go === 'settings' || go === 'howto' || go === 'news') view = go;
     else if (set === 'quality') {
       write('revolution.quality', v);
@@ -427,6 +444,12 @@ export function openMenu(params: URLSearchParams): void {
     const top = root.scrollTop;
     render();
     if (set) root.scrollTop = top;
+  });
+  root.addEventListener('input', (e) => {
+    const box = e.target as HTMLInputElement;
+    if (!box.matches('[data-seed]')) return;
+    box.value = box.value.replace(/[^0-9]/g, '');
+    setup.seed = box.value;
   });
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape' && view !== 'home') {

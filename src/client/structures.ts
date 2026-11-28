@@ -150,6 +150,7 @@ const TEAM_UI = [
   [0.85, 0.16, 0.1],
   [0.12, 0.38, 1.0],
   [0.9, 0.62, 0.1],
+  [0.37, 0.82, 0.45],
 ];
 const NEUTRAL_UI = [0.55, 0.55, 0.52];
 const DAMAGED_BELOW = 150; // of 255
@@ -2485,7 +2486,7 @@ const DRAB = 0x5d6149;
 const DRAB_DARK = 0x3f4434;
 const PANEL = 0x8b8c84;
 const SHEET = 0x4c514d;
-const TEAM_PAINT = [0x8a2b22, 0x27467a, 0x9a7a1e];
+const TEAM_PAINT = [0x8a2b22, 0x27467a, 0x9a7a1e, 0x3a6b3c];
 const CRATES = [0x5d6149, 0x6b4a36, 0x4b5560, 0x7a7466, 0x55503f];
 
 /**
