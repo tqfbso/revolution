@@ -1,0 +1,11 @@
+ambush.mjs --cam side --warm 10 --dur 10
+collapse.mjs --cam wide --warm 26 --dur 7 --rate 2
+night.mjs --cam menu --warm 41 --dur 6
+clash.mjs --cam line --warm 13 --dur 4.5
+kowloon.mjs --cam axis --warm 18 --dur 4.5
+sleep.mjs --warm 3 --dur 5.5
+WX=clear column.mjs --cam axis --warm 5 --dur 4.5
+clash.mjs --cam hud --warm 18 --dur 4.5
+night.mjs --cam low --warm 50 --dur 3.5
+kowloon.mjs --cam side --warm 26 --dur 3.5
+helis.mjs --cam over --warm 4 --dur 3.5
