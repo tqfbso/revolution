@@ -150,6 +150,8 @@ export interface Snapshot {
   townOwner: Uint8Array;
   townCapturer: Uint8Array;
   townProgress: Uint8Array;
+  /** Per town: civilians at home, in a game with rebels in it (sim/rebels.ts); else zeros. */
+  townFolk: Uint16Array;
   /** Per team: credits, supplies, fuel, technology tier, units and the limit on them. */
   credits: number[];
   supplies: number[];

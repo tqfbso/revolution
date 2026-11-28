@@ -1,5 +1,6 @@
 import { ON_OTHER, book } from './spend';
 import { FACTIONS, FACTION_COUNT, SIGHT_SQ, kindFor, kindOf } from './factions';
+import { amongFolk, isRebel, townPace, updateRebels } from './rebels';
 import { civiliansBuried, civiliansShelled, civiliansShot, updateCivilians } from './civilians';
 import {
   HUNGRY_RELOAD,
@@ -62,8 +63,13 @@ import {
 import { scarAt, scarFace } from './scars';
 import { applyUrbanCommand, fortified, spillRubble, updateEntrench } from './urban';
 import {
+  BOMB_ARMOUR_PCT,
+  BOMB_ARMOUR_REACH,
+  BOMB_RADIUS,
+  BOMB_SOFT_PCT,
   HIT_CHARGE,
   HIT_DIRECT,
+  WORK_BOMB,
   applyWorkCommand,
   blastWorks,
   canBreach,
@@ -497,6 +503,7 @@ export function step(w: World, commands: readonly Command[]): void {
   separate(w);
   fire(w);
   resolveShells(w);
+  updateBombs(w);
   integrate(w);
   resolveStorms(w);
   resolveDamage(w);
@@ -504,6 +511,7 @@ export function step(w: World, commands: readonly Command[]): void {
   if (w.tick % 10 === 0) updateFires(w);
   if (w.tick % TOWN_PERIOD === 0) {
     updateTowns(w);
+    updateRebels(w, (kind, team, x, y) => spawnUnit(w, kind, team, x, y));
     clearSmoke(w);
   }
   if (w.groundChanged || w.worksChanged) {
@@ -2543,12 +2551,15 @@ function launch(w: World, i: number, tx: number, ty: number, dist: number, load:
 
 /**
  * What World.shKind holds: the gun's kind and faction. The low four bits of the kind, the
- * faction (two bits), then the rest of the kind (the mortar, I6, is the first past 15), so
- * that every shell fired before there were more than sixteen kinds reads as it did.
+ * faction (two bits), then the rest of the kind (the mortar, I6, is the first past 15), then
+ * the rest of the faction (the rebels, I8, are the first past 3), so that every shell fired
+ * before there were more than sixteen kinds and four factions reads as it did.
  */
 function shellKind(kind: number, faction: number): number {
-  return (kind & 15) | (faction << 4) | ((kind >> 4) << 6);
+  return (kind & 15) | ((faction & 3) << 4) | ((kind >> 4) << 6) | ((faction >> 2) << 7);
 }
+const shellFaction = (packed: number): number => ((packed >> 4) & 3) | ((packed >> 7) << 2);
+const shellGun = (packed: number): number => (packed & 15) | (((packed >> 6) & 1) << 4);
 
 /** What a shell carries besides high explosive (World.shSmoke). */
 const SHELL_SMOKE = 1;
@@ -2691,8 +2702,8 @@ function resolveShells(w: World): void {
       bombLands(w, x, y, type, packed, bomberOf(w, owner, packed));
       continue;
     }
-    const kind = FACTIONS[(packed >> 4) & 3].kinds[(packed & 15) | ((packed >> 6) << 4)];
-    const mortar = ((packed & 15) | ((packed >> 6) << 4)) === KIND_MORTAR;
+    const kind = FACTIONS[shellFaction(packed)].kinds[shellGun(packed)];
+    const mortar = shellGun(packed) === KIND_MORTAR;
     if (w.shSmoke[k] !== 0) {
       // (This is the smoke flag of the shell just landed: slot k is only overwritten below.)
       const load = w.shSmoke[k];
@@ -2798,6 +2809,61 @@ function bombLands(w: World, x: number, y: number, type: number, team: number, b
 }
 
 /**
+ * The rebels' roadside bombs (I8): one goes off when a vehicle of another army is on its
+ * cell. Whoever of the other armies is near takes it, a vehicle's armour only close to;
+ * the army that laid it knows where it is and keeps clear. Bystanders are not so lucky.
+ */
+function updateBombs(w: World): void {
+  for (let k = w.workCount - 1; k >= 0; k--) {
+    const cell = w.workCells[k];
+    if (w.wKind[cell] !== WORK_BOMB || !workStands(w, cell)) continue;
+    const team = w.wTeam[cell];
+    let set = false;
+    for (let s = cellStart[cell]; s < cellStart[cell + 1] && !set; s++) {
+      const j = sorted[s];
+      set =
+        w.team[j] !== team &&
+        w.state[j] === STATE_ALIVE &&
+        w.carrier[j] < 0 &&
+        KIND_CLASS[w.kind[j]] === CLASS_VEHICLE;
+    }
+    if (!set) continue;
+    const x = ((cell & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+    const y = ((cell >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+    removeWork(w, cell, false);
+    w.events.push(EV_IMPACT, packPoint(x, y), 0);
+    civiliansShelled(w, x, y, BOMB_RADIUS, team);
+    const R = BOMB_RADIUS;
+    const r = (R >> CELL_SHIFT) + 1;
+    const cx = x >> CELL_SHIFT;
+    const cy = y >> CELL_SHIFT;
+    const y0 = cy > r ? cy - r : 0;
+    const y1 = cy + r < GRID_DIM ? cy + r : GRID_DIM - 1;
+    const x0 = cx > r ? cx - r : 0;
+    const x1 = cx + r < GRID_DIM ? cx + r : GRID_DIM - 1;
+    for (let gy = y0; gy <= y1; gy++) {
+      const to = cellStart[gy * GRID_DIM + x1 + 1];
+      for (let s = cellStart[gy * GRID_DIM + x0]; s < to; s++) {
+        const j = sorted[s];
+        if (w.team[j] === team || IS_AIR[w.kind[j]]) continue;
+        if (w.state[j] !== STATE_ALIVE || w.carrier[j] >= 0 || w.inside[j] >= 0) continue;
+        const kind = kindOf(w, j);
+        const armoured = kind.armour !== null;
+        const reach = armoured ? BOMB_ARMOUR_REACH : R;
+        const dx = w.posX[j] - x;
+        const dy = w.posY[j] - y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= reach * reach) continue;
+        const pct = armoured ? BOMB_ARMOUR_PCT : BOMB_SOFT_PCT;
+        const dmg = Math.trunc((kind.hp * pct * (2 * reach - isqrt(d2))) / (200 * reach));
+        damage[j] += dmg || 1;
+        killer[j] = -1;
+      }
+    }
+  }
+}
+
+/**
  * Is unit `j` hard to spot? In forest and in rubble always; in a building until it fires.
  */
 /** Hidden from anyone not close by: in a house, in forest or rubble, in smoke, or a recon team. */
@@ -2808,6 +2874,8 @@ export function concealed(w: World, j: number): boolean {
   if (w.inside[j] >= 0) return !onRoof(w, j) && w.reveal[j] <= w.tick;
   if (IS_AIR[w.kind[j]]) return false;
   if (kindOf(w, j).stealth) return true;
+  // Rebels among the people of a town (I8), until they shoot.
+  if (amongFolk(w, j)) return true;
   if (w.map.smoke[cellOfPos(w.posX[j], w.posY[j])] > w.tick) return true;
   const t = w.map.type[cellOfPos(w.posX[j], w.posY[j])];
   if (t === T_FOREST) return true;
@@ -3039,7 +3107,7 @@ function fire(w: World): void {
     damage[t] += dmg;
     killer[t] = i;
     w.cooldown[i] = reloadOf(w, i, kind);
-    if (w.inside[i] >= 0) w.reveal[i] = w.tick + REVEAL_TICKS;
+    if (w.inside[i] >= 0 || isRebel(w, w.team[i])) w.reveal[i] = w.tick + REVEAL_TICKS;
     w.events.push(EV_SHOT, i, t);
     civiliansShot(w, i, t);
     if (kind.kamikaze) {
@@ -3349,7 +3417,9 @@ function steer(w: World): void {
         ? (w.speed[i] * HUNGRY_SPEED) >> 8
         : w.pinned[i] > tick
           ? (w.speed[i] * PIN_SPEED) >> 8
-          : w.speed[i];
+          : isRebel(w, w.team[i])
+            ? townPace(w, i, w.speed[i])
+            : w.speed[i];
     let vx = 0;
     let vy = 0;
     let busy = false;
@@ -3463,7 +3533,9 @@ function steer(w: World): void {
       }
     }
     if (!busy && (flags & FLAG_MOVING) !== 0) {
-      const pace = w.orderSpeed[i] < s ? w.orderSpeed[i] : s;
+      // The pace of its group, which rebels in a town beat like their own (I8).
+      const group = isRebel(w, w.team[i]) ? townPace(w, i, w.orderSpeed[i]) : w.orderSpeed[i];
+      const pace = group < s ? group : s;
       // On a march that keeps a shape, its place in it comes before the route.
       const kept = w.lead[i] >= 0 ? keepStation(w, i, cls, s, pace) : 0;
       if (kept !== 0) {

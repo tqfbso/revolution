@@ -3836,7 +3836,66 @@ fallback; it was not needed.
 Not done: a real frame rate on Fabio's machine (his test decides it), a rotor drawn as a
 blurred disc at speed, far aircraft as boxes (few of them, left as they were).
 
-## 162. Who spent what in a shared army (2026-11-28)
+## 162. The rebels: a fourth army that lives off the people (I8) (2026-11-28)
+
+Fabio: the guerrilla army is what gives the game its name. One of the big powers (he
+suggested Russia) has invaded this country and a rebellion has formed, and you can play
+it. A weaker standing army, quicker to raise infantry, perhaps recruiting civilians; "they
+still need to have the same units, in a sense, to balance, except for air attack"; fast
+vehicles, large numbers, an advantage inside the city; and make it militarily accurate.
+
+Built from how such forces have fought (Grozny 1994 to 1995, Syria, Iraq, Ukraine's
+territorial defence in 2022): small bands with rockets hunting armour from close in,
+weapons on pickups, a population that hides, feeds and informs them, mines on the roads,
+shoulder-launched missiles as the only air defence, and no air force.
+
+- A fourth faction (`FACTION_REBEL` 4, `?army=rebels`), in the menu where No faction was.
+  Faction 0 stays as the hidden base table (`?army=none`) for tests and the golden hash.
+- The same kinds as everyone, so every counter still has its answer, but the cheap end is
+  cheaper and the heavy end is scarce: rebel fighters (72% health, 70% price, 60% time),
+  rocket teams (rocket-propelled grenades: shorter reach, two thirds the punch, twice the
+  rate, 60% price), technicals (the fastest wheels, one squad aboard, 42% health, one army
+  point), a rocket truck for the gun, a gun truck for air defence, a jammer van, hobby and
+  racing drones, and a few captured tanks at 125% price and 150% time. No helicopters, no
+  paratroops, no air strikes. Fighters do two and a half times their damage to aircraft
+  (the shoulder-launched missile). Army points can now differ by faction (`pointsOf`).
+- The people (`src/sim/rebels.ts`). A town counts as peopled while ten or more civilians
+  are at home in it. In a peopled town: rebel foot soldiers are as hard to see as men in a
+  wood until they fire; every enemy ground unit is reported to the rebels (informants),
+  whoever holds the town; and a town the rebels hold sends a free band of volunteers every
+  90 seconds, three civilians leaving home for good each time. Rebels on foot move a
+  quarter faster through any town (they know the alleys; this stands in for tunnels).
+  So shelling a town empty takes the rebels' advantage away, at the usual civilian fine.
+- Roadside bombs: rebel sappers lay one for 30 supplies (the card, or the computer's
+  sappers on the roads out of its towns). Never shown to the enemy; it goes off under the
+  first enemy vehicle to cross its cell and hurts what is within 6 m.
+- Models: pickups in civilian paint (white, sand, faded blue), a van with a mast, an old
+  lorry, Russia's tank for the captured one; fighters in field jackets and woollen caps
+  with a scarf in the army's colour. Realistic proportions, no gore, as before.
+- Balance, computer against computer on Hard, 25 minutes, city, euro and ridge, both
+  corners: first cut 25 of 36 for the rebels, then trimmed three times. Last round 20 of 36
+  (56%): 8 of 12 against the alliance, 6 of 12 against Russia, 6 of 12 against China; 8 of
+  12 on the city map, 6 of 12 on each of the other two. Strong in the city and level in
+  the open is the shape asked for. Games without rebels hash as before.
+
+Not done: informants use the army-wide "spotted" mark, so in a free-for-all the other
+armies see what the rebels are told; tunnels as such; the story; the game's title still
+reads Revolution though Fabio called it Rebellion here; a 108 game round (36 played).
+Real frame rate cannot be measured from the cloud.
+
+## 163. Orders lost when playing the Rebels: the command card crash (2026-11-28)
+
+Playing the Rebels, any selection with a truck or sappers in it made the command card throw
+on every redraw ("Cannot access before initialization": the new roadside bomb button read
+`u` inside a callback a few lines above `const u` in the same block). The card went blank
+and the pointer handler stopped before the order was sent, so units could be selected but
+not ordered. TypeScript does not flag a const read from a closure before its line. Fixed by
+reading `this.units` there. `tools/ordercheck.mjs` now starts a battle as each army,
+box-selects the opening force with the mouse, right clicks and checks that it moves with no
+page error; CI runs it (job `orders`). A lint rule (`no-use-before-define`) was tried and
+left out: 46 hits, all module constants read from functions, which are safe.
+
+## 164. Who spent what in a shared army (2026-11-28)
 
 The last missing piece of deeper co-op (146). The money stays the army's and anyone may
 spend it on anything (Fabio's rule: nothing locked); the sim now keeps the books, so the

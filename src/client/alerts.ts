@@ -15,6 +15,7 @@ import {
   EV_PLANE,
   EV_PARADROP,
   EV_AMBUSH,
+  EV_VOLUNTEERS,
   EV_AIRSTRIKE,
   unpackX,
   unpackY,
@@ -258,6 +259,12 @@ export class Alerts {
         if ((b & 255) === me) {
           this.show(this.book.raise(ALERT_NOTE, x, z, 'Paratroops on the ground', now));
         } else this.attack(ALERT_ARMY, x, z, 'Enemy paratroops landing', now);
+      } else if (type === EV_VOLUNTEERS) {
+        // A town the rebels hold has sent them a band of its people (I8).
+        if (b !== me) continue;
+        const p = this.structures.townPos(a);
+        const text = `Volunteers from ${this.map.townName[a]} have joined us`;
+        this.show(this.book.raise(ALERT_NOTE, p.x, p.z, text, now));
       } else if (type === EV_AMBUSH) {
         // An ambush opens fire (I6): ours springs, or we have walked into theirs.
         const x = s.positions[2 * a];

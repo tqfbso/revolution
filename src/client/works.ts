@@ -14,6 +14,7 @@ import {
 } from '../sim/map';
 import {
   WORKS,
+  WORK_BOMB,
   WORK_COUNT,
   WORK_GATE,
   WORK_RUBBLE,
@@ -151,6 +152,24 @@ GEOMETRY[WORK_SANDBAG] = () => {
   }
   return withMask(parts);
 };
+
+// A roadside bomb, as the men who laid it see it: an oil drum on its side under a heap of
+// rubbish, two shells wired together beside it, a strip of the army's colour to find it by.
+GEOMETRY[WORK_BOMB] = () =>
+  withMask([
+    { size: [0.62, 0.62, 0.95], at: [0.2, 0.31, 0.1], rot: [0, 0.5, 0], color: RUST },
+    { size: [0.16, 0.16, 0.7], at: [-0.55, 0.09, 0.3], rot: [0, -0.4, 0], color: 0x4b5141 },
+    { size: [0.16, 0.16, 0.7], at: [-0.75, 0.09, -0.1], rot: [0, 0.3, 0], color: 0x4b5141 },
+    { size: [1.5, 0.12, 1.2], at: [0.1, 0.06, -0.5], rot: [0, 0.2, 0], color: 0x55504a },
+    { size: [0.7, 0.3, 0.5], at: [0.7, 0.15, -0.6], rot: [0, -0.3, 0], color: SACK, shade: 0.8 },
+    {
+      size: [0.5, 0.04, 0.12],
+      at: [0.2, 0.64, 0.1],
+      rot: [0, 0.5, 0],
+      color: 0xffffff,
+      team: true,
+    },
+  ]);
 
 // What a falling block throws into the street: slabs, a length of facade, bent steel.
 GEOMETRY[WORK_RUBBLE] = () => {
@@ -299,6 +318,8 @@ export class WorksView {
   /** May the player be shown this work? His own always; the enemy's once seen, if finished. */
   private known(cell: number, rec: number): boolean {
     if (((rec >> 4) & 7) === ME || this.revealAll) return true;
+    // A roadside bomb (I8) is found by driving over it.
+    if ((rec & KIND_MASK) === WORK_BOMB) return false;
     return (rec & DONE) !== 0 && this.seen[cell] === 1;
   }
 

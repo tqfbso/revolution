@@ -131,7 +131,7 @@ const POWERS: Choice[] = [
   ['nato', 'Western alliance'],
   ['russia', 'Russia'],
   ['china', 'China'],
-  ['none', 'No faction', 'The plain roster, the same for both.'],
+  ['rebels', 'Rebels'],
 ];
 const GRAPHICS: Choice[] = [
   ['low', 'Low'],

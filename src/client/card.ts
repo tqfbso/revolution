@@ -1,4 +1,5 @@
-import { factionOf, myKinds, myPrices } from './army';
+import { factionOf, myKinds, myPoints, myPrices } from './army';
+import { FACTION_REBEL } from '../sim/factions';
 import { ME } from './me';
 import * as THREE from 'three/webgpu';
 import {
@@ -72,12 +73,11 @@ import {
   KIND_TRUCK,
   PARA_PLANE_LOAD,
   PARA_RESERVE_MAX,
-  POINTS,
   TOWN_FUEL,
   TOWN_INCOME,
   TOWN_SUPPLIES,
 } from '../sim/units';
-import { MAX_ORDER, WORKS, WORK_BUILDABLE, WORK_COUNT, canFortify } from '../sim/works';
+import { MAX_ORDER, WORKS, WORK_BOMB, WORK_BUILDABLE, WORK_COUNT, canFortify } from '../sim/works';
 import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
 import { DOCTRINE, SHAPES, SHAPE_AUTO, SHAPE_BLOCK, SHAPE_COUNT } from '../sim/formations';
 import {
@@ -119,6 +119,29 @@ const SHORT = [
   'Plane',
   'Mortar',
 ];
+/** What the rebels (I8) call theirs in a queue slot, and what theirs are for. */
+const REBEL_SHORT: Record<number, string> = {
+  1: 'Fighters',
+  2: 'Rockets',
+  3: 'Pickup',
+  4: 'Rocket tr.',
+  8: 'Gun truck',
+  11: 'Sappers',
+};
+const REBEL_HINT: Record<number, string> = {
+  0: 'Captured tank. Dear and slow to come by: a few at most. Kills vehicles and breaks walls; weak to missile teams, to infantry up close and to strike drones.',
+  1: 'Rebel fighters. The cheapest and quickest squad in the game, and the weakest man for man. In a town where people still live they are as hard to see as men in a wood until they fire, and they run a quarter faster through any town. Rockets hurt vehicles within 8 m; a shoulder-launched missile or two keeps helicopters honest.',
+  2: "Rocket team. Rocket-propelled grenades, not guided missiles: three quarters of a missile team's reach and two thirds of its punch, but twice the rate of fire and half the price. Fight them from windows, roofs (Shift + R) and ambushes (Shift + H).",
+  3: 'Technical. A pickup with a heavy machine gun: the fastest thing on wheels, carries one squad (L to mount, U to dismount), mows down infantry, and dies to anything with a cannon. One army point, not two.',
+  4: 'Rocket truck. Twelve tubes on a pickup: shells what others have spotted out to 70 m, then drives off before the answer lands. Ctrl + right click: shell a spot. F: smoke. I: a flare, at night.',
+  8: 'Gun truck. A twin anti-aircraft cannon on a pickup: your answer to drones and helicopters. Shorter reach than a real air-defence vehicle, and no armour.',
+  9: "Jammer van. Enemy drones in its ring crash, enemy cameras in it are blinded. A smaller ring than any army's jammer.",
+  11: "Sappers. Build field works, blow up the enemy's, leave cameras (V), and lay roadside bombs: hidden from the enemy, one goes off under his first vehicle to cross it.",
+};
+const hintOf = (kind: number): string =>
+  (factionOf(ME) === FACTION_REBEL ? REBEL_HINT[kind] : undefined) ?? HINT[kind];
+const shortOf = (kind: number): string =>
+  (factionOf(ME) === FACTION_REBEL ? REBEL_SHORT[kind] : undefined) ?? SHORT[kind];
 const HINT = [
   'Main battle tank. Kills vehicles and breaks walls; weak to missile teams, to infantry up close in streets, and to strike drones without air defence or a jammer near.',
   'Infantry squad. Cheap and fast to raise. Holds buildings, trenches and forest; rockets hurt vehicles within 8 m.',
@@ -984,12 +1007,13 @@ export class CommandCard {
             continue;
           }
           const item = bases[rec + 8 + q];
-          const name = item === TIER_ITEM ? `Tier ${this.tier + 1}` : SHORT[item];
+          const name = item === TIER_ITEM ? `Tier ${this.tier + 1}` : shortOf(item);
           html += `<div class="slot" title="${item === TIER_ITEM ? name : myKinds()[item].name}">${name}${q === 0 ? `<b style="width:${bases[rec + 7]}%"></b>` : ''}</div>`;
         }
         html += '</div>';
         const first = bases[rec + 8];
-        const waiting = queued > 0 && first !== TIER_ITEM && this.pop + POINTS[first] > this.popCap;
+        const waiting =
+          queued > 0 && first !== TIER_ITEM && this.pop + myPoints()[first] > this.popCap;
         const grounded =
           queued > 0 && (first === KIND_HELI || first === KIND_LIFT) && this.helis >= this.heliCap;
         const full = queued > 0 && first === KIND_PARA && this.reserve >= PARA_RESERVE_MAX;
@@ -999,7 +1023,7 @@ export class CommandCard {
         html += '<div class="row">';
         myPrices().forEach((p, kind) => {
           if (p.from === type) {
-            const pts = POINTS[kind] > 1 ? ` ${POINTS[kind]} pts` : '';
+            const pts = myPoints()[kind] > 1 ? ` ${myPoints()[kind]} pts` : '';
             html += this.button(
               'train',
               kind,
@@ -1007,7 +1031,7 @@ export class CommandCard {
               p,
               '',
               false,
-              HINT[kind],
+              hintOf(kind),
             );
           }
         });
@@ -1039,6 +1063,23 @@ export class CommandCard {
           const w = WORKS[k];
           const p = { supplies: w.supplies, fuel: 0, credits: 0, ticks: w.ticks, tier: 1 };
           html += this.button('work', k, w.name, p, '', this.tool === k);
+        }
+        if (
+          factionOf(ME) === FACTION_REBEL &&
+          this.builders().some((id) => KINDS[this.units.kindOf(id)].engineer)
+        ) {
+          // The rebels' own (I8): laid by sappers, sprung by the first enemy vehicle over it.
+          const w = WORKS[WORK_BOMB];
+          const p = { supplies: w.supplies, fuel: 0, credits: 0, ticks: w.ticks, tier: 1 };
+          html += this.button(
+            'work',
+            WORK_BOMB,
+            w.name,
+            p,
+            '',
+            this.tool === WORK_BOMB,
+            'Sappers only. Hidden from the enemy; goes off under his first vehicle to cross it: wrecks a truck or a carrier, cripples a tank, hurts the men around. Yours can cross it.',
+          );
         }
         html += this.button(
           'work',

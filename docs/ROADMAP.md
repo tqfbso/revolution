@@ -296,7 +296,7 @@ the partner's view on the minimap. Rejoining a game in progress is built (decisi
 by replaying the orders, not by sending the world). Built (decision 146): units that are
 a player's own (by role as they roll out, or by first order), hand-over (Give, Take), roles
 changed during the game, names, a team panel, teammates' units in their colour, and marks
-on the map with a meaning (Z, then 1 to 3). Built (decision 162): who spent what, in the
+on the map with a meaning (Z, then 1 to 3). Built (decision 164): who spent what, in the
 team panel and on the end screen. Next: commanders that belong to a player, a role-first
 production screen, soft budgets per role if the books show they are wanted.
 
@@ -527,12 +527,17 @@ review fixes and the order-ownership refactor agreed on 2026-11-15, which stay f
       the only penalty (Fabio: the cost today is fine). Decision 154: tier 3 and a standing
       headquarters, 200 supplies / 150 fuel / 250 credits, four minutes between strikes;
       Shift+J; the computer uses them on Normal and Hard.
-- [ ] I8 The guerrilla. The No faction choice becomes the guerrilla army (which gives the
-      game its name; Fabio will share the story later). Faction 0 stays as a hidden base
-      table for tests and the golden hash. Technicals, heavy drones, militia raised in held
-      towns, rocket teams; no tanks, helicopters, guns or air strikes. Balanced by cover
-      among civilians, informants in held towns, knowing the city and ambushes. Built with
-      the M10 unique units and the authored models.
+- [x] I8 The rebels (decision 162). The No faction choice in the menu became the rebel army,
+      which gives the game its name: one of the big three has invaded and the country has
+      risen. Faction 0 stays as a hidden base table for tests and the golden hash
+      (`?army=none`). Cheap, quick fighters, rocket teams, technicals, rocket and gun trucks
+      on pickups, hobby and racing drones; no helicopters, paratroops or air strikes. They
+      live off the people: hidden among them in any town where people still live, told
+      where the enemy is in such a town, joined by volunteers in the towns they hold, a
+      quarter faster on foot through any town, and their sappers lay roadside bombs.
+      Departed from the first sketch here in two things, both on Fabio's word that they
+      "still need to have the same units, in a sense": a few captured tanks, dear and slow
+      to come by, and a rocket truck where the others have guns.
 
 ## M10 Factions
 

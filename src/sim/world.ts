@@ -238,6 +238,8 @@ export const EV_FELL = 31;
 export const EV_FIRE = 32;
 /** a = the unit that sprang it, b = the enemy vehicle in the circle (or -1): an ambush opens fire (I6). */
 export const EV_AMBUSH = 38;
+/** A band of volunteers has joined the rebels (I8): a = town, b = team. */
+export const EV_VOLUNTEERS = 39;
 /** Flares burning at once. */
 export const MAX_FLARES = 16;
 export const EV_CAMERA_LOST = 20; // a = camera slot, b = team: pulled down by the enemy
@@ -371,6 +373,8 @@ export interface World {
   sOccTeam: Uint8Array;
   /** Towns: owner (or NO_TEAM), the team capturing it and how far it has got. */
   townOwner: Uint8Array;
+  /** Civilians at home in each town; kept only in a game with rebels in it (rebels.ts). */
+  townFolk: Uint16Array;
   townCapturer: Uint8Array;
   townProgress: Int16Array;
   /** Credits per team: paid by held towns, spent on technology and the advanced units. */
@@ -680,6 +684,7 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     sOcc: new Uint8Array(MAX_STRUCTS),
     sOccTeam: new Uint8Array(MAX_STRUCTS),
     townOwner: new Uint8Array(MAX_TOWNS).fill(NO_TEAM),
+    townFolk: new Uint16Array(MAX_TOWNS),
     townCapturer: new Uint8Array(MAX_TOWNS).fill(NO_TEAM),
     townProgress: new Int16Array(MAX_TOWNS),
     credits: new Int32Array(MAX_TEAMS),
@@ -955,6 +960,9 @@ export function hashWorld(w: World): number {
   }
   // Only once something was felled, so that worlds without it hash as they always did.
   if (w.felledCount > 0) mix(w.felledCount ^ (w.felled[w.felledCount - 1] << 12));
+  // Only in a game with rebels in it, so that the others hash as they always did.
+  for (let t = 0; t < MAX_TOWNS; t++)
+    if (w.townFolk[t] !== 0) mix(0xf01c ^ (t << 16) ^ w.townFolk[t]);
   mix(w.civCount ^ (w.civEscaped << 12));
   mix(w.civFieldAt);
   for (let t = 0; t < OLD_TEAMS; t++) mix(w.civKilled[t]);

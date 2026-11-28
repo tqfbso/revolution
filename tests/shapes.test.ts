@@ -95,7 +95,7 @@ function spread(w: World): { along: number; across: number } {
 describe('how a body moves (I4, decision 148)', () => {
   it('names every shape, and gives every faction one for open ground', () => {
     expect(SHAPES.length).toBe(SHAPE_COUNT);
-    expect(DOCTRINE).toEqual([SHAPE_BLOCK, SHAPE_WEDGE, SHAPE_LINE, SHAPE_VEE]);
+    expect(DOCTRINE).toEqual([SHAPE_BLOCK, SHAPE_WEDGE, SHAPE_LINE, SHAPE_VEE, SHAPE_LINE]);
   });
 
   it('without a faction a move is the block it always was: no march, no leads', () => {

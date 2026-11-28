@@ -1,7 +1,7 @@
 // The economy: what things cost, the trucks that pay for them, base buildings and what
 // they produce. Three resources with three different shapes (see decision 035):
 // supplies scale with trucks and run out, fuel scales with wells held, credits with towns.
-import { FACTIONS, kindOf } from './factions';
+import { FACTIONS, kindOf, pointsOf } from './factions';
 import {
   CMD_ASSIST,
   CMD_BUILD,
@@ -56,7 +56,6 @@ import {
   KIND_STRIKE,
   KIND_TANK,
   KIND_TRUCK,
-  POINTS,
 } from './units';
 import {
   DEST_COMMANDER,
@@ -900,7 +899,7 @@ function updateProduction(w: World): void {
     }
     const unit = item !== TIER_ITEM;
     // An army at its limit builds nothing more until it has lost something or grown.
-    if (unit && w.pop[team] + POINTS[item] > w.popCap[team]) continue;
+    if (unit && w.pop[team] + pointsOf(w, team, item) > w.popCap[team]) continue;
     // A helicopter needs somewhere to land, and the reserve has only so many places.
     if (unit && IS_HELI[item] && w.helis[team] >= w.heliCap[team]) continue;
     if (item === KIND_PARA && w.paraReserve[team] >= PARA_RESERVE_MAX) continue;
@@ -909,7 +908,7 @@ function updateProduction(w: World): void {
     if (item === KIND_PARA) {
       // Paratroops do not walk out of the door: they wait off the map for the plane.
       w.paraReserve[team]++;
-      w.pop[team] += POINTS[item];
+      w.pop[team] += pointsOf(w, team, item);
       w.events.push(EV_RESERVE, team, w.paraReserve[team]);
     } else if (unit) {
       // Out of the south side, onto the strip of ground every building keeps free.
@@ -917,7 +916,7 @@ function updateProduction(w: World): void {
       const oy = ((map.sY[s] + map.sH[s]) << CELL_SHIFT) + (CELL_FX >> 1);
       const id = spawnUnit(w, item, team, ox, oy);
       if (id < 0) continue;
-      w.pop[team] += POINTS[item];
+      w.pop[team] += pointsOf(w, team, item);
       if (IS_HELI[item]) w.helis[team]++;
       w.events.push(EV_TRAINED, id, s);
       rally(w, id, s);
@@ -970,10 +969,10 @@ function countForces(w: World): void {
   w.heliCap.fill(0);
   for (let i = 0; i < w.count; i++) {
     if (w.state[i] !== STATE_ALIVE) continue;
-    w.pop[w.team[i]] += POINTS[w.kind[i]];
+    w.pop[w.team[i]] += pointsOf(w, w.team[i], w.kind[i]);
     if (IS_HELI[w.kind[i]]) w.helis[w.team[i]]++;
   }
-  for (let t = 0; t < MAX_TEAMS; t++) w.pop[t] += w.paraReserve[t] * POINTS[KIND_PARA];
+  for (let t = 0; t < MAX_TEAMS; t++) w.pop[t] += w.paraReserve[t] * pointsOf(w, t, KIND_PARA);
   for (let s = 0; s < w.map.structCount; s++) {
     const team = w.sTeam[s];
     if (team === NO_TEAM || w.sHp[s] <= 0) continue;

@@ -26,9 +26,9 @@ export function unitMaterial(
   const marking = attribute('teamMask', 'float');
   const army = tint.w.floor().div(SEEDS).floor();
   const coat = mix(
-    mix(vec3(1, 1, 1), vec3(...COATS[2]), step(1.5, army)),
-    vec3(...COATS[3]),
-    step(2.5, army),
+    mix(mix(vec3(1, 1, 1), vec3(...COATS[2]), step(1.5, army)), vec3(...COATS[3]), step(2.5, army)),
+    vec3(...COATS[4]),
+    step(3.5, army),
   );
   const painted = mix(attribute('color', 'vec3').mul(coat), tint.xyz, marking);
   const burn = tint.w.fract().sub(BURN_BASE).div(BURN_SCALE).clamp(0, 1);
