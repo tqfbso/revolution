@@ -3919,6 +3919,7 @@ team panel and the end screen can say who put it where.
   (supplies, fuel, credits, units, buildings) under the per-player score.
 - Checked with two headless players over `?net=local`: both screens showed the same books
   through 40+ hash checks, no desync. The real broker cannot be reached from the cloud.
+
 ## 165. Road speed: wheels +30%, tracks +15% (2026-11-28)
 
 Fabio approved it from the code audit. A ground vehicle on a road or paved square
