@@ -187,6 +187,12 @@
         flex-wrap: wrap;
         row-gap: 0;
       }
+      #resources .stats .good b {
+        color: var(--good);
+      }
+      #resources .stats .bad b {
+        color: var(--bad);
+      }
       #resources button {
         height: 36px;
         padding: 0 14px;
@@ -261,6 +267,46 @@
       #armies .out {
         text-decoration: line-through;
         opacity: 0.55;
+      }
+      #inspect {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 7;
+        display: none;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 3px;
+        min-width: 170px;
+        max-width: 280px;
+        padding: 9px 13px;
+        border-radius: 12px;
+        white-space: normal;
+        line-height: 1.4;
+        pointer-events: none;
+      }
+      #inspect.on {
+        display: flex;
+      }
+      #inspect b {
+        font-size: 13px;
+      }
+      #inspect .bar {
+        display: block;
+        width: 100%;
+        height: 3px;
+        margin: 2px 0;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      #inspect .bar i {
+        display: block;
+        height: 100%;
+        border-radius: 2px;
+        background: var(--ink);
+      }
+      #inspect .hot {
+        color: #ffb4a8;
       }
       #perf {
         margin: 0;
@@ -597,6 +643,123 @@
         display: none;
         pointer-events: auto;
         z-index: 8;
+      }
+      #log {
+        top: 60px;
+        left: 16px;
+        width: 380px;
+        max-height: min(60vh, 520px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: 12px 14px;
+        display: none;
+        pointer-events: auto;
+        z-index: 8;
+        color: var(--dim);
+        background: var(--sheet);
+      }
+      #log.on {
+        display: block;
+      }
+      #log .head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      #log .head b {
+        color: var(--ink);
+        font-size: 13px;
+      }
+      #log .head span {
+        flex: 1;
+        color: var(--faint);
+      }
+      #log .close {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        line-height: 24px;
+        text-align: center;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      #log .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      #log .row:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      #log .row i {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 4px;
+      }
+      #log .t,
+      #log .sq {
+        flex: none;
+        font-variant-numeric: tabular-nums;
+        color: var(--faint);
+      }
+      #log .sq {
+        color: var(--amber);
+      }
+      #log .x {
+        flex: 1;
+        color: var(--ink);
+      }
+      #log p {
+        margin: 4px 0;
+      }
+      #help .help-top {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      #help .help-top b {
+        color: var(--ink);
+        font-size: 15px;
+      }
+      #help .keys {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+        gap: 4px 16px;
+        margin-bottom: 10px;
+      }
+      #help kbd {
+        display: inline-block;
+        padding: 0 5px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--amber);
+        font: inherit;
+        font-weight: 600;
+      }
+      #help .help-note {
+        margin: 0 0 8px;
+        color: var(--faint);
+      }
+      #help details {
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 6px 0;
+      }
+      #help summary {
+        cursor: pointer;
+        color: var(--ink);
+        font-weight: 600;
+      }
+      #help details p {
+        margin: 6px 0;
+      }
+      #help details b {
+        color: var(--ink);
+        font-weight: 600;
       }
       #bottom {
         position: fixed;
@@ -1584,6 +1747,12 @@ starting…</pre>
           <option value="0.75">0.75x</option>
         </select>
         <button
+          id="log-toggle"
+          title="Event log: every alert and report of the battle, with the time and the grid square; click a line to look there (Shift+Backspace)"
+        >
+          Log
+        </button>
+        <button
           id="help-toggle"
           class="icon"
           aria-label="How to play"
@@ -1662,152 +1831,137 @@ starting…</pre>
     <div id="paused" class="panel"></div>
     <pre id="perf-test-result" class="panel"></pre>
     <div id="help" class="panel">
-      The enemy base is off the map until one of your units sees it: scout. A battle is set up on
-      the New battle screen (main menu, Skirmish): map, armies, time, weather and opponent. The menu
-      button (top right, three lines) has sound, graphics, Restart battle and Main menu.<br />
-      Versus (2 to 4 players): the same invitation, with Game set to Versus in the lobby. Red
-      against blue and no computer; everyone picks a side, players on one side share its army (2 v
-      2, a duel, or uneven sides), and each side sees only what its own troops see<br />
-      Co-op (2 to 4 players): main menu, "Co-op with friends" gives one link to send to everyone;
-      the host presses Start when all are in. Whoever opens it commands the same army with you
-      against the computer. Everyone gives a name and picks a role. The team panel (top left) lists
-      who is playing: new units of your role are yours as they roll out, and a unit that is nobody's
-      becomes yours when you first order it. A box drawn over a crowd takes your own units and
-      leaves your teammates' alone (theirs carry a ring in their colour); nothing is locked, a box
-      or a click on their units alone still selects them. Give hands your selection to a teammate,
-      Take makes it yours, and the role menu on your row changes what you look after. Z marks the
-      point under your pointer for everyone, on the ground and on the minimap, and says its grid
-      square; press 1, 2 or 3 just after to make it Attack here, Defend here or Help me here. The
-      boxes on the minimap are where your teammates are looking; Go to jumps there. Pause and speed
-      are shared.<br />
-      Map grid: the minimap is ruled in squares, A to H across and 1 to 8 down ("armour to C4"). K
-      (or the Grid button) draws the same squares and their names on the battlefield.<br />
-      Engineers and trucks: B (or Repair / fortify), then right click a building, to mend it;
-      engineers then fortify it. Engineers clear street rubble: right click it.<br />
-      Economy: select trucks, right click a stockpile (tan marker) or an oil well (amber) to haul;
-      the buttons at the bottom build. Hold Shift while placing to put down several: the trucks
-      build them one after the other, in the order placed, and a line shows what is still to come
-      (Shift+right click a building of yours adds it to the list). Click one of your buildings to
-      produce units.<br />
-      Supplies run out, wells pump slowly (hold more wells), towns pay credits for technology.<br />
-      Supply: income is generous, keeping an army fed is the limit. Troops are in supply within 150
-      m of a depot or headquarters, a little past the edge of a town you hold, and within 50 m of a
-      truck that is itself within 260 m of one of those (the lighter ground with the green edge on
-      the minimap). Beyond it they have rations for two minutes; after that they fire at half rate
-      and vehicles crawl, until they are back in supply. In supply and out of the fight, troops
-      mend. A long push needs a truck with it, a forward depot, or the next town. Upkeep (top bar):
-      every army point above 60 costs supplies each minute<br />
-      Production (P, or the button at the top): every factory on one screen. Order 20 squads and all
-      your barracks share the work; each unit is paid for as it starts, so you can order ahead of
-      your money. Keep: that many are kept in the field, losses replaced by themselves. Send to: new
-      units of that kind go straight to a town instead of the factory's rally point<br />
-      Commanders: select troops and press N, and they get a commander (Alpha to Hotel, eight at
-      most). The board top right has a card for each, always in the same order: its name, what it is
-      doing and where, five strength pips, its number of units, a tag only when something is wrong,
-      and its grid square (M hides and shows the board). While you have units selected every card
-      shows an amber plus with their number: one click, or a right click anywhere on the card, puts
-      them under that commander. Click a card and it opens: give it a mission, then click the map
-      (or the minimap) for the place. Attack: it forms up, marches as one body, closes up outside
-      the place where the enemy cannot see it (for 20 seconds at most), assaults with smoke and
-      guns, holds what it took, and breaks off and waits for reinforcements when it is losing. Move
-      (or T with its troops selected): goes to the place and stands there, without stopping to fight
-      on the way, going into houses or falling back. Concentrate (or R with its troops selected):
-      everything it has onto the exact spot you click, each unit at its own best speed, with no
-      forming up and no waiting outside; the last stretch is fought, and they stay massed there
-      until you give the mission again. Hold: stays to the last, infantry in the houses. Defend:
-      holds, goes out to meet an enemy nearby, gives ground to one far too strong and comes back.
-      Patrol: back and forth between where it stood and the place. Screen: a thin line of lookouts
-      that pulls back from anything strong. Replace losses: what it loses is ordered again and sent
-      to it. Production's "Send to" can also send every new unit of a kind to a commander. An order
-      you give a unit yourself takes it out of its commander's hands (select it and press the plus
-      on its commander's card to put it back). The foot of the board counts idle units and can hand
-      them to the nearest commander<br />
-      You command red. Drag: select · Double click: all of that type · Shift: add · Ctrl+A: all<br />
-      Right click: move (breaks off a fight) · Right click an enemy: attack it · C then click or
-      Alt+right click: attack-move · Shift+right click: way point (the troops go there after where
-      they are going now; several make a route, drawn while they are selected) · X: stop · H: hold
-      position · G: hold fire · . (full stop): idle trucks · Esc: clear<br />
-      Movement (the button on any selection and on every commander, or the comma key): Auto is a
-      convoy on roads and into towns (vehicles in file, squads on both sides, the first pair ahead
-      of the lead vehicle) and your army's formation in open ground (the alliance a wedge, Russia a
-      line, China a vee). Convoy, Wedge, Line, Vee, Echelon or Block force one everywhere, from the
-      next move order on<br />
-      Right click a building: infantry moves in · Ctrl+right click a building or bridge: shell it<br />
-      Shift+R then right click a building: the squads go up on its roof (further reach and sight,
-      rockets hit a tank's top, a mortar can fire; but no walls round them, and a tank cannot hit
-      them close under the eaves) · Shift+H then drag a circle: ambush (fire held, men hidden, until
-      an enemy vehicle enters it)<br />
-      Engineers: O (Demolish), then right click a building or bridge (charges), a wood (they fell a
-      patch, which lets vehicles through and clears the view) or a wall, wire or rubble. People
-      still in a house that is brought down are killed, and you pay for them<br />
-      Right click a building the enemy holds: infantry storms it, room by room. Bring three men for
-      every defender, or fewer if a tank has breached a wall first or smoke covers the way in.
-      Engineers are worth four riflemen in the assault<br />
-      Buildings come apart slowly: damaged, then a gutted shell, then a ruin, and each still
-      shelters infantry. Tank guns breach the wall they hit (a hole the men behind are exposed
-      through); only artillery and engineers' charges bring a building down fast. A ruin cannot be
-      destroyed<br />
-      Ctrl+right click the ground: guns shell that spot (X to cease fire) · F: guns lay smoke at the
-      pointer, which blinds both sides<br />
-      Y: see through the buildings between you and the street you are looking at (close up only; off
-      until you press it, and remembered)<br />
-      Weather (New battle screen): in rain everyone sees 85% as far, in snow 80%, in fog 55%, scouts
-      and drones included. No dust in rain or snow<br />
-      Free-for-all (New battle screen, Armies: 3 or 4): every army for itself on the four corners
-      map. You are red, bottom left; blue, gold and green are computers that fight you and each
-      other. You win when the last enemy headquarters has fallen<br />
-      Armies (New battle screen, Your army and Enemy): the Western alliance has fewer, better and
-      dearer units, the toughest tank, long sight and a precise long gun, but only a light jammer (a
-      smaller ring, dearer). Russia has cheap fast-firing tanks, rocket batteries, long-armed air
-      defence and the strongest jammer, but no transport helicopter. China has the cheapest
-      infantry, swarm drones at well under the usual price, fast wheeled carriers that seat three
-      squads and hardy engineers, but no paratroopers<br />
-      Night battles (New battle screen, Time: night): troops see six tenths as far, scouts and their
-      drone as far as by day. Whatever is lit is seen at daytime range: a unit that has just fired,
-      anyone near a burning vehicle, and everything under a flare. I: the nearest selected gun puts
-      a flare over the pointer for 30 seconds (it lights your own troops too)<br />
-      Field works: select trucks or engineers (Barracks), pick a work at the bottom and drag a line
-      on the ground. Walls and gates stop everything (gates open for you), barbed wire stops men,
-      tank obstacles stop vehicles, trenches and sandbags are cover: right click them with infantry
-      to man them<br />
-      Right click an enemy work: tanks and guns shoot it down, engineers blow it up. Tanks drive
-      over wire. Units ordered past a wall with no way round breach it themselves if they can<br />
-      Right click a carrier (or L with squads and carriers selected): mount up · U: dismount<br />
-      Drones fly over everything; a red ring on the ground is an enemy jammer: drones die inside
-      it<br />
-      Helicopters (tier 2): trucks build a Helipad, which builds them and holds three; another pad,
-      another three. The attack helicopter hunts vehicles and squads in the open; the transport
-      lifts four squads over anything (L to board, U to set down). Air defence shoots both down,
-      rifles and autocannon wear them down, jammers do nothing to them<br />
-      Paratroopers (Barracks, tier 2) wait in reserve off the map: the count shows in the top bar. J
-      (or a click on it), then click the map: a transport plane comes in over your edge of the map
-      and drops up to eight squads there. Enemy air defence under its path shoots it down with
-      everyone aboard, so look first. On the ground they have rations for two minutes<br />
-      Air strike (tier 3, your headquarters standing; the button shows in the top bar): Shift+J,
-      then click the map. A jet comes in fast over your edge of the map. The Western alliance drops
-      one guided bomb that follows the vehicle or squad you clicked and kills it, Russia a stick of
-      six bombs along its run that clears a street of men in the open, China a swarm of eight drones
-      that dive on the vehicles round the point (two to a tank), then on men in the open; a jammer
-      sends them astray. 200 supplies, 150 fuel, 250 credits, then four minutes before the next. Air
-      defence on the way in shoots the jet down before it lets go. Bombs hurt your own men too<br />
-      V with engineers selected: leave a surveillance camera where they stand (20 supplies, 12 at
-      most). It watches a small circle, raises a contact alert, and the enemy cannot see or shoot
-      it. An enemy jammer blinds it (its ring turns red) and gives it away; then any enemy ground
-      unit that walks up pulls it down. Your jammer does the same to theirs: found cameras get a red
-      mark<br />
-      Ctrl or Alt/Option + 0..9: save group (on a Mac use Option: Ctrl + number belongs to the
-      system), or click + Group · with Shift as well: add the selection to that group · 0..9: recall
-      (Shift: add to the selection) · twice: jump to it. Groups show as numbered chips above the
-      command card; click one to select it · Minimap: click to look, right click to order<br />
-      Space: pause. Orders given while paused all start when you resume, so you can plan a line of
-      works or an attack in peace. Speed 0.75x slows the whole game a little<br />
-      Alerts: when you are attacked off screen, or a recon drone finds enemy troops, a banner, a
-      ping on the minimap and an arrow at the screen edge show where. Backspace (or a click on any
-      of them) takes you there; Backspace again goes to the one before<br />
-      WASD / arrows / screen edge: pan · Wheel: zoom · Q/E or middle drag: rotate<br />
-      Every order with a key also has a button at the bottom when the right units are selected;
-      hover over a button to read what it does. F3 (or a click on the frame-rate line): the full
-      performance readout
+      <div class="help-top"><b>How to play</b><span>F1 or the ? button to close</span></div>
+      <div class="keys">
+        <span><kbd>Drag</kbd> select</span>
+        <span><kbd>Double click</kbd> all of that type</span>
+        <span><kbd>Right click</kbd> move, or attack what is under it</span>
+        <span><kbd>C</kbd> / <kbd>Alt</kbd>+right click: attack-move</span>
+        <span><kbd>Shift</kbd>+right click: way point</span>
+        <span><kbd>Ctrl</kbd>+right click: shell it</span>
+        <span><kbd>X</kbd> stop · <kbd>H</kbd> hold · <kbd>G</kbd> hold fire</span>
+        <span><kbd>,</kbd> movement (convoy, wedge, line...)</span>
+        <span><kbd>N</kbd> new commander · <kbd>M</kbd> board</span>
+        <span><kbd>P</kbd> production · <kbd>K</kbd> grid</span>
+        <span><kbd>Option</kbd>+0..9 save group · 0..9 recall</span>
+        <span><kbd>Space</kbd> pause · <kbd>Backspace</kbd> go to alert</span>
+        <span><kbd>Shift</kbd>+<kbd>Backspace</kbd> event log</span>
+        <span><kbd>WASD</kbd> pan · wheel zoom · <kbd>Q</kbd>/<kbd>E</kbd> turn</span>
+        <span><kbd>Y</kbd> see through buildings</span>
+      </div>
+      <p class="help-note">
+        Rest the pointer on a unit or a building to read what it is. Rings on the ground: amber what
+        the selected guns and missiles reach (broken red: too close for them), blue what scouts see,
+        orange an ambush you laid. The ring an order leaves: green move, amber attack-move, red
+        attack or shell, blue into a house or carrier.
+      </p>
+      <details open>
+        <summary>Fighting in towns</summary>
+        <p>
+          Right click a building: infantry moves in. Right click one the enemy holds: they storm it,
+          room by room; bring three men for every defender, fewer if a tank has breached a wall or
+          smoke covers the way in. Engineers count as four riflemen.
+        </p>
+        <p>
+          Buildings come apart slowly: shot up, gutted, then a ruin, and each still shelters men.
+          Shells and rockets take a building from the top down. Fire from close by (a tank with its
+          muzzle on the wall, an engineer's charge, a vehicle blowing up beside it) eats the
+          <b>ground floor</b>: below half it <b>catches fire</b>, the fire climbs a floor every six
+          seconds and drives the garrison out unhurt, and nobody goes back in for forty seconds.
+          When the ground floor is gone the whole building <b>pancakes</b>, whatever health it had
+          left, and kills those inside. Mending shores it up.
+        </p>
+        <p>
+          Shift+R then right click a building: squads go up on the roof (further reach and sight,
+          rockets hit a tank's top, a mortar can fire; but no walls round them). Shift+H then drag a
+          circle: ambush, fire held until an enemy vehicle enters it. B then right click: repair
+          (trucks, engineers), then engineers fortify. O: engineers demolish a building, a bridge, a
+          wood or a wall; people still in a house brought down are killed, and you pay for them.
+          Right click street rubble with engineers to clear it.
+        </p>
+      </details>
+      <details>
+        <summary>Fire support and the air</summary>
+        <p>
+          Ctrl+right click the ground (or an enemy) with guns or mortars: they shell it, seen or
+          not. X ceases fire. F: smoke at the pointer, which blinds both sides. I: a flare over the
+          pointer for 30 seconds (it lights your troops too).
+        </p>
+        <p>
+          Drones fly over everything; a red ring on the ground is an enemy jammer and drones die in
+          it. Helicopters (tier 2, from a Helipad, three a pad): the attack helicopter hunts
+          vehicles and men in the open, the transport lifts four squads (L board, U set down).
+          Paratroopers (Barracks, tier 2): J then click the map. Air strike (tier 3, HQ standing):
+          Shift+J then click; the alliance drops one guided bomb, Russia a stick of six, China a
+          swarm of eight drones. Air defence under the path shoots the plane down first.
+        </p>
+      </details>
+      <details>
+        <summary>Commanders</summary>
+        <p>
+          Select troops and press N: they get a commander (eight at most). The board top right has a
+          card for each; with units selected each card shows a plus that puts them under it. Click a
+          card, pick a mission, click the map. Attack forms up, marches as one body, assaults with
+          smoke and guns, holds what it took and breaks off when losing. Move (T) goes without
+          stopping to fight. Concentrate (R) sends everything to one spot at once. Hold stays to the
+          last; Defend gives ground to one far too strong and comes back; Patrol goes back and
+          forth; Screen is a thin line of lookouts. Replace losses orders what it loses again. An
+          order you give a unit yourself takes it from its commander.
+        </p>
+      </details>
+      <details>
+        <summary>Economy, supply and production</summary>
+        <p>
+          Select trucks, right click a stockpile (tan) or an oil well (amber) to haul; the buttons
+          at the bottom build. Shift while placing puts down several, built in order. Click one of
+          your buildings to produce, or P for every factory on one screen: order ahead of your money
+          (each unit is paid as it starts), Keep holds that many in the field, Send to routes new
+          units to a town or a commander. Towns pay credits for technology.
+        </p>
+        <p>
+          The top bar shows <b>Net</b>: supplies a minute coming in (trucks and flags) less upkeep.
+          Troops are in supply within 150 m of a depot or HQ, a little past a town you hold, and
+          within 50 m of a truck that is itself within 260 m of one of those. Beyond it they have
+          two minutes of rations, then fire at half rate and vehicles crawl. In supply and out of
+          the fight, troops mend. Every army point above 60 costs upkeep.
+        </p>
+        <p>
+          Field works: trucks or engineers, pick a work and drag a line. Walls and gates stop
+          everything, wire stops men, tank obstacles stop vehicles, trenches and sandbags are cover
+          (right click them with infantry). V with engineers: a hidden surveillance camera.
+        </p>
+      </details>
+      <details>
+        <summary>Armies, night and weather</summary>
+        <p>
+          The Western alliance: fewer, better, dearer units, the toughest tank, long sight, only a
+          light jammer. Russia: cheap fast-firing tanks, rocket batteries, the strongest jammer, no
+          transport helicopter. China: the cheapest infantry, cheap swarm drones, fast wheeled
+          carriers, no paratroopers. The rebels: quick cheap fighters, at home in towns, roadside
+          bombs, no air attack.
+        </p>
+        <p>
+          At night troops see six tenths as far; whatever is lit (a unit that just fired, a burning
+          wreck, a flare) is seen at daytime range. Rain cuts sight to 85%, snow 80%, fog 55%.
+        </p>
+      </details>
+      <details>
+        <summary>Setting up, co-op and versus</summary>
+        <p>
+          The enemy base is hidden until one of your units sees it: scout. Main menu, Skirmish: map,
+          armies, time, weather, opponent and a layout number (the same number gives the same
+          ground). Three or four armies is a free-for-all on the four corners map; you win when the
+          last enemy HQ falls.
+        </p>
+        <p>
+          Co-op with friends gives one link for everyone; you command one army together against the
+          computer, each with a role. A box takes your own units and leaves your teammates' (theirs
+          carry a ring in their colour). Give and Take hand units over. Z marks a point for
+          everyone; 1, 2 or 3 just after makes it Attack, Defend or Help me. Versus: red against
+          blue, no computer, each side sees only what its troops see. Pause and speed are shared.
+        </p>
+        <p>F3 (or a click on the frame-rate line): the full performance readout.</p>
+      </details>
     </div>
     <canvas id="minimap"></canvas>
     <div id="select-box"></div>

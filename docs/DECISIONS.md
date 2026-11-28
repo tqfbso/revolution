@@ -3938,6 +3938,40 @@ From the code audit Fabio passed on (section 3B and 4.3):
 - New battle has a Layout number with Randomise: a fresh one each time the screen opens, or
   type one to fight on the same ground again. It was always 1. `?seed=` still wins.
 
+## Audit UX 2. Hover inspector, net income, a help screen in sections (2026-11-28)
+
+From the code audit (section 3C):
+
+- Rest the pointer on a unit or a building for a third of a second and a small glass card
+  beside it says what it is (src/client/inspect.ts). A unit: name, army, health, reach and
+  sight. A building: what it is, floors, health and state (intact, shot up, gutted, ruin),
+  whether its roof can be held, the fire on its ground floor, a breach, sandbags, who is
+  inside and how much room is left (the sim's own rule). Only what the player can already
+  see. Off while placing or drawing.
+- The top bar's Upkeep is replaced by Net: supplies a minute that came in over the last
+  minute of game time (every rise between two snapshots: trucks unloading, flags paying),
+  less upkeep. Measured, not predicted; spending is not counted. Upkeep is in its tooltip.
+- Help (F1) is now a key table, a note on rings and the inspector, and six folding sections.
+  It explains, for the first time, the ground floor catching fire and the pancake collapse
+  (decision 150), and Ctrl+right click to shell. About 1,300 words instead of 2,300.
+
+## Audit UX 3. Sounds of the interface, engines in the air, a quieter night, an event log (2026-11-28)
+
+From the code audit (section 3C), all synthesised like the rest (src/client/sound.ts):
+
+- Interface: a soft tick when you select, a radio key click and blip when you order (two
+  blips for attack or shell), a thunk when a building is placed, a rising chime for a flag
+  taken and a falling one for a flag lost, a short swell for victory and a low fall for
+  defeat. The base under attack now has its own slower horn; other attacks and contacts
+  keep their tones.
+- Engines: a helicopter's blade slap, a drone's buzzing motor (strike drones too) and the
+  transport plane's propellers, each one loop set to what is in the air near the camera,
+  heard whether seen or not, as they would be.
+- No birds at night or in rain or snow (half in fog); a low hiss of rain in rain, crickets
+  on a clear night. The jet's whine used a fixed 48 kHz rate; it now uses the device's.
+- Event log: the Log button (top right) or Shift+Backspace lists every alert and report of
+  the battle (80 kept) with the battle clock and grid square; a click looks there.
+
 ## 165. Road speed: wheels +30%, tracks +15% (2026-11-28)
 
 Fabio approved it from the code audit. A ground vehicle on a road or paved square

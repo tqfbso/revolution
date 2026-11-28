@@ -1,3 +1,4 @@
+import type { UiSound } from './sound';
 import { factionOf, myKinds, myPoints, myPrices } from './army';
 import { FACTION_REBEL } from '../sim/factions';
 import { ME } from './me';
@@ -78,7 +79,10 @@ import {
   TOWN_SUPPLIES,
 } from '../sim/units';
 import { MAX_ORDER, WORKS, WORK_BOMB, WORK_BUILDABLE, WORK_COUNT, canFortify } from '../sim/works';
-import { STANCE_FREE, STANCE_HOLD_FIRE } from '../sim/world';
+import { STANCE_FREE, STANCE_HOLD_FIRE, TICK_RATE } from '../sim/world';
+
+/** Income is summed over this many ticks of game time: one minute. */
+const INCOME_WINDOW = 60 * TICK_RATE;
 import { DOCTRINE, SHAPES, SHAPE_AUTO, SHAPE_BLOCK, SHAPE_COUNT } from '../sim/formations';
 import {
   BASE_STRIDE,
@@ -214,6 +218,18 @@ export class CommandCard {
   airStrike: () => void = () => {};
   /** Flags the player holds: each pays supplies, fuel and credits every second. */
   private flags = 0;
+  private flagsKnown = false;
+  /** A chime or a click for what happened (set by the client). */
+  uiSound: (kind: UiSound) => void = () => {};
+  /**
+   * Supplies that came in (trucks unloading, flags paying), as [tick, amount], over the last
+   * INCOME_WINDOW ticks: what the army earns a minute, set against upkeep.
+   */
+  private gains: number[] = [];
+  private lastSupplies = -1;
+  private lastTick = -1;
+  /** Supplies a minute coming in, less upkeep. */
+  private net = 0;
   /** The player's units that are out of supply (set by whoever knows: the supply view). */
   hungry: () => number[] = () => [];
   private html = '';
@@ -321,6 +337,7 @@ export class CommandCard {
   }
 
   applySnapshot(s: Snapshot): void {
+    this.income(s.tick, s.supplies[ME] ?? 0, s.upkeep[ME] ?? 0);
     this.supplies = s.supplies[ME] ?? 0;
     this.fuel = s.fuel[ME] ?? 0;
     this.credits = s.credits[ME] ?? 0;
@@ -336,6 +353,9 @@ export class CommandCard {
     this.upkeep = s.upkeep[ME] ?? 0;
     let flags = 0;
     for (let t = 0; t < s.townOwner.length; t++) if (s.townOwner[t] === ME) flags++;
+    // A chime up for a flag taken, down for one lost (not for the count at the start).
+    if (this.flagsKnown && flags !== this.flags) this.uiSound(flags > this.flags ? 'gain' : 'loss');
+    this.flagsKnown = true;
     this.flags = flags;
     // The game is decided when a headquarters that stood is gone.
     // With several enemies (decision 124) it is won when the last of them has lost his.
@@ -722,6 +742,7 @@ export class CommandCard {
       // With Shift it is one more for the list: built after those placed before it.
       ...(keep ? { queue: true } : {}),
     });
+    this.uiSound('place');
     if (!keep) this.placing = -1;
     this.plotOk = false;
     return true;
@@ -933,6 +954,27 @@ export class CommandCard {
     return -1;
   }
 
+  /**
+   * Income is measured, not predicted: every rise in supplies between two snapshots is
+   * money in (spending only ever lowers it), summed over the last minute of game time.
+   */
+  private income(tick: number, supplies: number, upkeep: number): void {
+    if (tick < this.lastTick) this.gains = []; // a new game, or a rejoin from the start
+    if (this.lastSupplies >= 0 && tick > this.lastTick && supplies > this.lastSupplies) {
+      this.gains.push(tick, supplies - this.lastSupplies);
+    }
+    this.lastSupplies = supplies;
+    this.lastTick = tick;
+    let k = 0;
+    while (k < this.gains.length && this.gains[k] <= tick - INCOME_WINDOW) k += 2;
+    if (k > 0) this.gains.splice(0, k);
+    let sum = 0;
+    for (let j = 1; j < this.gains.length; j += 2) sum += this.gains[j];
+    // Before a full minute has passed, scale what came in so far up to a minute.
+    const span = Math.min(INCOME_WINDOW, Math.max(TICK_RATE * 10, tick));
+    this.net = Math.round((sum * INCOME_WINDOW) / span) - upkeep;
+  }
+
   private cost(p: Price): string {
     const part = (v: number, have: number, cls: string) =>
       v > 0 ? `<i class="${cls}${have < v ? ' short' : ''}">${v}</i>` : '';
@@ -970,7 +1012,7 @@ export class CommandCard {
       `<i class="sep"></i>` +
       `<span title="Army points in the field, and the most your depots allow"><b>${this.pop}</b>/${this.popCap} army</span>` +
       `<span>Tier ${this.tier}</span>` +
-      `<span${this.upkeep > 0 ? ' class="sup"' : ''} title="What your army costs to keep, in supplies a minute. The first 60 army points are free.">Upkeep ${this.upkeep > 0 ? '−' : ''}${this.upkeep}/min</span>` +
+      `<span class="${this.net < 0 ? 'bad' : 'good'}" title="Supplies a minute: what came in over the last minute (trucks unloading and flags paying), less upkeep (${this.upkeep} a minute: every army point above 60 costs supplies). Spending is not counted."><b>Net ${this.net > 0 ? '+' : this.net < 0 ? '−' : ''}${Math.abs(this.net)}</b>/min</span>` +
       `<span${this.flags > 0 ? ' class="cred"' : ''} title="What the flags you hold pay, in supplies a minute. Each flag also pays ${TOWN_FUEL * 60} fuel and ${TOWN_INCOME * 60} credits a minute. Lose the flag and you lose the income.">Flags +${this.flags * TOWN_SUPPLIES * 60}/min</span>` +
       `</span>`;
     const idle = this.idle().length;

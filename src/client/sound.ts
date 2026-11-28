@@ -195,7 +195,7 @@ export function makeBuffers(ctx: AudioContext): AudioBuffer[][] {
         const k = 0.03 + 0.25 * near;
         const roar = (low(st, 0, noise(), k) - low(st, 1, noise(), 0.004)) * 6 * swell;
         const f = (t < pass ? 900 : 620) * j;
-        st[2] += (2 * Math.PI * f) / 48000;
+        st[2] += (2 * Math.PI * f) / ctx.sampleRate;
         const whine = Math.sin(st[2]) * 0.08 * near;
         return roar + whine;
       }),
@@ -349,6 +349,69 @@ export function birds(ctx: AudioContext): AudioBuffer {
   });
 }
 
+/**
+ * Engines heard as long as something is in the air (the audit, 3C): a helicopter's blade
+ * slap over a low turbine, a drone's buzzing motor, a transport plane's drone. One loop
+ * each, set to the nearest few in the air near the ear, not one voice per aircraft.
+ */
+export const HUM_ROTOR = 0;
+export const HUM_DRONE = 1;
+export const HUM_PLANE = 2;
+const HUMS = 3;
+const HUM_HALF = [70, 22, 160];
+const HUM_LEVEL = [0.55, 0.22, 0.5];
+
+function hums(ctx: AudioContext): AudioBuffer[] {
+  return [
+    // Rotor: about five blade passes a second, each a dull slap, over a turbine's whine.
+    render(ctx, 2, 211, (t, noise, st) => {
+      const phase = (t * 5.5) % 1;
+      const slap = Math.exp(-phase / 0.05);
+      const body = low(st, 0, noise(), 0.05) * (0.35 + 1.6 * slap);
+      const thump = Math.sin(2 * Math.PI * 5.5 * t) * 0.25 * slap;
+      st[2] += (2 * Math.PI * 1180) / ctx.sampleRate;
+      return body * 1.8 + thump + Math.sin(st[2]) * 0.035;
+    }),
+    // A small drone: a motor's buzz with a slow wobble, like a moped in the sky.
+    render(ctx, 2, 223, (t, noise, st) => {
+      const wobble = 1 + 0.03 * Math.sin(2 * Math.PI * 0.5 * t);
+      st[0] += (2 * Math.PI * 132 * wobble) / ctx.sampleRate;
+      const saw = ((st[0] / (2 * Math.PI)) % 1) * 2 - 1;
+      const buzz = low(st, 1, saw, 0.25) + 0.4 * Math.sin(2 * st[0]);
+      return buzz * (0.85 + 0.15 * Math.sin(2 * Math.PI * 7 * t)) + low(st, 2, noise(), 0.1) * 0.2;
+    }),
+    // A transport plane: four propellers far up, a low beat and a wash of air.
+    render(ctx, 3, 227, (t, noise, st) => {
+      const beat = 0.75 + 0.25 * Math.sin(2 * Math.PI * 1.3 * t);
+      const drone = Math.sin(2 * Math.PI * 68 * t) * 0.5 + Math.sin(2 * Math.PI * 102 * t) * 0.25;
+      return (low(st, 0, noise(), 0.02) * 4 + drone) * beat;
+    }),
+  ];
+}
+
+/** Short sounds of the interface: a radio click for an order, a soft tick for a selection. */
+export type UiSound = 'select' | 'order' | 'fire' | 'place' | 'gain' | 'loss' | 'win' | 'lose';
+
+/** Rain on everything at once: a soft, dark hiss with a patter in it. Kept low (decision 133). */
+function rainHiss(ctx: AudioContext): AudioBuffer {
+  return render(ctx, 7.3, 239, (_t, noise, st) => {
+    const x = noise();
+    const wash = low(st, 0, x, 0.25) - low(st, 1, x, 0.03);
+    const drop = noise() > 0.9985 ? noise() : 0;
+    return wash + low(st, 2, drop, 0.5) * 3;
+  });
+}
+
+/** Crickets on a still night: trills of a high note in threes. */
+function crickets(ctx: AudioContext): AudioBuffer {
+  return render(ctx, 5.1, 241, (t) => {
+    const trill = (t * 2.2) % 1;
+    const on = trill < 0.24 && (trill * 50) % 1 < 0.55 ? 1 : 0;
+    const far = 0.6 + 0.4 * Math.sin((2 * Math.PI * t) / 5.1);
+    return Math.sin(2 * Math.PI * 4400 * t) * on * far;
+  });
+}
+
 interface Pending {
   kind: number;
   gain: number;
@@ -372,6 +435,16 @@ export class Sound {
   private bed: GainNode | null = null;
   private song: GainNode | null = null;
   private air: GainNode | null = null;
+  /** The engine loops (HUM_*), each with its level and pan, and what was heard this tick. */
+  private hum: { gain: GainNode; pan: StereoPannerNode }[] = [];
+  private humLevel = new Float32Array(HUMS);
+  private humPan = new Float32Array(HUMS);
+  /** Night or rain: birds keep quiet (the audit). Set once by the game. */
+  private songScale = 1;
+  private crickets: GainNode | null = null;
+  private wantRain = false;
+  private wantCrickets = false;
+  private lastUi = new Map<UiSound, number>();
   /** How much firing went unvoiced lately: too far, or more than there are voices for. */
   private heat = 0;
   private unheard = 0;
@@ -426,7 +499,126 @@ export class Sound {
     this.wind(ctx);
     this.bed = this.loop(ctx, battle(ctx), 0);
     this.song = this.loop(ctx, birds(ctx), 0);
+    for (const buffer of hums(ctx)) {
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const pan = ctx.createStereoPanner();
+      source.connect(gain).connect(pan).connect(this.master);
+      source.start(ctx.currentTime + Math.random() * 0.5);
+      this.hum.push({ gain, pan });
+    }
+    if (this.wantRain) this.loop(ctx, rainHiss(ctx), 0.022);
+    if (this.wantCrickets) this.crickets = this.loop(ctx, crickets(ctx), 0);
   }
+
+  /**
+   * What the weather and the hour do to the countryside: no birds at night or in rain and
+   * snow (fewer in fog), a soft hiss of rain, and crickets on a clear night.
+   */
+  setAmbience(night: boolean, rain: boolean, snow: boolean, fog: boolean): void {
+    this.songScale = night || rain || snow ? 0 : fog ? 0.5 : 1;
+    this.wantRain = rain;
+    this.wantCrickets = night && !rain && !snow;
+  }
+
+  /** Something in the air at (x, z): HUM_* says which engine. Call per snapshot, then flush. */
+  engine(kind: number, x: number, z: number): void {
+    if (this.ctx === null || this.volume === 0) return;
+    const dx = x - this.earX;
+    const dz = z - this.earZ;
+    const d = Math.hypot(Math.hypot(dx, dz), this.earUp);
+    const g = (HUM_LEVEL[kind] * HUM_HALF[kind]) / (HUM_HALF[kind] + d);
+    if (g < 0.01) return;
+    const pan = Math.max(
+      -0.8,
+      Math.min(0.8, (dx * this.rightX + dz * this.rightZ) / (60 + d * 0.6)),
+    );
+    // The pan leans to the louder ones.
+    const sum = this.humLevel[kind] + g;
+    this.humPan[kind] = (this.humPan[kind] * this.humLevel[kind] + pan * g) / sum;
+    this.humLevel[kind] = sum;
+  }
+
+  /** A click, a blip or a sting of the interface, heard wherever the camera is. */
+  ui(kind: UiSound): void {
+    const ctx = this.ctx;
+    if (ctx === null || this.master === null || this.volume === 0) return;
+    const now = ctx.currentTime;
+    if (now - (this.lastUi.get(kind) ?? -1) < 0.07) return;
+    this.lastUi.set(kind, now);
+    if (ctx.state === 'suspended') void ctx.resume();
+    const tone = (hz: number, at: number, len: number, level: number, type: OscillatorType) => {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = hz;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 2600;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, now + at);
+      gain.gain.linearRampToValueAtTime(level, now + at + Math.min(0.01, len / 4));
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + at + len);
+      osc.connect(filter).connect(gain).connect(this.master!);
+      osc.start(now + at);
+      osc.stop(now + at + len + 0.02);
+      osc.onended = () => gain.disconnect();
+    };
+    // A burst of radio hiss: the press of a handset's key.
+    const squelch = (at: number, len: number, level: number) => {
+      const source = ctx.createBufferSource();
+      source.buffer = this.hiss ?? (this.hiss = render(ctx, 0.12, 307, (_t, noise) => noise()));
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.frequency.value = 2200;
+      band.Q.value = 1.4;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(level, now + at);
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + at + len);
+      source.connect(band).connect(gain).connect(this.master!);
+      source.start(now + at);
+      source.stop(now + at + len + 0.02);
+      source.onended = () => gain.disconnect();
+    };
+    switch (kind) {
+      case 'select':
+        squelch(0, 0.025, 0.05);
+        tone(1500, 0, 0.04, 0.025, 'sine');
+        break;
+      case 'order':
+        squelch(0, 0.05, 0.07);
+        tone(1050, 0.035, 0.05, 0.035, 'square');
+        break;
+      case 'fire':
+        squelch(0, 0.05, 0.07);
+        tone(760, 0.035, 0.05, 0.035, 'square');
+        tone(760, 0.11, 0.05, 0.035, 'square');
+        break;
+      case 'place':
+        tone(150, 0, 0.12, 0.12, 'sine');
+        squelch(0, 0.03, 0.04);
+        break;
+      case 'gain':
+        [523, 659, 784].forEach((hz, k) => tone(hz, k * 0.11, 0.22, 0.06, 'triangle'));
+        break;
+      case 'loss':
+        [659, 523, 392].forEach((hz, k) => tone(hz, k * 0.13, 0.26, 0.06, 'triangle'));
+        break;
+      case 'win':
+        [262, 330, 392, 523].forEach((hz, k) =>
+          tone(hz, k * 0.18, 2.2 - k * 0.3, 0.07, 'triangle'),
+        );
+        break;
+      case 'lose':
+        [220, 208, 165, 110].forEach((hz, k) =>
+          tone(hz, k * 0.32, 2.4 - k * 0.3, 0.08, 'sawtooth'),
+        );
+        break;
+    }
+  }
+  private hiss: AudioBuffer | null = null;
 
   private loop(ctx: AudioContext, buffer: AudioBuffer, level: number): GainNode {
     const source = ctx.createBufferSource();
@@ -483,18 +675,20 @@ export class Sound {
 
   /**
    * An alert tone, heard wherever the camera is: 0 = under attack (two urgent falling
-   * notes), 1 = contact (a short rising radio blip).
+   * notes), 1 = contact (a short rising radio blip), 2 = the base under attack (a horn).
    */
   alert(kind: number): void {
     const ctx = this.ctx;
     if (ctx === null || this.master === null || this.volume === 0) return;
     if (ctx.state === 'suspended') void ctx.resume();
     const t0 = ctx.currentTime + 0.02;
-    const notes = kind === 0 ? [880, 660, 880, 660] : [520, 780];
-    const step = kind === 0 ? 0.16 : 0.09;
+    // 2: the base itself: a slower, lower two-tone horn that cannot be taken for the others.
+    const notes =
+      kind === 0 ? [880, 660, 880, 660] : kind === 2 ? [440, 330, 440, 330] : [520, 780];
+    const step = kind === 0 ? 0.16 : kind === 2 ? 0.28 : 0.09;
     notes.forEach((hz, k) => {
       const osc = ctx.createOscillator();
-      osc.type = kind === 0 ? 'square' : 'sine';
+      osc.type = kind === 1 ? 'sine' : kind === 2 ? 'sawtooth' : 'square';
       osc.frequency.value = hz;
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
@@ -502,7 +696,7 @@ export class Sound {
       const gain = ctx.createGain();
       const at = t0 + k * step;
       gain.gain.setValueAtTime(0, at);
-      gain.gain.linearRampToValueAtTime(kind === 0 ? 0.11 : 0.16, at + 0.012);
+      gain.gain.linearRampToValueAtTime(kind === 1 ? 0.16 : kind === 2 ? 0.09 : 0.11, at + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.001, at + step * 0.95);
       osc.connect(filter).connect(gain).connect(this.master!);
       osc.start(at);
@@ -601,7 +795,18 @@ export class Sound {
     const battle = 1 - Math.exp(-this.heat / 3);
     this.bed?.gain.setTargetAtTime(BED * battle, now, 0.4);
     const near = 1 / (1 + this.earUp / 45);
-    this.song?.gain.setTargetAtTime(0.035 * near * Math.max(0, 1 - battle * 4), now, 1.5);
+    this.song?.gain.setTargetAtTime(
+      0.035 * near * this.songScale * Math.max(0, 1 - battle * 4),
+      now,
+      1.5,
+    );
+    this.crickets?.gain.setTargetAtTime(0.02 * near * Math.max(0, 1 - battle * 3), now, 2);
+    for (let k = 0; k < this.hum.length; k++) {
+      this.hum[k].gain.gain.setTargetAtTime(Math.min(0.6, this.humLevel[k]), now, 0.25);
+      this.hum[k].pan.pan.setTargetAtTime(this.humPan[k], now, 0.25);
+      this.humLevel[k] = 0;
+      this.humPan[k] = 0;
+    }
     this.air?.gain.setTargetAtTime(0.7 + Math.min(1.3, this.earUp / 90), now, 0.5);
   }
 }
