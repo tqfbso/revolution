@@ -1700,3 +1700,302 @@ export function jammerChina(): VehicleModel {
     return { turretY: deck + 1.7, turretZ: -1.6, muzzleY: 0, muzzleZ: 0 };
   });
 }
+
+// The rebels' (I8): nothing built for war. Pickups and lorries off the street with weapons
+// bolted to the load bed, each in the colour it was bought in under the dust, a band of the
+// army's colour daubed across bonnet and doors so that friends know it.
+
+const REBEL = 4;
+const body = (hex: number) => ({ color: under(hex, REBEL) });
+const DUSTY_WHITE = 0xb4ae9c;
+const FADED_BLUE = 0x5d6f7c;
+const SAND = 0xa08f6c;
+const PRIMER = 0x7a4d3c;
+
+/**
+ * A crew-cab pickup: chassis, bonnet, cab and an open load bed. Returns the height of the
+ * bed floor. `long` stretches the bed (the one-tonne kind the heavier weapons need).
+ */
+function pickup(P: Parts, hex: number, long = 0): number {
+  const c = body(hex);
+  const back = -2.65 - long;
+  const floor = 0.86;
+  wheels(P, [1.6, -1.45 - long * 0.7], 0.84, 0.4, 0.3);
+  P.box(0.9, 0.22, 4.6 + long, { at: [0, 0.5, -0.1 - long / 2], color: STEEL }, 1); // frame
+  // The body below the waist, nose to tailgate.
+  P.prism(
+    [
+      [back, 0.5],
+      [back, 1.02],
+      [2.5, 1.02],
+      [2.68, 0.86],
+      [2.66, 0.5],
+    ],
+    0.9,
+    c,
+  );
+  // Bonnet, falling to the grille.
+  P.prism(
+    [
+      [0.95, 1.0],
+      [1.0, 1.2],
+      [2.35, 1.12],
+      [2.52, 1.0],
+    ],
+    0.86,
+    c,
+  );
+  // The cab: raked screen, flat roof, upright back.
+  P.prism(
+    [
+      [-0.6, 1.0],
+      [-0.56, 1.78],
+      [0.42, 1.78],
+      [1.0, 1.2],
+      [0.95, 1.0],
+    ],
+    [0.86, 0.8, 0.8, 0.86, 0.86],
+    c,
+  );
+  P.box(1.5, 0.52, 0.05, { at: [0, 1.5, 0.74], rot: [-0.78, 0, 0], color: GLASS }, 1);
+  P.box(1.4, 0.36, 0.04, { at: [0, 1.5, -0.6], color: GLASS }, 0);
+  P.both((s) => {
+    P.box(0.04, 0.34, 1.0, { at: [s * 0.85, 1.48, -0.06], rot: [0, 0, s * 0.08], color: GLASS }, 1);
+    // Bed sides and the daubed band on the door.
+    P.box(0.07, 0.42, -0.72 - back, { at: [s * 0.87, 1.2, (back - 0.72) / 2], ...c }, 2);
+    P.box(0.03, 0.34, 0.8, { at: [s * 0.915, 0.82, 0.0], team: 1 }, 1);
+    P.box(0.24, 0.14, 0.06, { at: [s * 0.62, 0.9, 2.68], color: LAMP }, 0);
+    P.box(0.1, 0.16, 0.2, { at: [s * 0.98, 1.3, 0.72], color: RUBBER }, 0); // mirrors
+    P.box(0.3, 0.06, 0.9, { at: [s * 0.86, 0.84, 1.6], color: RUBBER }, 0); // arch trim
+  });
+  P.box(1.74, 0.42, 0.07, { at: [0, 1.2, back + 0.03], ...c }, 2); // tailgate
+  P.box(1.74, 0.42, 0.07, { at: [0, 1.2, -0.7], ...c }, 1); // bed front
+  P.box(1.1, 0.03, 0.5, { at: [0, 1.17, 1.7], rot: [-0.06, 0, 0], team: 1 }, 1); // band on the bonnet
+  P.box(1.86, 0.2, 0.14, { at: [0, 0.56, 2.72], color: STEEL }, 1); // bumper
+  P.box(1.1, 0.22, 0.04, { at: [0, 0.82, 2.69], color: RUBBER }, 0); // grille
+  P.box(1.8, 0.14, 0.12, { at: [0, 0.56, back - 0.04], color: STEEL }, 0);
+  return floor;
+}
+
+/**
+ * The technical: a pickup with a heavy machine gun on a post in the bed, behind a plate of
+ * scrap steel, belts of ammunition and a spare wheel thrown in round it.
+ */
+export function technicalRebel(): VehicleModel {
+  return vehicle((_lod, H, T) => {
+    const floor = pickup(H, DUSTY_WHITE);
+    H.box(1.5, 0.05, 1.8, { at: [0, floor + 0.03, -1.7], color: STEEL }, 1);
+    H.box(0.4, 0.24, 0.3, { at: [0.5, floor + 0.17, -2.3], color: 0x4b5141 }, 0); // ammunition tins
+    H.box(
+      0.4,
+      0.24,
+      0.3,
+      { at: [-0.45, floor + 0.17, -2.35], rot: [0, 0.3, 0], color: 0x4b5141 },
+      0,
+    );
+    H.cyl(0.36, 0.22, 'y', { at: [0.45, floor + 0.14, -1.0], color: RUBBER }, 9, 0); // spare wheel
+    H.box(0.5, 0.3, 0.6, { at: [-0.5, floor + 0.2, -1.05], color: 0x5b5c44, cloth: true }, 0); // bedroll
+    H.cyl(0.07, 0.9, 'y', { at: [0, floor + 0.45, -1.7], color: STEEL }, 6, 1); // the post
+
+    // The gun on its cradle: receiver, long barrel, spade grips, the shield, a belt tin.
+    T.box(0.2, 0.2, 0.3, { at: [0, 0.1, 0], color: STEEL }, 1);
+    T.box(0.16, 0.2, 0.9, { at: [0, 0.3, 0.1], color: STEEL });
+    const [my, mz] = gun(T, { y: 0.32, z: 0.5, len: 1.35, r: 0.035, sleeve: false });
+    T.cyl(0.05, 0.5, 'z', { at: [0, 0.32, 0.8], color: RUBBER }, 6, 1); // barrel jacket
+    T.box(0.32, 0.04, 0.04, { at: [0, 0.36, -0.42], color: STEEL }, 0);
+    T.box(0.26, 0.24, 0.2, { at: [-0.24, 0.26, 0.1], color: 0x4b5141 }, 0);
+    T.both((s) => {
+      T.box(
+        0.42,
+        0.7,
+        0.03,
+        { at: [s * 0.3, 0.42, 0.5], rot: [0, s * 0.18, 0], ...body(PRIMER) },
+        1,
+      );
+    });
+    T.box(0.5, 0.2, 0.03, { at: [0, 0.6, 0.52], team: 1 }, 1);
+    return { turretY: floor + 0.9, turretZ: -1.7, muzzleY: my, muzzleZ: mz };
+  });
+}
+
+/**
+ * The rocket truck: a long pickup with twelve launch tubes in three rows on a frame of
+ * welded pipe, tilted up over the cab.
+ */
+export function rocketTruckRebel(): VehicleModel {
+  return vehicle((_lod, H, T) => {
+    const floor = pickup(H, SAND, 0.5);
+    H.box(1.5, 0.08, 2.2, { at: [0, floor + 0.04, -1.95], color: STEEL }, 1);
+    H.both((s) => {
+      H.box(0.08, 0.5, 0.08, { at: [s * 0.6, floor + 0.3, -1.3], color: STEEL }, 0);
+      H.box(0.08, 0.3, 0.08, { at: [s * 0.6, floor + 0.2, -2.6], color: STEEL }, 0);
+    });
+    H.box(0.5, 0.3, 0.7, { at: [0, floor + 0.2, -2.85], color: 0x4b5141 }, 0); // rocket crate
+
+    const pitch = 0.42;
+    const rot: [number, number, number] = [-pitch, 0, 0];
+    const len = 2.1;
+    const up = (along: number, y: number): [number, number] => [
+      0.2 + y * Math.cos(pitch) + Math.sin(pitch) * along,
+      Math.cos(pitch) * along - y * Math.sin(pitch),
+    ];
+    T.cyl(0.3, 0.2, 'y', { at: [0, 0.1, 0], color: STEEL }, 8, 1); // traverse ring
+    for (let row = 0; row < 3; row++) {
+      for (let k = 0; k < 4; k++) {
+        const [y, z] = up(0.2, 0.2 + row * 0.2);
+        T.cyl(
+          0.085,
+          len,
+          'z',
+          { at: [(k - 1.5) * 0.2, y, z], rot },
+          7,
+          row === 2 || k % 3 === 0 ? 2 : 1,
+        );
+      }
+    }
+    // The frame that holds them, and the band that marks whose they are.
+    for (const along of [-0.6, 0.9]) {
+      const [y, z] = up(along, 0.4);
+      T.box(0.92, 0.68, 0.06, { at: [0, y, z], rot, color: STEEL }, 1);
+    }
+    const [by, bz] = up(0.2, 0.71);
+    T.box(0.8, 0.02, 0.5, { at: [0, by, bz], rot, team: 1 }, 1);
+    T.both((s) => {
+      T.box(0.06, 0.8, 0.06, { at: [s * 0.44, 0.45, 0.5], rot: [0.5, 0, 0], color: STEEL }, 0);
+    });
+    const [my, mz] = up(0.2 + len / 2, 0.4);
+    return { turretY: floor + 0.08, turretZ: -1.9, muzzleY: my, muzzleZ: mz };
+  });
+}
+
+/**
+ * The gun truck: a twin anti-aircraft cannon off its trailer and onto the back of a long
+ * pickup, the gunner's seat between the barrels' cradles.
+ */
+export function gunTruckRebel(): VehicleModel {
+  return vehicle((_lod, H, T) => {
+    const floor = pickup(H, FADED_BLUE, 0.5);
+    H.box(1.6, 0.1, 2.4, { at: [0, floor + 0.05, -2.0], color: STEEL }, 1);
+    H.box(0.4, 0.3, 0.5, { at: [0.5, floor + 0.25, -2.9], color: 0x4b5141 }, 0);
+    H.box(0.4, 0.3, 0.5, { at: [-0.5, floor + 0.25, -2.9], color: 0x4b5141 }, 0);
+
+    T.cyl(0.5, 0.16, 'y', { at: [0, 0.08, 0], color: STEEL }, 9, 1); // the mount's ring
+    T.box(0.9, 0.5, 0.7, { at: [0, 0.4, -0.1], ...body(0x4f5544) }); // cradle
+    T.box(0.36, 0.4, 0.3, { at: [0, 0.5, -0.65], color: RUBBER }, 0); // the seat
+    T.both((s) => {
+      gun(T, { y: 0.62, z: 0.2, len: 2.3, r: 0.045, x: s * 0.22, pitch: 0.5, sleeve: false });
+      T.box(0.2, 0.3, 0.6, { at: [s * 0.22, 0.66, 0.2], rot: [-0.5, 0, 0], color: STEEL }, 1);
+      T.box(0.3, 0.34, 0.4, { at: [s * 0.62, 0.5, 0.0], color: 0x4b5141 }, 1); // ammunition boxes
+      T.cyl(0.05, 0.3, 'z', { at: [s * 0.22, 1.62, 2.02], rot: [-0.5, 0, 0], color: RUBBER }, 6, 0); // flash hiders
+    });
+    T.box(0.5, 0.02, 0.4, { at: [0, 0.66, -0.2], team: 1 }, 1);
+    return { turretY: floor + 0.1, turretZ: -2.0, muzzleY: 1.72, muzzleZ: 2.2 };
+  });
+}
+
+/**
+ * The jammer van: a delivery van with its sides plated over and a roof full of home-built
+ * aerials round one mast.
+ */
+export function jammerRebel(): VehicleModel {
+  return vehicle((_lod, H, T) => {
+    const c = body(DUSTY_WHITE);
+    wheels(H, [1.75, -1.55], 0.86, 0.38, 0.3);
+    H.box(0.9, 0.22, 4.8, { at: [0, 0.48, 0], color: STEEL }, 1);
+    H.prism(
+      [
+        [-2.7, 0.46],
+        [-2.7, 2.3],
+        [1.2, 2.3],
+        [1.95, 1.5],
+        [2.6, 1.3],
+        [2.7, 0.8],
+        [2.66, 0.46],
+      ],
+      [0.94, 0.9, 0.9, 0.9, 0.92, 0.94, 0.94],
+      c,
+    );
+    H.box(1.6, 0.6, 0.05, { at: [0, 1.86, 1.6], rot: [-0.82, 0, 0], color: GLASS }, 1);
+    H.both((s) => {
+      H.box(0.04, 0.4, 0.7, { at: [s * 0.93, 1.75, 0.85], color: GLASS }, 1);
+      H.box(0.04, 0.9, 2.6, { at: [s * 0.95, 1.5, -1.2], ...body(PRIMER) }, 1); // plates
+      H.box(0.03, 0.34, 0.9, { at: [s * 0.975, 1.0, 0.7], team: 1 }, 1);
+      H.box(0.24, 0.14, 0.06, { at: [s * 0.62, 0.95, 2.7], color: LAMP }, 0);
+    });
+    H.box(1.9, 0.2, 0.14, { at: [0, 0.54, 2.74], color: STEEL }, 1);
+    H.box(1.2, 0.5, 0.9, { at: [0, 2.55, -1.9], color: 0x4b5141 }, 1); // generator on the roof rack
+    H.box(1.7, 0.05, 3.2, { at: [0, 2.33, -0.9], color: STEEL }, 0);
+
+    T.cyl(0.14, 0.2, 'y', { at: [0, 0.1, 0], color: STEEL }, 7, 1);
+    T.box(0.09, 3.0, 0.09, { at: [0, 1.5, 0], color: STEEL });
+    for (let k = 0; k < 4; k++) {
+      const yaw = k * 0.8;
+      T.box(
+        0.04,
+        0.04,
+        1.5 - k * 0.2,
+        { at: [0, 1.2 + k * 0.55, 0], rot: [0, yaw, 0], color: RUBBER },
+        1,
+      );
+      T.box(
+        1.2 - k * 0.2,
+        0.04,
+        0.04,
+        { at: [0, 1.3 + k * 0.55, 0], rot: [0, yaw, 0], color: RUBBER },
+        0,
+      );
+    }
+    T.cyl(0.3, 0.06, 'x', { at: [0.2, 2.2, 0], color: under(0x8a8c84, REBEL) }, 9, 1); // a dish off a roof
+    T.cyl(0.1, 0.2, 'y', { at: [0, 3.1, 0], team: 1 }, 6, 1);
+    return { turretY: 2.3, turretZ: 0.2, muzzleY: 0, muzzleZ: 0 };
+  });
+}
+
+/** The rebels' supply lorry: a farm lorry with a bonnet, stake sides and a tarpaulin roped over sacks. */
+export function truckRebel(): VehicleModel {
+  return vehicle((_lod, H) => {
+    const { deck, cabBack } = lorry(H, {
+      axles: [2.2, -2.2],
+      r: 0.52,
+      back: -3.5,
+      front: 3.4,
+      cab: 'bonnet',
+      cabLen: 1.6,
+      roof: 2.5,
+    });
+    H.box(
+      2.3,
+      0.14,
+      cabBack + 3.5,
+      { at: [0, deck + 0.07, (cabBack - 3.5) / 2], color: 0x5a4630 },
+      2,
+    );
+    H.both((s) => {
+      for (let z = -3.3; z < cabBack - 0.2; z += 0.8)
+        H.box(0.07, 0.9, 0.09, { at: [s * 1.12, deck + 0.55, z], color: 0x5a4630 }, 0);
+      H.box(
+        0.05,
+        0.22,
+        cabBack + 3.4,
+        { at: [s * 1.13, deck + 0.45, (cabBack - 3.5) / 2], color: 0x5a4630 },
+        1,
+      );
+      H.box(
+        0.05,
+        0.22,
+        cabBack + 3.4,
+        { at: [s * 1.13, deck + 0.85, (cabBack - 3.5) / 2], color: 0x5a4630 },
+        1,
+      );
+      H.box(0.03, 0.3, 0.9, { at: [s * 1.16, deck + 0.85, -1.6], team: 1 }, 1);
+    });
+    H.box(2.0, 1.0, cabBack + 3.0, {
+      at: [0, deck + 0.62, (cabBack - 3.5) / 2],
+      top: [0.8, 0.9],
+      color: under(0x4d5a63, REBEL),
+      cloth: true,
+    });
+    H.box(0.9, 0.03, 0.7, { at: [0, 2.52, cabBack + 0.8], team: 1 }, 1);
+    return noTurret;
+  });
+}

@@ -25,3 +25,5 @@ export const nameOf = (team: number, kind: number): string =>
 /** The numbers of a `kind` in the army of `team`. */
 export const kindIn = (team: number, kind: number): UnitKind =>
   FACTIONS[factions[team] ?? 0].kinds[kind];
+/** What each kind counts for against the player's army limit. */
+export const myPoints = (): readonly number[] => FACTIONS[mine].points;

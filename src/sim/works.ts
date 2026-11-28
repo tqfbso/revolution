@@ -1,7 +1,7 @@
 // Field works: what an army builds on the ground to hold it. One cell each. Walls and gates
 // stop everyone (a gate lets its owner through), wire stops men, obstacles stop vehicles,
 // trenches and sandbags are cover for infantry. See decisions 052 to 056.
-import { kindOf } from './factions';
+import { FACTION_REBEL, kindOf } from './factions';
 import {
   CMD_BREACH,
   CMD_DEMOLISH,
@@ -60,7 +60,13 @@ export const WORK_SANDBAG = 6;
  * owns it; it stops vehicles like a tank obstacle and comes apart with an engineer's charge.
  */
 export const WORK_RUBBLE = 7;
-export const WORK_COUNT = 8;
+/**
+ * A roadside bomb (I8): laid by the rebels' sappers, on a road as readily as beside it. It
+ * is nothing to walk or drive over and nothing to see until another army's vehicle is on
+ * top of it (see `updateBombs` in the sim). Not one of the works anyone can order.
+ */
+export const WORK_BOMB = 8;
+export const WORK_COUNT = 9;
 /** Kinds below this one can be ordered built. */
 export const WORK_BUILDABLE = 7;
 /** The "army" that owns street rubble: nobody. Fits the three bits a snapshot gives a team. */
@@ -179,7 +185,32 @@ export const WORKS: readonly Work[] = [
     blast: 12,
     charge: 150,
   },
+  {
+    // A shell or two wired to a trigger under a heap of rubbish. Nothing shoots it away.
+    name: 'Roadside bomb',
+    terrain: T_OPEN,
+    supplies: 30,
+    ticks: 120,
+    hp: 0,
+    ford: false,
+    direct: 0,
+    blast: 0,
+    charge: 0,
+  },
 ];
+
+/** How far a roadside bomb reaches, and how near its middle a vehicle's armour is hurt. */
+export const BOMB_RADIUS = fx(6);
+export const BOMB_ARMOUR_REACH = fx(4.5);
+/** Percent of its health an armoured vehicle on top of one loses, and anything else does. */
+export const BOMB_ARMOUR_PCT = 70;
+export const BOMB_SOFT_PCT = 120;
+
+/** May the army of `team` order works of this kind? The bomb is the rebels' alone. */
+export function canOrder(w: World, team: number, kind: number): boolean {
+  if (kind === WORK_BOMB) return w.faction[team] === FACTION_REBEL;
+  return kind > 0 && kind < WORK_BUILDABLE;
+}
 
 /** Where a hit on a field work comes from (see Work.direct, .blast, .charge). */
 export const HIT_DIRECT = 0;
@@ -379,8 +410,14 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
       const builders = validUnits(w, cmd.units).filter((id) => isBuilder(w.kind[id]));
       const kind = cmd.work;
       if (builders.length === 0 || !Array.isArray(cmd.cells)) return true;
-      if (!(kind > 0 && kind < WORK_BUILDABLE)) return true;
       const team = w.team[builders[0]];
+      if (!canOrder(w, team, kind)) return true;
+      // A bomb is a sapper's work: a truck driver would not know where to start.
+      if (kind === WORK_BOMB) {
+        for (let k = builders.length - 1; k >= 0; k--)
+          if (!KINDS[w.kind[builders[k]]].engineer) builders.splice(k, 1);
+        if (builders.length === 0) return true;
+      }
       const sites: number[] = [];
       for (let k = 0; k < cmd.cells.length && k < MAX_ORDER; k++) {
         const c = cmd.cells[k];
@@ -408,7 +445,7 @@ export function applyWorkCommand(w: World, cmd: Command): boolean {
       const team = clampInt(cmd.team | 0, 0, MAX_TEAMS - 1);
       if (!Array.isArray(cmd.cells)) return true;
       for (const c of cmd.cells) {
-        if (!(cmd.work > 0 && cmd.work < WORK_BUILDABLE)) continue;
+        if (!(cmd.work > 0 && (cmd.work < WORK_BUILDABLE || cmd.work === WORK_BOMB))) continue;
         if (canFortify(map, cmd.work, c) && w.wKind[c] === 0 && plan(w, team, cmd.work, c)) {
           finish(w, c);
         }

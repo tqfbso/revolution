@@ -36,8 +36,13 @@ import {
   tankAlliance,
   tankChina,
   tankRussia,
+  gunTruckRebel,
+  jammerRebel,
+  rocketTruckRebel,
+  technicalRebel,
   truckAlliance,
   truckChina,
+  truckRebel,
   truckRussia,
 } from './armour';
 import {
@@ -165,6 +170,8 @@ export function buildMortar(faction = 0): {
   tube: THREE.BufferGeometry;
   far: THREE.BufferGeometry;
 } {
+  // The rebels' tubes and launchers (I8) are the invader's.
+  if (faction === 4) faction = 2;
   const g: THREE.BufferGeometry[] = [];
   const [my, mz] = MORTAR_MUZZLE;
   const long = faction === 2 ? 1.12 : faction === 3 ? 0.9 : 1;
@@ -229,6 +236,7 @@ export function buildLauncher(faction = 0): {
   launcher: THREE.BufferGeometry;
   far: THREE.BufferGeometry;
 } {
+  if (faction === 4) faction = 2;
   const g: THREE.BufferGeometry[] = [];
   const h = LAUNCHER_GRIP[0];
   const r = faction === 2 ? 0.075 : faction === 3 ? 0.11 : 0.095;
@@ -285,7 +293,9 @@ export interface Arsenal {
 /** The models of the army of `faction` (sim/factions.ts). */
 export function buildArsenal(faction: number): Arsenal {
   const vehicles = new Array<VehicleModel | null>(KIND_COUNT).fill(null);
-  const f = faction === 2 ? 1 : faction === 3 ? 2 : 0;
+  // The rebels (I8) build nothing of their own that flies, and their few tanks are the
+  // invader's: what they did not make themselves is drawn as Russia's.
+  const f = faction === 2 || faction === 4 ? 1 : faction === 3 ? 2 : 0;
   vehicles[KIND_TANK] = [tankAlliance, tankRussia, tankChina][f]();
   vehicles[KIND_IFV] = [ifvAlliance, ifvRussia, ifvChina][f]();
   vehicles[KIND_ARTILLERY] = [gunAlliance, gunRussia, gunChina][f]();
@@ -297,5 +307,15 @@ export function buildArsenal(faction: number): Arsenal {
   vehicles[KIND_HELI] = [gunshipAlliance, gunshipRussia, gunshipChina][f]();
   vehicles[KIND_LIFT] = [liftAlliance, liftRussia, liftChina][f]();
   vehicles[KIND_PLANE] = [planeAlliance, planeRussia, planeChina][f]();
+  if (faction === 4) {
+    vehicles[KIND_IFV] = technicalRebel();
+    vehicles[KIND_ARTILLERY] = rocketTruckRebel();
+    vehicles[KIND_AD] = gunTruckRebel();
+    vehicles[KIND_EW] = jammerRebel();
+    vehicles[KIND_TRUCK] = truckRebel();
+    // Shop-bought quadcopters, like China's small ones.
+    vehicles[KIND_DRONE] = reconChina();
+    vehicles[KIND_STRIKE] = strikeChina();
+  }
   return { vehicles, jet: [jetAlliance, jetRussia, jetChina][f]() };
 }

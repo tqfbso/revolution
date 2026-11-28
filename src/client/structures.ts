@@ -1,5 +1,9 @@
 import { weathered } from './weather';
 import { ME } from './me';
+import { factionOf } from './army';
+import { FACTION_REBEL } from '../sim/factions';
+import { TOWN_FOLK } from '../sim/rebels';
+import { CELL_FX, CELL_SHIFT } from '../sim/map';
 import * as THREE from 'three/webgpu';
 import {
   attribute,
@@ -3169,6 +3173,8 @@ export class StructureView {
   /** Latest health per structure (0..255, 0 = destroyed) and town state from the sim. */
   readonly hp = new Uint8Array(MAX_STRUCTS).fill(255);
   townOwner: Uint8Array = new Uint8Array(0);
+  /** Civilians at home per town (zeros unless rebels are in the game). */
+  townFolk: Uint16Array = new Uint16Array(0);
   townCapturer: Uint8Array = new Uint8Array(0);
   townProgress: Uint8Array = new Uint8Array(0);
   credits: number[] = [];
@@ -3660,6 +3666,18 @@ export class StructureView {
       const id = s.bases[o];
       if (s.bases[o + 2] !== ME || s.structHp[id] === 0) continue;
       posts.push(map.sX[id] + (map.sW[id] >> 1), map.sY[id] + (map.sH[id] >> 1), BASE_SIGHT);
+    }
+    // The rebels (I8) are told what goes on in every town where people still live.
+    this.townFolk = s.townFolk;
+    if (factionOf(ME) === FACTION_REBEL) {
+      for (let t = 0; t < map.townCount; t++) {
+        if (s.townFolk[t] < TOWN_FOLK) continue;
+        posts.push(
+          map.townX[t] >> CELL_SHIFT,
+          map.townY[t] >> CELL_SHIFT,
+          Math.round((map.townR[t] * 1.5) / CELL_FX),
+        );
+      }
     }
     this.fog.posts = posts;
     const n = Math.min(s.structHp.length, map.structCount);
