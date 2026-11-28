@@ -7,7 +7,19 @@
 import * as THREE from 'three/webgpu';
 import { CMD_DUTY, CMD_GIVE, type Command } from '../sim/commands';
 import { POINTS } from '../sim/units';
-import { NO_SEAT, STATE_ALIVE } from '../sim/world';
+import {
+  NO_SEAT,
+  SPENT_BUILDINGS,
+  SPENT_CREDITS,
+  SPENT_FUEL,
+  SPENT_ON_BUILDINGS,
+  SPENT_ON_OTHER,
+  SPENT_ON_UNITS,
+  SPENT_STRIDE,
+  SPENT_SUPPLIES,
+  SPENT_UNITS,
+  STATE_ALIVE,
+} from '../sim/world';
 import { INFO_STATE_MASK, type Snapshot } from '../worker/protocol';
 import { DUTIES, SEAT_COLOURS, SEAT_RGB, type Coop } from './net';
 import type { UnitView } from './units';
@@ -69,6 +81,8 @@ export class Team {
   /** The place of the mark just made, while its kind can still be changed. */
   private pending: { x: number; z: number; until: number } | null = null;
   private readonly probe = new THREE.Vector3();
+  /** Who spent what, from the last picture (rows of SPENT_STRIDE by seat). */
+  private spent: Int32Array | null = null;
 
   constructor(private readonly d: TeamDeps) {
     this.el = document.createElement('div');
@@ -270,6 +284,7 @@ export class Team {
   /** Units that changed hands without our doing: say so, once per picture. */
   applySnapshot(s: Snapshot): void {
     const { units, coop } = this.d;
+    this.spent = s.spent;
     const me = coop.seat;
     const quiet = this.first || performance.now() - this.acted < 1500;
     const got = new Map<number, { n: number; x: number; z: number }>();
@@ -353,7 +368,8 @@ export class Team {
             return (
               `<div class="mate${gone}"><i style="background:${SEAT_COLOURS[k]}"></i>` +
               `<b>${esc(coop.names[k])}${me ? ' (you)' : ''}</b>${role}` +
-              `<span class="have" data-cell="have${k}"></span>${acts}</div>`
+              `<span class="have" data-cell="have${k}"></span>${acts}</div>` +
+              `<div class="spent" data-cell="spent${k}"></div>`
             );
           })
           .join('') +
@@ -376,6 +392,14 @@ export class Team {
         const name = DUTIES[coop.duties[k]] ?? DUTIES[0];
         if (duty.textContent !== name) duty.textContent = name;
       }
+      const spent = cell(`spent${k}`) as HTMLElement | null;
+      if (spent && this.spent) {
+        const line = spentLine(this.spent, k);
+        if (spent.textContent !== line.text) {
+          spent.textContent = line.text;
+          spent.title = line.title;
+        }
+      }
       const give = cell(`give${k}`) as HTMLButtonElement | null;
       if (give) give.disabled = picked === 0;
     }
@@ -392,4 +416,39 @@ export class Team {
         : '';
     if (free && free.textContent !== text) free.textContent = text;
   }
+}
+
+/** 1240 as "1.2k", 980 as "980". */
+export const short = (n: number): string =>
+  Math.abs(n) >= 10000
+    ? `${Math.round(n / 1000)}k`
+    : Math.abs(n) >= 1000
+      ? `${(n / 1000).toFixed(1)}k`
+      : String(n);
+
+/**
+ * What the player in `row` has spent of the army's money, in a line for the team panel,
+ * and where it went, for its tooltip.
+ */
+export function spentLine(spent: Int32Array, row: number): { text: string; title: string } {
+  const o = row * SPENT_STRIDE;
+  const s = spent[o + SPENT_SUPPLIES] ?? 0;
+  const f = spent[o + SPENT_FUEL] ?? 0;
+  const c = spent[o + SPENT_CREDITS] ?? 0;
+  const n = spent[o + SPENT_UNITS] ?? 0;
+  const b = spent[o + SPENT_BUILDINGS] ?? 0;
+  if (s === 0 && f === 0 && c === 0) return { text: 'spent nothing yet', title: '' };
+  const bought = [
+    n > 0 ? `${n} unit${n === 1 ? '' : 's'}` : '',
+    b > 0 ? `${b} building${b === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  const text =
+    `spent ${short(s)} supplies · ${short(f)} fuel · ${short(c)} credits` +
+    (bought.length > 0 ? ` · ${bought.join(', ')}` : '');
+  const on = (k: number) => (spent[o + k] ?? 0).toLocaleString('en-US');
+  const title =
+    `Of the army's money, on units ${on(SPENT_ON_UNITS)}, on buildings ${on(SPENT_ON_BUILDINGS)}, ` +
+    `on research, air strikes, field works and cameras ${on(SPENT_ON_OTHER)} ` +
+    `(supplies, fuel and credits together).`;
+  return { text, title };
 }

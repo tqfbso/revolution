@@ -194,6 +194,24 @@ export const STAT_RAZED = STAT_SEAT0 + STAT_STRIDE * STAT_SEATS;
 export const STATS = STAT_RAZED + 1;
 /** A unit no player has given an order to himself. */
 export const NO_SEAT = 255;
+/**
+ * Who spent what (see src/sim/spend.ts): one row per player of a shared army, then one per
+ * army for what nobody in particular paid for (the computer, commanders' reinforcements).
+ * A row: supplies, fuel and credits paid out, then units bought, buildings put up, and how
+ * much of the three went on units, on buildings and on everything else (research, strikes,
+ * field works, cameras). Refunds come off the row that paid. Not part of the hash.
+ */
+export const SPENT_SUPPLIES = 0;
+export const SPENT_FUEL = 1;
+export const SPENT_CREDITS = 2;
+export const SPENT_UNITS = 3;
+export const SPENT_BUILDINGS = 4;
+export const SPENT_ON_UNITS = 5;
+export const SPENT_ON_BUILDINGS = 6;
+export const SPENT_ON_OTHER = 7;
+export const SPENT_STRIDE = 8;
+/** The row of what nobody in particular in army `t` paid for. */
+export const SPENT_NOBODY = (t: number): number => STAT_SEATS + t;
 
 export const EV_CIVILIAN = 26;
 /** a = team, b = paratroop squads now waiting in reserve. */
@@ -540,6 +558,18 @@ export interface World {
    * may order any of its units. It follows from the orders, so it is not in the hash.
    */
   owner: Uint8Array;
+  /** Who spent what: rows of SPENT_STRIDE, see SPENT_*. Not in the hash. */
+  spent: Int32Array;
+  /** The seat whose command is being carried out now, NO_SEAT between commands. */
+  payer: number;
+  /** Per place on a factory queue: the seat that paid for it, so a refund goes back to him. */
+  sQueueBy: Uint8Array;
+  /** Per building: the seat who put it on repeat; he pays for what it builds again. */
+  sRepeatBy: Uint8Array;
+  /** Per seat and kind: units he put on bulk order that no factory has taken yet. */
+  orderBy: Int16Array;
+  /** Per army and kind: the seat who set the standing order ("keep N"). */
+  keepBy: Uint8Array;
   /** By seat: the army the player commands (-1: nobody sits there), and his role now. */
   seatArmy: Int8Array;
   duty: Uint8Array;
@@ -748,6 +778,12 @@ export function createWorld(seed: number, map: GameMap = generateMap(seed)): Wor
     stats: new Int32Array(STATS),
     seat: new Uint8Array(MAX_UNITS).fill(NO_SEAT),
     owner: new Uint8Array(MAX_UNITS).fill(NO_SEAT),
+    spent: new Int32Array((STAT_SEATS + MAX_TEAMS) * SPENT_STRIDE),
+    payer: NO_SEAT,
+    sQueueBy: new Uint8Array(MAX_STRUCTS * QUEUE_MAX).fill(NO_SEAT),
+    sRepeatBy: new Uint8Array(MAX_STRUCTS).fill(NO_SEAT),
+    orderBy: new Int16Array(STAT_SEATS * KIND_SLOTS),
+    keepBy: new Uint8Array(MAX_TEAMS * KIND_SLOTS).fill(NO_SEAT),
     seatArmy: new Int8Array(STAT_SEATS).fill(-1),
     duty: new Uint8Array(STAT_SEATS),
     dutyTurn: 0,
