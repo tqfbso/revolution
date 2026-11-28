@@ -42,6 +42,7 @@ import { Effects } from './client/effects';
 import { Fog } from './client/fog';
 import { GridOverlay, gridRef } from './client/grid';
 import { RouteView } from './client/routes';
+import { RingView } from './client/rings';
 import { Minimap } from './client/minimap';
 import { FrontLine, W_BASE, W_TOWN } from './client/front';
 import { FrontOverlay } from './client/frontmesh';
@@ -234,6 +235,7 @@ async function start(): Promise<void> {
   works.clutter = clutter;
   const units = new UnitView(terrain, effects, fog, look, structures, scars);
   const routes = new RouteView(units, (x, z) => terrain.heightAt(x, z));
+  const rings = new RingView(units, (x, z) => terrain.heightAt(x, z));
   units.night = effects.night = night;
   // No dust off wet ground or snow.
   if (weather === WEATHER_RAIN || weather === WEATHER_SNOW) effects.dustiness = 0;
@@ -340,6 +342,7 @@ async function start(): Promise<void> {
     units.applySnapshot(e.data, performance.now());
     card.applySnapshot(e.data);
     routes.applySnapshot(e.data);
+    rings.applySnapshot(e.data);
     production.applySnapshot(e.data);
     board.applySnapshot(e.data);
     supply.applySnapshot(e.data);
@@ -535,6 +538,7 @@ async function start(): Promise<void> {
     rts.look(map.startX[myTeam] * 4 + 14, map.startY[myTeam] * 4 + 10, 95);
   }
   input.controlAll = controlAll;
+  rings.everyone = controlAll;
   structures.revealAll = input.controlAll || demo;
   structures.farDetail = params.get('far') !== '0';
   // Y: see through the buildings in front of the view, or not. Kept for the next game.
@@ -673,6 +677,7 @@ async function start(): Promise<void> {
     card.group,
     grid.group,
     routes.group,
+    rings.group,
   );
   // Flags: who holds what, at a glance, and what the fighting has cost the people who
   // live here (decision 102). Each square is a town; the pointer names it.
@@ -1003,6 +1008,7 @@ async function start(): Promise<void> {
     terrain.update(dt);
     input.update(dt);
     routes.update(dt);
+    rings.update(dt);
     card.update();
     if (coop) {
       // Tell the others where we look, three times a second, and show where they look.
@@ -1109,6 +1115,7 @@ async function start(): Promise<void> {
     cameras,
     coop,
     routes,
+    rings,
   };
   document.getElementById('loading')?.remove();
 }

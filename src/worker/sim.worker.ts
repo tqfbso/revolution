@@ -260,6 +260,20 @@ function postSnapshot(w: World, simMs: number): void {
     plot(w.jobStruct[i]);
     for (let q = 0; q < len; q++) plot(w.buildNext[i * BUILD_QUEUE + q]);
   }
+  // Ambush circles, each once however many wait on it: team, x, z, radius in world units.
+  const ambushes: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (w.stance[i] !== STANCE_AMBUSH || w.state[i] !== STATE_ALIVE) continue;
+    const team = w.team[i];
+    const x = fromFx(w.ambX[i]);
+    const z = fromFx(w.ambY[i]);
+    const r = fromFx(w.ambR[i]);
+    let seen = false;
+    for (let a = 0; a < ambushes.length && !seen; a += 4) {
+      seen = ambushes[a] === team && ambushes[a + 1] === x && ambushes[a + 2] === z;
+    }
+    if (!seen && ambushes.length < 4 * 64) ambushes.push(team, x, z, r);
+  }
   const positions = new Float32Array(n * 2);
   const info = new Uint8Array(n);
   const hp = new Uint8Array(n);
@@ -443,6 +457,7 @@ function postSnapshot(w: World, simMs: number): void {
     commanders,
     task,
     routes: Float32Array.from(routes),
+    ambushes: Float32Array.from(ambushes),
     stats: w.stats.slice(),
     spent: w.spent.slice(),
     civilians: Float32Array.from(civs),

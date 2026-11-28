@@ -201,6 +201,8 @@ export interface Snapshot {
    * place is where the leg under way ends.
    */
   routes: Float32Array;
+  /** Ambush circles being waited on, four numbers each: team, x, z and radius in world units. */
+  ambushes: Float32Array;
   /** The score so far (STAT_* in sim/world.ts). */
   stats: Int32Array;
   /** Who spent what: rows of SPENT_STRIDE by seat, then one per army for nobody's. */
