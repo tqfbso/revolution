@@ -1420,6 +1420,21 @@ export class UnitView {
     return this.kind[id];
   }
 
+  /** Health out of 255. */
+  healthOf(id: number): number {
+    return this.hp[id];
+  }
+
+  /** One of the player's own, alive and in the open (not in a house or a carrier). */
+  isOwnInOpen(id: number): boolean {
+    return (
+      this.isAlive(id) &&
+      this.teamOf(id) === this.playerTeam &&
+      (this.info[id] & INFO_INSIDE) === 0 &&
+      this.lodOf[id] !== LOD_HIDDEN
+    );
+  }
+
   /** It has a target it is shooting at. */
   isFiring(id: number): boolean {
     return this.aim[id] !== NO_AIM;

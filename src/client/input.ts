@@ -610,6 +610,40 @@ export class Input {
     return best;
   }
 
+  /**
+   * What the pointer rests on, for the hover inspector: a unit it can see (an enemy first),
+   * else a building. Nothing while something is being placed or drawn.
+   */
+  pointed(clientX: number, clientY: number): { unit: number; structure: number } {
+    if (this.card.placing >= 0 || this.card.tool !== 0 || this.card.drawingAmbush || this.pick) {
+      return { unit: -1, structure: -1 };
+    }
+    let unit = this.enemyAt(clientX, clientY);
+    if (unit < 0) unit = this.nearestOnScreen(clientX, clientY, (i) => this.units.isOwnInOpen(i));
+    if (unit >= 0) return { unit, structure: -1 };
+    return { unit: -1, structure: this.structureAt(clientX, clientY).structure };
+  }
+
+  private nearestOnScreen(clientX: number, clientY: number, ok: (i: number) => boolean): number {
+    const rect = this.dom.getBoundingClientRect();
+    const pos = this.units.renderPos;
+    let best = -1;
+    let bestD = CLICK_PICK_PX * CLICK_PICK_PX;
+    for (let i = 0; i < this.units.count; i++) {
+      if (!ok(i)) continue;
+      this.v.set(pos[3 * i], pos[3 * i + 1] + 0.5, pos[3 * i + 2]).project(this.camera);
+      if (this.v.z < -1 || this.v.z > 1) continue;
+      const sx = rect.left + (this.v.x * 0.5 + 0.5) * rect.width;
+      const sy = rect.top + (-this.v.y * 0.5 + 0.5) * rect.height;
+      const d = (sx - clientX) * (sx - clientX) + (sy - clientY) * (sy - clientY);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   /** The player's carrier under a screen point, or -1. */
   private carrierAt(clientX: number, clientY: number): number {
     const rect = this.dom.getBoundingClientRect();

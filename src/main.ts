@@ -43,6 +43,7 @@ import { Fog } from './client/fog';
 import { GridOverlay, gridRef } from './client/grid';
 import { RouteView } from './client/routes';
 import { RingView } from './client/rings';
+import { Inspector } from './client/inspect';
 import { Minimap } from './client/minimap';
 import { FrontLine, W_BASE, W_TOWN } from './client/front';
 import { FrontOverlay } from './client/frontmesh';
@@ -432,6 +433,8 @@ async function start(): Promise<void> {
     card,
     works,
   );
+  const inspector = new Inspector(units, structures, map, canvas);
+  inspector.pick = (x, y) => input.pointed(x, y);
   input.say = (text, x, z) => alerts?.report(ALERT_NOTE, x, z, text, performance.now() / 1000);
   // The mission board: sub-commanders, their missions and how they are getting on.
   const promptEl = document.getElementById('prompt');
@@ -1007,6 +1010,7 @@ async function start(): Promise<void> {
     const c3 = performance.now();
     terrain.update(dt);
     input.update(dt);
+    inspector.update(dt);
     routes.update(dt);
     rings.update(dt);
     card.update();
