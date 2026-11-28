@@ -3998,3 +3998,13 @@ rebels' gun truck. A captured tank stays tracked. A convoy's pace is raised on t
 Hungry and pinned vehicles get no bonus. Route finding does not yet prefer roads (cell costs
 are 1 or 2, too coarse for a 15% preference); on the city maps vehicles drive the streets
 anyway. Golden hashes moved (city and four corners).
+
+## 166. The engine buzz: aircraft loops made quiet (2026-11-28)
+
+Fabio, the same day as Audit UX 3: a constant buzz made the game unplayable with sound on. The cause was the new engine loops. Each aircraft added its level to its loop (0.22 to 0.55 close by), summed over every aircraft on the map up to 0.6, and the drone loop was a sawtooth. A sky with a dozen drones gave a steady 132 Hz buzz at about 0.28 RMS, some seventy times the birdsong (0.004).
+
+- A loop now follows the loudest aircraft of its kind plus a little for how many there are (a quarter louder for each doubling), with a ceiling per loop, and falls off with the square of distance past its range. Close-by levels are 0.10 rotor, 0.035 drone, 0.08 plane.
+- The drone is a soft whirr of air with a faint 110 Hz note, no sawtooth.
+- Loops no longer fade out at the end of each turn (a dip every two seconds); the end is blended into the start instead. Crickets chirp with soft edges instead of an on/off gate.
+
+Measured offline (OfflineAudioContext, RMS at the output): forty drones under the camera 0.016 (was 0.28), a dozen at battle zoom 0.005; rotor at most 0.014, plane 0.022; birdsong 0.004, rain 0.003, crickets 0.003.

@@ -42,11 +42,13 @@ type Shape = (t: number, noise: () => number, state: number[]) => number;
 
 /** Fill a buffer from a function of time. `state` is scratch space for filters. */
 function render(
-  ctx: AudioContext,
+  ctx: BaseAudioContext,
   seconds: number,
   seed: number,
   shape: Shape,
   drive = 1,
+  /** Fade the end to silence; off for a loop, where the dip would pulse once a turn. */
+  fadeOut = true,
 ): AudioBuffer {
   const rate = ctx.sampleRate;
   const n = Math.ceil(seconds * rate);
@@ -64,13 +66,21 @@ function render(
     out[i] = v;
     if (Math.abs(v) > peak) peak = Math.abs(v);
   }
+  if (!fadeOut) {
+    // A loop: carry on past the end and blend that into the start, so the turn has no seam.
+    const blend = Math.min(n, Math.floor(rate * 0.08));
+    for (let i = 0; i < blend; i++) {
+      const w = i / blend;
+      out[i] = out[i] * w + shape((n + i) / rate, noise, state) * (1 - w);
+    }
+  }
   // Normalise, and fade the last few milliseconds so nothing ends on a click.
-  const fade = Math.min(n, Math.floor(rate * 0.02));
+  const fade = fadeOut ? Math.min(n, Math.floor(rate * 0.02)) : 0;
   // `drive` above 1 presses the peaks down, which makes a blast with one sharp spike loud.
   const top = Math.tanh(drive);
   for (let i = 0; i < n; i++) {
     const v = Math.tanh((out[i] / (peak || 1)) * drive) / top;
-    out[i] = v * 0.9 * (i > n - fade ? (n - i) / fade : 1);
+    out[i] = v * 0.9 * (fade > 0 && i > n - fade ? (n - i) / fade : 1);
   }
   return buffer;
 }
@@ -358,34 +368,75 @@ export const HUM_ROTOR = 0;
 export const HUM_DRONE = 1;
 export const HUM_PLANE = 2;
 const HUMS = 3;
-const HUM_HALF = [70, 22, 160];
-const HUM_LEVEL = [0.55, 0.22, 0.5];
+/**
+ * How far off each engine is still heard at half its level, in metres, and its level close
+ * by. A loop never stops, so these are low: ambience sits at 0.02 to 0.04 and a single shot
+ * well above it. The first build had 0.22 to 0.55 per aircraft, summed over every aircraft
+ * on the map, which made a swarm of drones a constant loud buzz (Fabio, 28 November).
+ */
+const HUM_HALF = [90, 45, 160];
+const HUM_LEVEL = [0.1, 0.035, 0.08];
+/** No loop goes above this however many aircraft there are. */
+const HUM_MAX = [0.14, 0.05, 0.08];
 
-function hums(ctx: AudioContext): AudioBuffer[] {
+/**
+ * The level of an engine loop from the loudest one heard and how many there are: a crowd of
+ * drones is a little louder than one, not twenty times as loud.
+ */
+export function humGain(kind: number, loudest: number, count: number): number {
+  if (count <= 0) return 0;
+  return Math.min(HUM_MAX[kind], loudest * (1 + 0.25 * Math.log2(count)));
+}
+
+/** The engine loops, by HUM_*. Exported for the offline level check in the tests. */
+export function hums(ctx: BaseAudioContext): AudioBuffer[] {
   return [
     // Rotor: about five blade passes a second, each a dull slap, over a turbine's whine.
-    render(ctx, 2, 211, (t, noise, st) => {
-      const phase = (t * 5.5) % 1;
-      const slap = Math.exp(-phase / 0.05);
-      const body = low(st, 0, noise(), 0.05) * (0.35 + 1.6 * slap);
-      const thump = Math.sin(2 * Math.PI * 5.5 * t) * 0.25 * slap;
-      st[2] += (2 * Math.PI * 1180) / ctx.sampleRate;
-      return body * 1.8 + thump + Math.sin(st[2]) * 0.035;
-    }),
-    // A small drone: a motor's buzz with a slow wobble, like a moped in the sky.
-    render(ctx, 2, 223, (t, noise, st) => {
-      const wobble = 1 + 0.03 * Math.sin(2 * Math.PI * 0.5 * t);
-      st[0] += (2 * Math.PI * 132 * wobble) / ctx.sampleRate;
-      const saw = ((st[0] / (2 * Math.PI)) % 1) * 2 - 1;
-      const buzz = low(st, 1, saw, 0.25) + 0.4 * Math.sin(2 * st[0]);
-      return buzz * (0.85 + 0.15 * Math.sin(2 * Math.PI * 7 * t)) + low(st, 2, noise(), 0.1) * 0.2;
-    }),
+    render(
+      ctx,
+      2,
+      211,
+      (t, noise, st) => {
+        const phase = (t * 5.5) % 1;
+        const slap = Math.exp(-phase / 0.05);
+        const body = low(st, 0, noise(), 0.05) * (0.35 + 1.6 * slap);
+        const thump = Math.sin(2 * Math.PI * 5.5 * t) * 0.25 * slap;
+        st[2] += (2 * Math.PI * 1180) / ctx.sampleRate;
+        return body * 1.8 + thump + Math.sin(st[2]) * 0.035;
+      },
+      1,
+      false,
+    ),
+    // A small drone: a soft whirr of propellers, mostly air, with a faint motor note under
+    // it. No sawtooth: its harmonics were the buzz.
+    render(
+      ctx,
+      2,
+      223,
+      (t, noise, st) => {
+        const wobble = 1 + 0.02 * Math.sin(2 * Math.PI * 0.5 * t);
+        st[0] += (2 * Math.PI * 110 * wobble) / ctx.sampleRate;
+        const note = Math.sin(st[0]) * 0.25 + Math.sin(2 * st[0]) * 0.08;
+        const x = noise();
+        const air = low(st, 1, x, 0.2) - low(st, 2, x, 0.04);
+        return air * (0.8 + 0.2 * Math.sin(2 * Math.PI * 4 * t)) + note;
+      },
+      1,
+      false,
+    ),
     // A transport plane: four propellers far up, a low beat and a wash of air.
-    render(ctx, 3, 227, (t, noise, st) => {
-      const beat = 0.75 + 0.25 * Math.sin(2 * Math.PI * 1.3 * t);
-      const drone = Math.sin(2 * Math.PI * 68 * t) * 0.5 + Math.sin(2 * Math.PI * 102 * t) * 0.25;
-      return (low(st, 0, noise(), 0.02) * 4 + drone) * beat;
-    }),
+    render(
+      ctx,
+      3,
+      227,
+      (t, noise, st) => {
+        const beat = 0.75 + 0.25 * Math.sin(2 * Math.PI * (4 / 3) * t);
+        const drone = Math.sin(2 * Math.PI * 68 * t) * 0.5 + Math.sin(2 * Math.PI * 102 * t) * 0.25;
+        return (low(st, 0, noise(), 0.02) * 4 + drone) * beat;
+      },
+      1,
+      false,
+    ),
   ];
 }
 
@@ -393,7 +444,7 @@ function hums(ctx: AudioContext): AudioBuffer[] {
 export type UiSound = 'select' | 'order' | 'fire' | 'place' | 'gain' | 'loss' | 'win' | 'lose';
 
 /** Rain on everything at once: a soft, dark hiss with a patter in it. Kept low (decision 133). */
-function rainHiss(ctx: AudioContext): AudioBuffer {
+export function rainHiss(ctx: BaseAudioContext): AudioBuffer {
   return render(ctx, 7.3, 239, (_t, noise, st) => {
     const x = noise();
     const wash = low(st, 0, x, 0.25) - low(st, 1, x, 0.03);
@@ -403,10 +454,11 @@ function rainHiss(ctx: AudioContext): AudioBuffer {
 }
 
 /** Crickets on a still night: trills of a high note in threes. */
-function crickets(ctx: AudioContext): AudioBuffer {
+export function crickets(ctx: BaseAudioContext): AudioBuffer {
   return render(ctx, 5.1, 241, (t) => {
     const trill = (t * 2.2) % 1;
-    const on = trill < 0.24 && (trill * 50) % 1 < 0.55 ? 1 : 0;
+    // Soft-edged chirps (a raised sine, not an on/off gate, which clicked fifty times a second).
+    const on = trill < 0.24 ? 0.5 - 0.5 * Math.cos(2 * Math.PI * ((trill * 50) % 1)) : 0;
     const far = 0.6 + 0.4 * Math.sin((2 * Math.PI * t) / 5.1);
     return Math.sin(2 * Math.PI * 4400 * t) * on * far;
   });
@@ -438,6 +490,8 @@ export class Sound {
   /** The engine loops (HUM_*), each with its level and pan, and what was heard this tick. */
   private hum: { gain: GainNode; pan: StereoPannerNode }[] = [];
   private humLevel = new Float32Array(HUMS);
+  private humWeight = new Float32Array(HUMS);
+  private humCount = new Uint16Array(HUMS);
   private humPan = new Float32Array(HUMS);
   /** Night or rain: birds keep quiet (the audit). Set once by the game. */
   private songScale = 1;
@@ -530,16 +584,20 @@ export class Sound {
     const dx = x - this.earX;
     const dz = z - this.earZ;
     const d = Math.hypot(Math.hypot(dx, dz), this.earUp);
-    const g = (HUM_LEVEL[kind] * HUM_HALF[kind]) / (HUM_HALF[kind] + d);
-    if (g < 0.01) return;
+    // Falls off with the square of distance past the half-level range.
+    const r = d / HUM_HALF[kind];
+    const g = HUM_LEVEL[kind] / (1 + r * r);
+    if (g < 0.002) return;
     const pan = Math.max(
       -0.8,
       Math.min(0.8, (dx * this.rightX + dz * this.rightZ) / (60 + d * 0.6)),
     );
     // The pan leans to the louder ones.
-    const sum = this.humLevel[kind] + g;
-    this.humPan[kind] = (this.humPan[kind] * this.humLevel[kind] + pan * g) / sum;
-    this.humLevel[kind] = sum;
+    const sum = this.humWeight[kind] + g;
+    this.humPan[kind] = (this.humPan[kind] * this.humWeight[kind] + pan * g) / sum;
+    this.humWeight[kind] = sum;
+    this.humLevel[kind] = Math.max(this.humLevel[kind], g);
+    this.humCount[kind]++;
   }
 
   /** A click, a blip or a sting of the interface, heard wherever the camera is. */
@@ -802,9 +860,12 @@ export class Sound {
     );
     this.crickets?.gain.setTargetAtTime(0.02 * near * Math.max(0, 1 - battle * 3), now, 2);
     for (let k = 0; k < this.hum.length; k++) {
-      this.hum[k].gain.gain.setTargetAtTime(Math.min(0.6, this.humLevel[k]), now, 0.25);
+      const level = humGain(k, this.humLevel[k], this.humCount[k]);
+      this.hum[k].gain.gain.setTargetAtTime(level, now, 0.25);
       this.hum[k].pan.pan.setTargetAtTime(this.humPan[k], now, 0.25);
       this.humLevel[k] = 0;
+      this.humWeight[k] = 0;
+      this.humCount[k] = 0;
       this.humPan[k] = 0;
     }
     this.air?.gain.setTargetAtTime(0.7 + Math.min(1.3, this.earUp / 90), now, 0.5);
