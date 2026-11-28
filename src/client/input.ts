@@ -1,3 +1,4 @@
+import type { UiSound } from './sound';
 import * as THREE from 'three/webgpu';
 import {
   CMD_ATTACK,
@@ -327,6 +328,7 @@ export class Input {
       .map((m) => m.id);
     if (ids.length === 0) return;
     u.setSelected(ids, additive);
+    if (u.selectedCount > 0) this.uiSound('select');
     const now = performance.now();
     if (this.lastGroup.n === n && now - this.lastGroup.time < DOUBLE_MS) {
       const c = u.centreOf(ids);
@@ -407,6 +409,7 @@ export class Input {
     }
     this.card.select(-1);
     this.units.setSelected(isClick ? picked : this.ownFirst(picked), additive);
+    if (this.units.selectedCount > 0) this.uiSound('select');
   }
 
   /**
@@ -665,7 +668,11 @@ export class Input {
     return best;
   }
 
+  /** A click or a radio blip for what the player just did (set by the client). */
+  uiSound: (kind: UiSound) => void = () => {};
+
   private mark(x: number, y: number, z: number, tone: MarkTone = 'move'): void {
+    this.uiSound(tone === 'fire' ? 'fire' : 'order');
     (this.marker.material as THREE.MeshBasicNodeMaterial).color.setHex(MARK_COLOUR[tone]);
     this.marker.position.set(x, y, z);
     this.marker.visible = true;

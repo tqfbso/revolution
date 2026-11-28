@@ -644,6 +644,79 @@
         pointer-events: auto;
         z-index: 8;
       }
+      #log {
+        top: 60px;
+        left: 16px;
+        width: 380px;
+        max-height: min(60vh, 520px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: 12px 14px;
+        display: none;
+        pointer-events: auto;
+        z-index: 8;
+        color: var(--dim);
+        background: var(--sheet);
+      }
+      #log.on {
+        display: block;
+      }
+      #log .head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      #log .head b {
+        color: var(--ink);
+        font-size: 13px;
+      }
+      #log .head span {
+        flex: 1;
+        color: var(--faint);
+      }
+      #log .close {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        line-height: 24px;
+        text-align: center;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      #log .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      #log .row:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      #log .row i {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 4px;
+      }
+      #log .t,
+      #log .sq {
+        flex: none;
+        font-variant-numeric: tabular-nums;
+        color: var(--faint);
+      }
+      #log .sq {
+        color: var(--amber);
+      }
+      #log .x {
+        flex: 1;
+        color: var(--ink);
+      }
+      #log p {
+        margin: 4px 0;
+      }
       #help .help-top {
         display: flex;
         justify-content: space-between;
@@ -1674,6 +1747,12 @@ starting…</pre>
           <option value="0.75">0.75x</option>
         </select>
         <button
+          id="log-toggle"
+          title="Event log: every alert and report of the battle, with the time and the grid square; click a line to look there (Shift+Backspace)"
+        >
+          Log
+        </button>
+        <button
           id="help-toggle"
           class="icon"
           aria-label="How to play"
@@ -1766,6 +1845,7 @@ starting…</pre>
         <span><kbd>P</kbd> production · <kbd>K</kbd> grid</span>
         <span><kbd>Option</kbd>+0..9 save group · 0..9 recall</span>
         <span><kbd>Space</kbd> pause · <kbd>Backspace</kbd> go to alert</span>
+        <span><kbd>Shift</kbd>+<kbd>Backspace</kbd> event log</span>
         <span><kbd>WASD</kbd> pan · wheel zoom · <kbd>Q</kbd>/<kbd>E</kbd> turn</span>
         <span><kbd>Y</kbd> see through buildings</span>
       </div>
