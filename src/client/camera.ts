@@ -79,6 +79,13 @@ export class RtsCamera {
     this.cur = { ...this.goal };
   }
 
+  /** Glide to look at a ground point from `dist`, keeping the rotation. */
+  glideTo(x: number, z: number, dist: number): void {
+    this.goal.x = x;
+    this.goal.z = z;
+    this.goal.dist = THREE.MathUtils.clamp(dist, MIN_DIST, MAX_DIST);
+  }
+
   /** Glide to look at a ground point, keeping zoom and rotation. */
   moveTo(x: number, z: number): void {
     this.goal.x = x;

@@ -78,6 +78,8 @@ const PLAY_ICON =
   '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M2 1l9 5-9 5z"/></svg>';
 
 /** The haze at the horizon: what distance fades into. */
+/** Seconds of the ending (camera on the fallen headquarters) before the end screen, in ms. */
+const ENDING_MS = 2800;
 const SKY = 0xa9b6bd;
 const NIGHT_SKY = 0x0d131d;
 
@@ -404,9 +406,13 @@ async function start(): Promise<void> {
       )
     : null;
   if (debrief) {
-    card.onOver = (won) => {
+    // A short ending first (the audit, 4.2): the camera glides to the headquarters that
+    // fell and the sting plays; the end screen comes up over it after ENDING seconds.
+    card.onOver = (won, x, z) => {
       sound.ui(won ? 'win' : 'lose');
-      debrief.show(won);
+      if (Number.isFinite(x)) rts.glideTo(x, z, 110);
+      document.body.classList.add('ending');
+      setTimeout(() => debrief.show(won), ENDING_MS);
     };
   }
   card.uiSound = (k) => sound.ui(k);
