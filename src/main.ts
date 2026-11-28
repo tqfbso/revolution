@@ -5,7 +5,7 @@ import '@fontsource/inter/latin-500.css';
 import '@fontsource/inter/latin-600.css';
 import '@fontsource/inter/latin-700.css';
 import { Precipitation, setWeather, skyOf } from './client/weather';
-import { WEATHER_RAIN, WEATHER_SNOW } from './sim/units';
+import { WEATHER_FOG, WEATHER_RAIN, WEATHER_SNOW } from './sim/units';
 import { factionOf, myKinds, setArmies } from './client/army';
 import { openMenu, toMenu, wantsMenu } from './client/menu';
 import { matchFromParams, matchLabel, matchToParams } from './client/setup';
@@ -267,6 +267,12 @@ async function start(): Promise<void> {
   );
   const supply = new SupplyView(map, units);
   const sound = new Sound();
+  sound.setAmbience(
+    night,
+    weather === WEATHER_RAIN,
+    weather === WEATHER_SNOW,
+    weather === WEATHER_FOG,
+  );
   units.sound = sound;
   const lodNear = units.lodNear * lodScale;
   const lodFar = units.lodFar * lodScale;
@@ -397,7 +403,13 @@ async function start(): Promise<void> {
         },
       )
     : null;
-  if (debrief) card.onOver = (won) => debrief.show(won);
+  if (debrief) {
+    card.onOver = (won) => {
+      sound.ui(won ? 'win' : 'lose');
+      debrief.show(won);
+    };
+  }
+  card.uiSound = (k) => sound.ui(k);
   const production = new ProductionCentre(
     document.getElementById('production') as HTMLElement,
     map,
@@ -435,6 +447,7 @@ async function start(): Promise<void> {
   );
   const inspector = new Inspector(units, structures, map, canvas);
   inspector.pick = (x, y) => input.pointed(x, y);
+  input.uiSound = (k) => sound.ui(k);
   input.say = (text, x, z) => alerts?.report(ALERT_NOTE, x, z, text, performance.now() / 1000);
   // The mission board: sub-commanders, their missions and how they are getting on.
   const promptEl = document.getElementById('prompt');

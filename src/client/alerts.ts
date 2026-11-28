@@ -1,6 +1,7 @@
 // Battle alerts: the map is far larger than the screen, so what happens off it has to be
 // announced. A banner with a tone and a spoken line, a ping on the minimap, an arrow at
 // the screen edge pointing at it, and Backspace to jump there.
+import { esc } from './wire';
 import { STRIKE_NAMES } from '../sim/air';
 import { factionOf, myKinds, nameOf } from './army';
 import { FACTIONS } from '../sim/factions';
@@ -67,6 +68,8 @@ const AGAIN = [50, 50, 40, 45, 60, 6, 20];
 /** Seconds between two alerts of the same kind anywhere: a wide front is not ten banners. */
 const GAP = [8, 8, 10, 12, 6, 0, 6];
 const KEEP = 12;
+/** Lines kept in the event log. */
+const LOG_KEEP = 80;
 
 /**
  * Which alerts are worth raising: each kind once per area for a while, and never two of a
@@ -198,9 +201,60 @@ export class Alerts {
     this.speaker = new Speaker(browserMouth(() => this.sound.volume));
     window.addEventListener('keydown', (e) => {
       if (e.code !== 'Backspace' || e.ctrlKey || e.metaKey || e.altKey) return;
+      if ((e.target as HTMLElement | null)?.closest?.('input, textarea, select')) return;
       e.preventDefault();
-      this.jump(performance.now() / 1000);
+      if (e.shiftKey) this.toggleLog();
+      else this.jump(performance.now() / 1000);
     });
+    this.logEl = document.createElement('div');
+    this.logEl.id = 'log';
+    this.logEl.className = 'panel';
+    document.body.append(this.logEl);
+    this.logEl.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      const row = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
+      if (row) {
+        const a = this.log[Number(row.dataset.i)];
+        if (a) {
+          this.lookAt(a.alert.x, a.alert.z);
+          this.minimap.ping(a.alert.x, a.alert.z, RGB[a.alert.kind]);
+        }
+      } else if ((e.target as HTMLElement).closest('.close')) this.toggleLog(false);
+    });
+    document.getElementById('log-toggle')?.addEventListener('click', (e) => {
+      this.toggleLog();
+      (e.currentTarget as HTMLElement).blur();
+    });
+  }
+
+  /** Every alert of the battle, newest first, with the battle clock it came at. */
+  private readonly log: { alert: Alert; clock: string }[] = [];
+  private readonly logEl: HTMLElement;
+  private logOpen = false;
+
+  /** The event log (Shift+Backspace, or the Log button): alerts do not vanish for good. */
+  toggleLog(open = !this.logOpen): void {
+    this.logOpen = open;
+    this.logEl.classList.toggle('on', open);
+    document.getElementById('log-toggle')?.classList.toggle('on', open);
+    if (open) this.drawLog();
+  }
+
+  private drawLog(): void {
+    if (!this.logOpen) return;
+    const rows = this.log
+      .map((e, i) => ({ e, i }))
+      .reverse()
+      .map(
+        ({ e, i }) =>
+          `<div class="row" data-i="${i}"><span class="t">${e.clock}</span>` +
+          `<i style="background:${CSS[e.alert.kind]}"></i><span class="x">${esc(e.alert.text)}</span>` +
+          `<span class="sq">${gridRef(e.alert.x, e.alert.z)}</span></div>`,
+      )
+      .join('');
+    this.logEl.innerHTML =
+      `<div class="head"><b>Event log</b><span>Click a line to look there</span><button class="close" aria-label="Close">×</button></div>` +
+      (rows || '<p>Nothing yet. Alerts and reports land here as the battle goes on.</p>');
   }
 
   /** Backspace: look at the latest alert; again within a few seconds, the one before it. */
@@ -433,12 +487,15 @@ export class Alerts {
    */
   private show(alert: Alert | null, level?: number): void {
     if (alert === null) return;
+    this.log.push({ alert, clock: document.getElementById('clock')?.textContent ?? '' });
+    if (this.log.length > LOG_KEEP) this.log.shift();
+    this.drawLog();
     this.cursor = 0;
     this.minimap.ping(alert.x, alert.z, RGB[alert.kind]);
     const note = alert.kind === ALERT_CONTACT || alert.kind === ALERT_NOTE;
     if (level === undefined) {
       const said = alert.kind === ALERT_TOWN || note ? alert.text : SPOKEN[alert.kind];
-      this.sound.alert(note ? 1 : 0);
+      this.sound.alert(alert.kind === ALERT_BASE ? 2 : note ? 1 : 0);
       if (alert.kind === ALERT_NOTE) this.speaker.push(said, SAY_NORMAL, alert.at);
       else this.speaker.push(said, SAY_URGENT, alert.at, 4);
     } else if (level >= 0) {

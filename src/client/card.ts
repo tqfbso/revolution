@@ -1,3 +1,4 @@
+import type { UiSound } from './sound';
 import { factionOf, myKinds, myPoints, myPrices } from './army';
 import { FACTION_REBEL } from '../sim/factions';
 import { ME } from './me';
@@ -217,6 +218,9 @@ export class CommandCard {
   airStrike: () => void = () => {};
   /** Flags the player holds: each pays supplies, fuel and credits every second. */
   private flags = 0;
+  private flagsKnown = false;
+  /** A chime or a click for what happened (set by the client). */
+  uiSound: (kind: UiSound) => void = () => {};
   /**
    * Supplies that came in (trucks unloading, flags paying), as [tick, amount], over the last
    * INCOME_WINDOW ticks: what the army earns a minute, set against upkeep.
@@ -349,6 +353,9 @@ export class CommandCard {
     this.upkeep = s.upkeep[ME] ?? 0;
     let flags = 0;
     for (let t = 0; t < s.townOwner.length; t++) if (s.townOwner[t] === ME) flags++;
+    // A chime up for a flag taken, down for one lost (not for the count at the start).
+    if (this.flagsKnown && flags !== this.flags) this.uiSound(flags > this.flags ? 'gain' : 'loss');
+    this.flagsKnown = true;
     this.flags = flags;
     // The game is decided when a headquarters that stood is gone.
     // With several enemies (decision 124) it is won when the last of them has lost his.
@@ -735,6 +742,7 @@ export class CommandCard {
       // With Shift it is one more for the list: built after those placed before it.
       ...(keep ? { queue: true } : {}),
     });
+    this.uiSound('place');
     if (!keep) this.placing = -1;
     this.plotOk = false;
     return true;

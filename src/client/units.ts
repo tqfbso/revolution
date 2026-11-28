@@ -107,6 +107,9 @@ import { buildWrecks, strikeAlliance } from './aircraft';
 import type { StructureView } from './structures';
 import type { Scars } from './scars';
 import {
+  HUM_DRONE,
+  HUM_PLANE,
+  HUM_ROTOR,
   SND_AUTOCANNON,
   SND_CANNON,
   SND_COLLAPSE,
@@ -128,6 +131,16 @@ export const TEAM_RGB = [
   [0.62, 0.36, 0.02],
   [0.1, 0.4, 0.12],
 ];
+/** Which engine loop (HUM_*) each kind of unit drives, or -1. */
+const HUM_OF: readonly number[] = Array.from({ length: KIND_COUNT }, (_, k) =>
+  k === KIND_HELI || k === KIND_LIFT
+    ? HUM_ROTOR
+    : k === KIND_DRONE || k === KIND_STRIKE
+      ? HUM_DRONE
+      : k === KIND_PLANE
+        ? HUM_PLANE
+        : -1,
+);
 const HULL_TURN = 2.6; // rad/s, visual only
 const TURRET_TURN = 3.2;
 const SOLDIER_TURN = 9;
@@ -843,7 +856,16 @@ export class UnitView {
     }
     this.playEvents(s.events, seconds);
     this.layFallen(seconds);
-    this.sound?.flush();
+    const sound = this.sound;
+    if (sound) {
+      // Engines in the air: heard whether seen or not, as they would be.
+      for (let i = 0; i < n; i++) {
+        const hum = HUM_OF[this.kind[i]];
+        if (hum < 0 || !this.isAlive(i)) continue;
+        sound.engine(hum, curr[2 * i], curr[2 * i + 1]);
+      }
+      sound.flush();
+    }
   }
 
   /** Men `from` to `to` - 1 of squad `i` have fallen: note where, to lay them down. */
