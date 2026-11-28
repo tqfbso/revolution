@@ -8,7 +8,7 @@
 import { CMD_AMBUSH, type AmbushCommand, type Command } from './commands';
 import { clampInt } from './fixed';
 import { CLASS_VEHICLE, STAGE_GUTTED } from './map';
-import { stageOf, validUnits } from './sim';
+import { seesUnit, stageOf, validUnits } from './sim';
 import { AMBUSH_MAX, AMBUSH_MIN, AMBUSH_PERIOD, KINDS } from './units';
 import {
   EV_AMBUSH,
@@ -97,7 +97,7 @@ export function updateAmbush(w: World): void {
   }
 }
 
-/** An enemy vehicle in the circle of `i` that it knows of, or -1. */
+/** An enemy vehicle in the circle of `i` that its army knows of or it can see itself, or -1. */
 function vehicleIn(w: World, i: number): number {
   const cx = w.ambX[i];
   const cy = w.ambY[i];
@@ -114,7 +114,8 @@ function vehicleIn(w: World, i: number): number {
     if (w.spotted[j] > tick) return j;
     const ex = w.posX[j] - w.posX[i];
     const ey = w.posY[j] - w.posY[i];
-    if (ex * ex + ey * ey <= s2) return j;
+    // Close enough to see, and nothing (a house, a rise) in between.
+    if (ex * ex + ey * ey <= s2 && seesUnit(w, i, j)) return j;
   }
   return -1;
 }

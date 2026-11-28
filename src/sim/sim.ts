@@ -1101,6 +1101,21 @@ function updateEyes(w: World): void {
   for (let i = 0; i < w.count; i++) if (w.state[i] === STATE_ALIVE) eyeZ[i] = eyeHeight(w, i);
 }
 
+/** Can unit `i` see unit `j` with its own eyes: nothing (ground, a house) between them? */
+export function seesUnit(w: World, i: number, j: number): boolean {
+  return lineOfSight(
+    w.map,
+    w.posX[i],
+    w.posY[i],
+    eyeHeight(w, i),
+    w.posX[j],
+    w.posY[j],
+    eyeHeight(w, j),
+    w.inside[i],
+    w.inside[j],
+  );
+}
+
 /** Height of a unit's eyes: the ground (or deck, or upper floor) it is on plus its own. */
 function eyeHeight(w: World, i: number): number {
   const map = w.map;
@@ -2092,7 +2107,11 @@ function acquireTargets(w: World): void {
     let budget = MAX_TARGET_TESTS;
     let sightTests = MAX_SIGHT_TESTS;
     let blocked = false;
-    for (let gy = y0; gy <= y1 && budget > 0; gy++) {
+    // Rows nearest first, so that the budgets (candidates, sight tests) go on the near
+    // ones rather than on whatever lies to the north.
+    for (let k = 0; k <= 2 * ACQUIRE_CELLS && budget > 0; k++) {
+      const gy = cy + ((k & 1) !== 0 ? -((k + 1) >> 1) : k >> 1);
+      if (gy < y0 || gy > y1) continue;
       const from = coarseStart[gy * COARSE_DIM + x0];
       let to = coarseStart[gy * COARSE_DIM + x1 + 1];
       if (to - from > budget) to = from + budget;
@@ -2475,7 +2494,10 @@ function acquireIndirect(w: World, i: number): void {
   let best = NO_TARGET;
   let bestKey = 4 * max2;
   let checks = MAX_SIGHT_TESTS;
-  for (let gy = y0; gy <= y1; gy++) {
+  // Rows nearest first, as in acquireTargets: the checks go on the near ones.
+  for (let k = 0; k <= 2 * reach; k++) {
+    const gy = cy + ((k & 1) !== 0 ? -((k + 1) >> 1) : k >> 1);
+    if (gy < y0 || gy > y1) continue;
     const from = coarseStart[gy * COARSE_DIM + x0];
     const to = coarseStart[gy * COARSE_DIM + x1 + 1];
     for (let s = from; s < to; s++) {
@@ -2796,8 +2818,12 @@ function bombLands(w: World, x: number, y: number, type: number, team: number, b
       if (d2 >= reach * reach) continue;
       const pct = armoured ? bomb.armour : bomb.soft;
       let dmg = Math.trunc((kind.hp * pct * (2 * reach - isqrt(d2))) / (200 * reach));
-      if (w.inside[j] >= 0) dmg = Math.trunc((dmg * THROUGH[stageOf(w, w.inside[j])]) / 100);
-      else if (KIND_CLASS[w.kind[j]] === CLASS_FOOT) {
+      // On a roof (I6) a bomb finds them as a shell does: a parapet, no ceiling.
+      if (w.inside[j] >= 0 && w.roof[j] !== 0 && onRoof(w, j)) {
+        dmg = Math.trunc((dmg * ROOF_EXPOSED_PCT) / 100);
+      } else if (w.inside[j] >= 0) {
+        dmg = Math.trunc((dmg * THROUGH[stageOf(w, w.inside[j])]) / 100);
+      } else if (KIND_CLASS[w.kind[j]] === CLASS_FOOT) {
         const under = map.type[cellOfPos(w.posX[j], w.posY[j])];
         if (under === T_RUBBLE || under === T_SANDBAG) dmg >>= 1;
         else if (under === T_TRENCH) dmg >>= 2;
@@ -3194,7 +3220,21 @@ function kill(w: World, i: number, by: number): void {
       w.carrier[j] = -1;
       w.flags[j] = 0;
       if (plane) kill(w, j, by);
-      else w.hp[j] -= air ? w.hp[j] - (w.hp[j] >> 2) : w.hp[j] >> 1;
+      else {
+        w.hp[j] -= air ? w.hp[j] - (w.hp[j] >> 2) : w.hp[j] >> 1;
+        // Out of a helicopter that falls on water or a house: onto the nearest ground.
+        if (air) {
+          const layer = layerOf(w.team[j], KIND_CLASS[w.kind[j]]);
+          const cell = cellOfPos(w.posX[j], w.posY[j]);
+          if (w.map.cost[layer][cell] === 0) {
+            const to = w.map.snap[layer][cell];
+            w.posX[j] = ((to & (MAP_CELLS - 1)) << CELL_SHIFT) + (CELL_FX >> 1);
+            w.posY[j] = ((to >> 8) << CELL_SHIFT) + (CELL_FX >> 1);
+          }
+          w.velX[j] = 0;
+          w.velY[j] = 0;
+        }
+      }
     }
   }
   score(w, i, by);
@@ -3413,7 +3453,7 @@ function steer(w: World): void {
     const cell = cellOfPos(x, y);
     // Out of rations a vehicle is out of fuel too: it crawls.
     const s =
-      w.ration[i] === 0 && kindOf(w, i).armour !== null && NEEDS_SUPPLY[w.kind[i]]
+      w.ration[i] === 0 && KIND_CLASS[w.kind[i]] === CLASS_VEHICLE && NEEDS_SUPPLY[w.kind[i]]
         ? (w.speed[i] * HUNGRY_SPEED) >> 8
         : w.pinned[i] > tick
           ? (w.speed[i] * PIN_SPEED) >> 8

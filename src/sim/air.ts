@@ -10,6 +10,7 @@
 //
 // Helicopters need none of this: they are ordinary units that happen to fly (see units.ts)
 // and are limited by their helipads (see economy.ts).
+import { onRoof } from './ambush';
 import { ON_OTHER, book } from './spend';
 import { CMD_AIRSTRIKE, CMD_GRANT, CMD_PARADROP, type Command } from './commands';
 import { B_HQ, BUILDINGS } from './economy';
@@ -435,7 +436,9 @@ function lockOn(w: World, team: number, x: number, y: number): number {
 /** A guided bomb's mark, while it lives and the laser can see it; else -1. */
 function marked(w: World, jet: number): number {
   const t = w.orderUnit[jet];
-  if (t < 0 || t >= w.count || w.state[t] !== STATE_ALIVE || w.inside[t] >= 0) return -1;
+  if (t < 0 || t >= w.count || w.state[t] !== STATE_ALIVE) return -1;
+  // In a house the laser cannot find it; up on the roof (I6) it can.
+  if (w.inside[t] >= 0 && !onRoof(w, t)) return -1;
   if (w.team[t] === w.team[jet] || w.carrier[t] >= 0) return -1;
   return t;
 }
@@ -487,7 +490,7 @@ function release(w: World, jet: number): void {
 /** How much a swarm munition wants to dive on unit `j`: vehicles before men, nothing hidden. */
 function swarmWorth(w: World, j: number, team: number): number {
   if (w.state[j] !== STATE_ALIVE || w.team[j] === team || w.carrier[j] >= 0) return 0;
-  if (w.inside[j] >= 0) return 0;
+  if (w.inside[j] >= 0 && !onRoof(w, j)) return 0;
   const kind = kindOf(w, j);
   if (kind.cls === CLASS_AIR) return 0;
   // What the swarm's own seekers cannot make out it does not find.

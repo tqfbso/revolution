@@ -3153,8 +3153,10 @@ export function follow(
       if (w.attack[i] === NO_TARGET) gunships.push(i);
     } else if (!led) {
       continue;
-    } else if (kind === KIND_ARTILLERY) {
-      if ((w.flags[i] & (FLAG_BOMBARD | FLAG_SIEGE)) !== 0) continue;
+    } else if (kind === KIND_ARTILLERY || kind === KIND_MORTAR) {
+      // Guns and mortars stay behind the line, and are not pulled off what they shell
+      // (nor a mortar off the roof it fires from).
+      if ((w.flags[i] & (FLAG_BOMBARD | FLAG_SIEGE)) !== 0 || w.inside[i] >= 0) continue;
       if (dist(w.posX[i], w.posY[i], bx, by) > fx(22)) rear.push(i);
     } else if (dist(w.posX[i], w.posY[i], cx, cy) > fx(16)) mid.push(i);
   }
@@ -3860,8 +3862,11 @@ export function ceaseFire(
   every = false,
 ): void {
   for (const i of units) {
-    if ((w.flags[i] & FLAG_SIEGE) === 0) continue;
+    // Guns are sent at a house as a bombardment (FLAG_BOMBARD with the house as its
+    // structure); a bombardment of a bare point has no structure and is left alone.
+    if ((w.flags[i] & (FLAG_SIEGE | FLAG_BOMBARD)) === 0) continue;
     const s = w.orderStruct[i];
+    if (s < 0) continue;
     if (s === point || (!every && w.map.sKind[s] !== S_BUILDING)) continue;
     out.push({ type: CMD_MOVE, units: [i], x: w.posX[i], y: w.posY[i] });
   }

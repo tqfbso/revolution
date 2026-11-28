@@ -3919,3 +3919,52 @@ team panel and the end screen can say who put it where.
   (supplies, fuel, credits, units, buildings) under the per-player score.
 - Checked with two headless players over `?net=local`: both screens showed the same books
   through 40+ hash checks, no desync. The real broker cannot be reached from the cloud.
+
+## 165. Bugs from an outside code audit: sim part (2026-11-28)
+
+Fabio passed on a code audit written by another model. Every bug claim in it was checked
+against the code before anything changed. Fixed, each with a test in `tests/audit.test.ts`
+that fails on the old code:
+
+- Engineers and trucks at a building numbered 1,024 or more (Kowloon has about 1,100)
+  ignored the three-to-a-building limit: the crew table had 1,024 slots, not MAX_STRUCTS.
+- Guns sent at a house carry FLAG_BOMBARD with the house as their structure, but
+  `ceaseFire` only looked at FLAG_SIEGE: the computer's and the sub-commanders' guns went
+  on shelling a house after it was cleared or the mission had moved on.
+- The computer's `follow` sent mortar teams into the middle of the line every time it was
+  called (they are not line troops and were not treated as guns), which broke off their
+  fire. They now wait behind the line with the guns, and one shelling something, or up on
+  a roof, is left where it is.
+- An air-strike bomb gave squads on a roof the full shelter of the house under them; it now
+  treats them as a shell does (ROOF_EXPOSED_PCT). The guided bomb can lock on to, and the
+  drone swarm dive on, a squad on a roof; inside a house they still cannot.
+- An ambush sprang on a vehicle within its own sight distance even with a house between
+  them. It now needs a clear line of sight (or the army to have the vehicle spotted, as
+  before).
+- Self-propelled guns, air defence and jammers out of rations drove at full speed; only
+  armour crawled. Every vehicle that eats now crawls.
+- Helicopters and trucks never mended: they do not eat, and mending lived inside the
+  rations loop. They now mend in their army's supply when out of the fight, at the same
+  rate as everyone else.
+- Squads that live through their transport helicopter coming down over water or a house
+  were left standing on it; they are now put on the nearest ground they can stand on.
+- Target search spent its candidate and sight-test budgets north to south. Rows are now
+  searched nearest first, for direct fire and for guns.
+
+Checked and left as it is:
+
+- When no route can be drawn this tick, a unit walks straight (documented in
+  `acquireField`). Making it wait instead was tried: the computer laid half the field works
+  it used to (the AI test caught it), because units with new goals every second starved.
+- Mortars on a roof get no reach bonus. The bonus is for weapons that need line of sight;
+  the roof is what lets a mortar fire at all (I6).
+- Storming does not look at fortification, and missile and mortar teams fight hand to hand
+  like rifle squads. Decision 091 lists what fortifying does, and storming is not on it;
+  changing either is balance, not a bug.
+- `MAX_PUSH` above an infantryman's walking speed, and a convoy waiting on its stopped lead,
+  are how separation and file marching work; the audit gives no case where either jams.
+- The computer does not count street rubble as enemy works: it is nobody's, and the count
+  is of the enemy's wire and walls. Teaching the computer to clear rubble is new work.
+- Open-ground formations that turn with the route are a new feature, not a bug.
+
+The golden hashes moved on purpose.
