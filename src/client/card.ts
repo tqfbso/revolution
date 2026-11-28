@@ -248,7 +248,10 @@ export class CommandCard {
   armed: '' | 'attack' | 'smoke' | 'flare' = '';
   private over = false;
   /** The game is decided (true: won). Without it, a banner says so. */
-  onOver: ((won: boolean) => void) | null = null;
+  /** The game is decided: whether we won, and where the headquarters that decided it stood. */
+  onOver: ((won: boolean, x: number, z: number) => void) | null = null;
+  /** Each army's headquarters, while it stands (a structure), for the ending's camera. */
+  private readonly hqOf = [-1, -1, -1, -1];
 
   constructor(
     private readonly el: HTMLElement,
@@ -362,7 +365,10 @@ export class CommandCard {
     const standing = [false, false, false, false];
     for (let o = 0; o < s.bases.length; o += BASE_STRIDE) {
       const team = s.bases[o + 2];
-      if (team < 4 && s.bases[o + 1] === B_HQ && s.structHp[s.bases[o]] > 0) standing[team] = true;
+      if (team < 4 && s.bases[o + 1] === B_HQ && s.structHp[s.bases[o]] > 0) {
+        standing[team] = true;
+        this.hqOf[team] = s.bases[o];
+      }
     }
     let foes = 0;
     let fallen = false;
@@ -389,8 +395,12 @@ export class CommandCard {
     }
     if (fallen && !this.over && (lost || foes === 0)) {
       this.over = true;
-      if (this.onOver) this.onOver(!lost);
-      else {
+      if (this.onOver) {
+        // The camera goes to the one that fell: ours if we lost, else the last enemy's.
+        const hq = this.hqOf[lost ? ME : out];
+        const c = hq >= 0 ? this.structures.centreOf(hq) : { x: NaN, z: NaN };
+        this.onOver(!lost, c.x, c.z);
+      } else {
         this.bannerEl.textContent = lost
           ? 'Defeat: your headquarters has fallen'
           : 'Victory: the enemy headquarters has fallen';

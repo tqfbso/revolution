@@ -46,8 +46,27 @@ export interface DebriefSetup {
   toMenu: () => void;
 }
 
+/** Army colours, as on the minimap. */
+const COLOUR = ['#eb4637', '#468cff', '#f0be3c', '#5fd273'];
+/** A point on the charts every this many ticks: ten seconds. */
+const SAMPLE = 10 * TICKS_PER_SECOND;
+
+/** What is drawn over time, per army. */
+interface Series {
+  title: string;
+  /** One list of values per army, a value per sample. */
+  values: number[][];
+}
+
 export class Debrief {
   private won: boolean | null = null;
+  /** Ticks of the samples, and per chart the values of every army at each. */
+  private readonly ticks: number[] = [];
+  private readonly series: Series[] = [
+    { title: 'Army in the field (points)', values: [[], [], [], []] },
+    { title: 'Flags held', values: [[], [], [], []] },
+    { title: 'Units lost', values: [[], [], [], []] },
+  ];
   private last: Snapshot | null = null;
   private html = '';
 
@@ -77,6 +96,20 @@ export class Debrief {
 
   applySnapshot(s: Snapshot): void {
     this.last = s;
+    // Until the end, a sample every ten seconds of battle for the charts.
+    if (
+      this.won === null &&
+      (this.ticks.length === 0 || s.tick - this.ticks[this.ticks.length - 1] >= SAMPLE)
+    ) {
+      this.ticks.push(s.tick);
+      for (let t = 0; t < 4; t++) {
+        this.series[0].values[t].push(s.pop[t] ?? 0);
+        this.series[1].values[t].push(s.townOwner.reduce((n, o) => n + (o === t ? 1 : 0), 0));
+        this.series[2].values[t].push(
+          t < STAT_TEAMS ? (s.stats[STAT_STRIDE * t + STAT_LOST] ?? 0) : 0,
+        );
+      }
+    }
     // Once a second is plenty: the fighting goes on after the headquarters falls.
     if (this.won !== null && s.tick % TICKS_PER_SECOND === 0) this.render();
   }
@@ -126,7 +159,7 @@ export class Debrief {
       `</div>` +
       `<p class="sub" style="font-size:13px;margin-top:16px">${st[STAT_RAZED]} city buildings were brought down. Of ${s.civStats[0]} civilians, ` +
       `${s.civStats[2]} got out of the town and ${civAll} were killed.` +
-      `</p></div>`;
+      `</p>${this.charts(teams, s.tick)}</div>`;
     const players = this.players();
     if (players.length > 1) {
       // The most valuable player: whose units destroyed the most, by army points; a tie
@@ -200,5 +233,42 @@ export class Debrief {
       `<p class="small">The money is the army's and anyone may spend it. Each order is booked ` +
       `to the player who gave it; bulk and standing orders to the player who set them.</p>`
     );
+  }
+
+  /** The battle over time: a small line chart per measure, a line per army. */
+  private charts(teams: number[], end: number): string {
+    if (this.ticks.length < 2) return '';
+    const W = 220;
+    const H = 96;
+    const t0 = this.ticks[0];
+    const span = Math.max(1, this.ticks[this.ticks.length - 1] - t0);
+    const out = this.series.map((ser) => {
+      let top = 1;
+      for (const t of teams) for (const v of ser.values[t]) top = Math.max(top, v);
+      const y = (v: number) => (H - 14 - ((H - 22) * v) / top).toFixed(1);
+      const x = (k: number) => (((this.ticks[k] - t0) / span) * (W - 34)).toFixed(1);
+      // Yours drawn last, on top, and thicker.
+      const lines = [...teams]
+        .reverse()
+        .map((t) => {
+          const v = ser.values[t];
+          const pts = v.map((n, k) => `${x(k)},${y(n)}`).join(' ');
+          const last = v[v.length - 1] ?? 0;
+          return (
+            `<polyline points="${pts}" fill="none" stroke="${COLOUR[t]}" stroke-width="${t === this.me ? 2.2 : 1.4}" stroke-linejoin="round" stroke-linecap="round"/>` +
+            `<text x="${W - 30}" y="${y(last)}" dy="4" style="fill:${COLOUR[t]}">${last}</text>`
+          );
+        })
+        .join('');
+      return (
+        `<div class="chart"><b>${ser.title}</b>` +
+        `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${ser.title} over the battle, a line per army">` +
+        `<line x1="0" x2="${W - 34}" y1="${H - 14}" y2="${H - 14}" stroke="rgba(255,255,255,0.15)"/>` +
+        lines +
+        `<text x="0" y="${H}">${clock(t0)}</text><text x="${W - 34}" y="${H}" text-anchor="end">${clock(Math.min(end, this.ticks[this.ticks.length - 1]))}</text>` +
+        `</svg></div>`
+      );
+    });
+    return `<div class="charts">${out.join('')}</div>`;
   }
 }

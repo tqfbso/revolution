@@ -1374,6 +1374,50 @@
       .screen.over::before {
         display: none;
       }
+      .screen.over {
+        animation: over-in 0.7s ease-out;
+        padding-bottom: 140px;
+      }
+      @keyframes over-in {
+        from {
+          opacity: 0;
+        }
+      }
+      body.ending #left,
+      body.ending #right,
+      body.ending #bottom,
+      body.ending #alerts,
+      body.ending #alert-arrows,
+      body.ending #inspect,
+      body.ending #log {
+        opacity: 0;
+        transition: opacity 0.6s;
+        pointer-events: none;
+      }
+      .screen .charts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 18px 28px;
+        margin-top: clamp(18px, 4vh, 36px);
+      }
+      .screen .chart b {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--ink);
+      }
+      .screen .chart svg {
+        display: block;
+        width: 100%;
+        height: auto;
+        margin-top: 6px;
+        overflow: visible;
+      }
+      .screen .chart text {
+        font-size: 11px;
+        fill: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
       .screen > * {
         position: relative;
         z-index: 1;

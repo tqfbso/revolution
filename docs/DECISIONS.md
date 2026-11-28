@@ -3972,6 +3972,20 @@ From the code audit (section 3C), all synthesised like the rest (src/client/soun
 - Event log: the Log button (top right) or Shift+Backspace lists every alert and report of
   the battle (80 kept) with the battle clock and grid square; a click looks there.
 
+## Audit UX 4. A short ending and charts on the end screen (2026-11-28)
+
+From the code audit (section 4.2):
+
+- When the battle is decided the end screen no longer slams shut on that tick. The HUD
+  fades, the camera glides to the headquarters that fell (yours if you lost, the last
+  enemy's if you won) and the victory or defeat sting plays; 2.8 seconds later the end
+  screen fades in over it.
+- The end screen has three small line charts, a line per army, sampled every ten seconds
+  of battle: army points in the field, flags held, units lost. Yours is drawn on top and
+  thicker; the last value is written at the end of each line.
+
+Not done: the Versus scoreboard merge (a bug, for the bug thread), a battle report to copy.
+
 ## 165. Road speed: wheels +30%, tracks +15% (2026-11-28)
 
 Fabio approved it from the code audit. A ground vehicle on a road or paved square
