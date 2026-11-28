@@ -319,6 +319,9 @@ export function farParts(parts: Part[]): Part[] {
       continue;
     }
     if (Math.max(sx, sy, sz) < 2.4) continue;
+    // A pole or a frame column (mullions, drainpipes): long but thin both ways, under a
+    // pixel wide at this distance, and mostly the wall's own colour.
+    if (sx + sy + sz - Math.max(sx, sy, sz) - Math.min(sx, sy, sz) < 0.4) continue;
     out.push(p);
   }
   for (const row of rows.values()) out.push(band(row));
@@ -3193,7 +3196,15 @@ export class StructureView {
   /** Bumped whenever a structure changes state, so the minimap knows to redraw its base. */
   version = 0;
 
+  /** Buildings as drawn normally: fully opaque, so the GPU can skip hidden walls early. */
   private readonly material: THREE.MeshStandardNodeMaterial;
+  /**
+   * The same look with the cutaway's screen of dots. Its discard stops the GPU rejecting
+   * hidden pixels before shading them, so it is put on only while the cutaway shows (Y, close up).
+   */
+  private readonly cutMaterial: THREE.MeshStandardNodeMaterial | null = null;
+  /** The one of the two the buildings wear just now. */
+  private wearing: THREE.MeshStandardNodeMaterial;
   private readonly meshes: (THREE.Mesh | null)[] = [];
   /**
    * The map's own buildings are not drawn one by one (a city has hundreds): all those of a
@@ -3296,9 +3307,11 @@ export class StructureView {
       // A fixed pattern on the screen that spreads the kept dots evenly at any density.
       const cell = screenCoordinate.xy.floor();
       const dot = cell.x.mul(0.7548776662).add(cell.y.mul(0.5698402909)).fract();
-      this.material.opacityNode = step(fade.mul(0.94), dot);
-      this.material.alphaTest = 0.5;
+      this.cutMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 0.93, metalness: 0 });
+      this.cutMaterial.opacityNode = step(fade.mul(0.94), dot);
+      this.cutMaterial.alphaTest = 0.5;
     }
+    this.wearing = this.material;
     // Signs: a panel shows its cell of the sign sheet instead of its own colour.
     hk = map.layout === 'kowloon';
     hkStyle = hk ? map.sStyle : null;
@@ -3333,6 +3346,14 @@ export class StructureView {
         this.material.emissiveNode = warm.mul(lit).mul(1.5).mul(fog.shade());
       }
     } else this.material.colorNode = weathered(painted(tint)).mul(fog.shade());
+    if (this.cutMaterial) {
+      // Both materials share every node, so the picture is the same until the dots show.
+      const cut = this.cutMaterial;
+      cut.colorNode = this.material.colorNode;
+      cut.roughnessNode = this.material.roughnessNode;
+      cut.normalNode = this.material.normalNode;
+      cut.emissiveNode = this.material.emissiveNode;
+    }
     const ui = new THREE.MeshBasicNodeMaterial();
     ui.colorNode = attribute('aTint', 'vec4').xyz;
     this.pips = new Batch(new THREE.BoxGeometry(0.62, 0.14, 0.62), ui, MAX_STRUCTS * 10 + 64);
@@ -3450,7 +3471,7 @@ export class StructureView {
   }
 
   private mesh(geometry: THREE.BufferGeometry): THREE.Mesh {
-    const mesh = new THREE.Mesh(geometry, this.material);
+    const mesh = new THREE.Mesh(geometry, this.wearing);
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = this.shadows;
     mesh.receiveShadow = this.shadows;
@@ -3857,6 +3878,17 @@ export class StructureView {
   }
 
   /**
+   * Near enough to the camera for its smoke to matter, as for the fires: smoke made further
+   * off is too small to see and takes particles from the fighting on screen.
+   */
+  private inView(s: number): boolean {
+    const m = this.map;
+    const dx = (m.sX[s] + m.sW[s] / 2) * CELL - this.eye.x;
+    const dz = (m.sY[s] + m.sH[s] / 2) * CELL - this.eye.z;
+    return dx * dx + dz * dz + this.eye.y * this.eye.y <= 700 * 700;
+  }
+
+  /**
    * The fire in the ground floor climbing (I5): flames out of the windows of every floor
    * it has, most out of the highest, and smoke off the top of the house.
    */
@@ -3996,6 +4028,15 @@ export class StructureView {
       // Only from close up: further out a block hides little, and the icons carry the units.
       const near = Math.min(1, Math.max(0, (175 - distance) / 45));
       this.cutStrength.value = this.seeThrough ? near : 0;
+      const want =
+        this.cutMaterial && this.cutStrength.value > 0 ? this.cutMaterial : this.material;
+      if (want !== this.wearing) {
+        const was = this.wearing;
+        this.wearing = want;
+        for (const child of this.group.children) {
+          if (child instanceof THREE.Mesh && child.material === was) child.material = want;
+        }
+      }
     }
     for (let k = 0; k < CHUNKS * CHUNKS; k++) {
       const near = this.chunks[k];
@@ -4027,7 +4068,7 @@ export class StructureView {
       if (this.hp[s] === 0) {
         // Ruins smoulder for a while.
         const age = seconds - this.fellAt[s];
-        if (age < SMOKE_SECONDS && Math.random() < dt * 2.5) {
+        if (age < SMOKE_SECONDS && Math.random() < dt * 2.5 && this.inView(s)) {
           const p = this.hit(s);
           if (this.fog.sees(p.x, p.z)) {
             this.effects.wreckSmoke(p.x, fromFx(m.sBase[s]) + 0.4, p.z, Math.max(0, 1 - age / 25));
@@ -4035,7 +4076,12 @@ export class StructureView {
         }
         continue;
       }
-      if ((this.shown[s] & 7) === 1 && this.broken[s] === 0 && Math.random() < dt * 0.5) {
+      if (
+        (this.shown[s] & 7) === 1 &&
+        this.broken[s] === 0 &&
+        Math.random() < dt * 0.5 &&
+        this.inView(s)
+      ) {
         const p = this.hit(s);
         if (this.fog.sees(p.x, p.z)) this.effects.wreckSmoke(p.x, this.topOf(s), p.z, 0.15);
       }

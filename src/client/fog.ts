@@ -31,7 +31,8 @@ export class Fog {
   readonly visible = new Uint8Array(CELLS);
   readonly explored = new Uint8Array(CELLS);
   readonly texture: THREE.DataTexture;
-  private readonly pixels = new Uint8Array(CELLS * 4).fill(BRIGHT_VISIBLE);
+  /** One byte a cell: the world's brightness there (only the red channel is ever read). */
+  private readonly pixels = new Uint8Array(CELLS).fill(BRIGHT_VISIBLE);
   private readonly stamped = new Uint8Array(CELLS);
   /** How far the viewpoint of each 2x2 block sees, in cells. */
   private readonly reach = new Uint8Array(CELLS);
@@ -43,7 +44,7 @@ export class Fog {
   private plain = 0;
 
   constructor(readonly enabled: boolean) {
-    this.texture = new THREE.DataTexture(this.pixels, MAP_CELLS, MAP_CELLS, THREE.RGBAFormat);
+    this.texture = new THREE.DataTexture(this.pixels, MAP_CELLS, MAP_CELLS, THREE.RedFormat);
     this.texture.magFilter = THREE.LinearFilter;
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.needsUpdate = true;
@@ -218,15 +219,19 @@ export class Fog {
     }
     const explored = this.explored;
     const px = this.pixels;
+    let changed = false;
     for (let c = 0; c < CELLS; c++) {
       if (visible[c]) explored[c] = 1;
       const goal = visible[c] ? BRIGHT_VISIBLE : explored[c] ? BRIGHT_EXPLORED : BRIGHT_UNEXPLORED;
       // Ease toward the goal so the edge of sight glides instead of flickering.
-      const v = px[4 * c];
+      const v = px[c];
+      if (v === goal) continue;
       const step = Math.round((goal - v) * 0.4);
-      px[4 * c] = step === 0 ? goal : v + step;
+      px[c] = step === 0 ? goal : v + step;
+      changed = true;
     }
-    this.texture.needsUpdate = true;
+    // Nothing moved at the edge of sight: the texture on the card is still right.
+    if (changed) this.texture.needsUpdate = true;
   }
 
   /** Mark what can be seen from a cell: rays outward, each stopped by what blocks sight. */

@@ -6,13 +6,18 @@ import type { UnitKind } from '../sim/units';
 
 const factions = [0, 0, 0, 0];
 let mine = 0;
+/** How many armies are in the battle (all four until told). */
+let armies = 4;
 
 /** `list[team]` is that army's faction; `team` is the player's own army. */
 export function setArmies(list: readonly number[], team: number): void {
   for (let t = 0; t < factions.length; t++) factions[t] = list[t] ?? 0;
+  armies = Math.min(factions.length, Math.max(1, list.length));
   mine = factions[team] ?? 0;
 }
 
+/** The number of armies in the battle. */
+export const armyCount = (): number => armies;
 /** The faction of the army of `team`. */
 export const factionOf = (team: number): number => factions[team] ?? 0;
 /** The player's version of every kind of unit. */

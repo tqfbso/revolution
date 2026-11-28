@@ -1158,6 +1158,8 @@ function stops(t: number, cls: number): boolean {
 export function refreshPassability(map: GameMap): void {
   const type = map.type;
   for (let cls = 0; cls < CLASS_COUNT; cls++) {
+    // The air is open everywhere, whatever falls down: worked out once.
+    if (cls === CLASS_AIR && map.natural[cls] !== undefined) continue;
     const c = (map.natural[cls] ??= new Uint8Array(CELL_COUNT));
     for (let i = 0; i < CELL_COUNT; i++) {
       // Under a field work lies the ground it was built on.
@@ -1185,6 +1187,8 @@ export function refreshWorks(map: GameMap): void {
   for (let cls = 0; cls < CLASS_COUNT; cls++) {
     const natural = map.natural[cls];
     const first = layerOf(0, cls);
+    // Nothing on the ground stops the air, and all armies share its layer: once is enough.
+    if (cls === CLASS_AIR && map.cost[first] !== undefined) continue;
     for (let team = 0; team < MAX_TEAMS; team++) {
       const layer = layerOf(team, cls);
       if (team > 0 && (cls === CLASS_AIR || gates === 0)) {

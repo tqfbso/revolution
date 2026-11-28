@@ -14,6 +14,7 @@ import {
   sin,
   smoothstep,
   time,
+  uniform,
   vec2,
   vec3,
   vec4,
@@ -48,8 +49,17 @@ function grade(c: V3): V3 {
 }
 
 export interface Post {
-  render(): void;
+  /** Draw the frame; `distance` is how far the camera is from what it looks at. */
+  render(distance: number): void;
 }
+
+/**
+ * The occlusion fades out between these distances and is left out beyond: its reach is
+ * under a metre, which from that far is under a pixel, so it no longer shows, but its
+ * passes still cost as much as from close up.
+ */
+const AO_FADE_FROM = 260;
+const AO_FADE_TO = 360;
 
 /** The post pipeline for a graphics level, or null on `low`, which draws straight to screen. */
 export function makePost(
@@ -63,30 +73,40 @@ export function makePost(
   const high = look.quality === 'high';
   const scenePass = pass(scene, camera);
   const colour = scenePass.getTextureNode('output');
-  let lit: V3 = colour.rgb;
-  if (enabled.ao) {
-    // Occlusion at half resolution: soldiers, vehicles and houses sit on the ground
-    // instead of floating over it, and corners between walls go dark.
-    const occlusion = ao(scenePass.getTextureNode('depth'), null as unknown as THREE.Node, camera);
-    occlusion.resolutionScale = 0.5;
-    occlusion.samples.value = high ? 16 : 8;
-    occlusion.radius.value = 0.9;
-    occlusion.thickness.value = 1.4;
-    occlusion.distanceFallOff.value = 1;
-    occlusion.scale.value = 1.25;
-    lit = lit.mul(mix(float(1), occlusion.getTextureNode().r, 0.9));
-  }
-  // High detail: fire, flashes and sun glints bleed light into what is around them.
-  // By night on every level that has a pipeline, and stronger: lamps, windows, flares and
-  // gunfire are the picture.
-  if (look.night) lit = lit.add(bloom(vec4(lit, 1), high ? 0.34 : 0.26, 0.45, 0.72).rgb);
-  else if (high) lit = lit.add(bloom(vec4(lit, 1), 0.14, 0.3, 1.5).rgb);
-  let out: V3 = renderOutput(vec4(lit, 1)).rgb;
-  // Sharpen before the grain goes on, or it sharpens the grain.
-  if (high) out = sharpen(vec4(out, 1), 0.16).rgb;
-  out = grade(out);
-  const pipeline = new THREE.RenderPipeline(renderer);
-  pipeline.outputColorTransform = false;
-  pipeline.outputNode = out;
-  return { render: () => pipeline.render() };
+  const aoStrength = uniform(0.9);
+  const finish = (lit: V3): THREE.RenderPipeline => {
+    // High detail: fire, flashes and sun glints bleed light into what is around them.
+    // By night on every level that has a pipeline, and stronger: lamps, windows, flares and
+    // gunfire are the picture.
+    if (look.night) lit = lit.add(bloom(vec4(lit, 1), high ? 0.34 : 0.26, 0.45, 0.72).rgb);
+    else if (high) lit = lit.add(bloom(vec4(lit, 1), 0.14, 0.3, 1.5).rgb);
+    let out: V3 = renderOutput(vec4(lit, 1)).rgb;
+    // Sharpen before the grain goes on, or it sharpens the grain.
+    if (high) out = sharpen(vec4(out, 1), 0.16).rgb;
+    out = grade(out);
+    const pipeline = new THREE.RenderPipeline(renderer);
+    pipeline.outputColorTransform = false;
+    pipeline.outputNode = out;
+    return pipeline;
+  };
+  // Without the occlusion: from far off, and on graphics levels that leave it out.
+  const plain = finish(colour.rgb);
+  if (!enabled.ao) return { render: () => plain.render() };
+  // Occlusion at half resolution: soldiers, vehicles and houses sit on the ground
+  // instead of floating over it, and corners between walls go dark.
+  const occlusion = ao(scenePass.getTextureNode('depth'), null as unknown as THREE.Node, camera);
+  occlusion.resolutionScale = 0.5;
+  occlusion.samples.value = high ? 16 : 8;
+  occlusion.radius.value = 0.9;
+  occlusion.thickness.value = 1.4;
+  occlusion.distanceFallOff.value = 1;
+  occlusion.scale.value = 1.25;
+  const shaded = finish(colour.rgb.mul(mix(float(1), occlusion.getTextureNode().r, aoStrength)));
+  return {
+    render: (distance) => {
+      const fade = (AO_FADE_TO - distance) / (AO_FADE_TO - AO_FADE_FROM);
+      aoStrength.value = 0.9 * Math.min(1, Math.max(0, fade));
+      (fade > 0 ? shaded : plain).render();
+    },
+  };
 }

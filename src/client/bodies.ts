@@ -65,6 +65,10 @@ export class Bodies {
   private readonly next = new Int32Array(TILES * TILES);
   private readonly flights: Flight[] = [];
   private dirty = true;
+  /** How many bodies on the ground each near and middle batch held at its last full build. */
+  private readonly nearLaid: number[] = [];
+  private readonly midLaid: number[] = [];
+  private laid = false;
   private unseen = 0;
   private lastBuild = -1e9;
   private readonly camPos = new THREE.Vector3(1e9, 0, 0);
@@ -95,6 +99,7 @@ export class Bodies {
     const set = this.near.length / DEAD_POSES;
     this.near.push(...near);
     this.mid.push(...mid);
+    this.dirty = true;
     return set;
   }
 
@@ -234,7 +239,18 @@ export class Bodies {
     camera.getWorldDirection(this.dir);
     const moved = cam.distanceToSquared(this.camPos) > 0.04 || this.dir.dot(this.camDir) < 0.99999;
     const reveal = this.unseen > 0 && seconds - this.lastBuild > 0.5;
-    if (!moved && !this.dirty && !reveal && flights.length === 0) return;
+    const still = !moved && !this.dirty && !reveal;
+    if (still && flights.length === 0) return;
+    // Only men in the air have moved: the bodies on the ground are where they were drawn,
+    // so keep them and redraw just the flights after them.
+    if (still && this.laid) {
+      this.near.forEach((b, p) => (b.n = this.nearLaid[p]));
+      this.mid.forEach((b, p) => (b.n = this.midLaid[p]));
+      this.fly(camera, lodNear);
+      this.near.forEach((b, p) => b.flush(this.nearLaid[p]));
+      this.mid.forEach((b, p) => b.flush(this.midLaid[p]));
+      return;
+    }
     this.camPos.copy(cam);
     this.camDir.copy(this.dir);
     this.dirty = false;
@@ -306,7 +322,28 @@ export class Bodies {
       }
     }
 
-    // And the men still in the air, turning over as they go, flat in their pose on landing.
+    this.near.forEach((b, p) => (this.nearLaid[p] = b.n));
+    this.mid.forEach((b, p) => (this.midLaid[p] = b.n));
+    this.laid = true;
+    this.fly(camera, lodNear);
+    for (const b of this.near) {
+      b.flush();
+      b.mesh.visible = b.n > 0;
+    }
+    for (const b of this.mid) {
+      b.flush();
+      b.mesh.visible = b.n > 0;
+    }
+    this.far.flush();
+  }
+
+  /** The men still in the air, turning over as they go, flat in their pose on landing. */
+  private fly(camera: THREE.Camera, lodNear: number): void {
+    const flights = this.flights;
+    const fog = this.fog;
+    const colours = this.colours;
+    const cam = camera.position;
+    const near2 = lodNear * lodNear;
     const f = this.f;
     for (const fl of flights) {
       if (fl.seen === 0 && !fog.sees(fl.x, fl.z)) continue;
@@ -338,16 +375,9 @@ export class Bodies {
       const dx = x - cam.x;
       const dz = z - cam.z;
       const d2 = dx * dx + (y - cam.y) * (y - cam.y) + dz * dz;
-      (d2 < near2 ? this.near : this.mid)[fl.pose].frame(f, c[0], c[1], c[2], fl.paint);
+      const b = (d2 < near2 ? this.near : this.mid)[fl.pose];
+      b.frame(f, c[0], c[1], c[2], fl.paint);
+      b.mesh.visible = true;
     }
-    for (const b of this.near) {
-      b.flush();
-      b.mesh.visible = b.n > 0;
-    }
-    for (const b of this.mid) {
-      b.flush();
-      b.mesh.visible = b.n > 0;
-    }
-    this.far.flush();
   }
 }

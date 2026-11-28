@@ -1,4 +1,4 @@
-import { factionOf, kindIn } from './army';
+import { armyCount, factionOf, kindIn } from './army';
 import { FACTIONS } from '../sim/factions';
 import * as THREE from 'three/webgpu';
 import { attribute, float, smoothstep, uv, vec3 } from 'three/tsl';
@@ -456,7 +456,8 @@ export class UnitView {
     this.nearBudget = look.quality === 'low' ? 120 : look.quality === 'high' ? 500 : 300;
     const batch = (g: THREE.BufferGeometry, cap: number, lod: number, men = false) =>
       this.batch(g, cap, lod, men);
-    for (let t = 0; t < 4; t++) this.fleet(factionOf(t));
+    // Only the armies in the battle: an unused slot would build a whole extra army of models.
+    for (let t = 0; t < armyCount(); t++) this.fleet(factionOf(t));
     this.bombs = batch(buildBomb(), 64, 1);
     this.munitions = batch(strikeAlliance().hull[1], 64, 1);
     this.chutes = batch(
@@ -479,7 +480,7 @@ export class UnitView {
       effects,
       TEAM_RGB,
     );
-    for (let t = 0; t < 4; t++) this.troop(factionOf(t));
+    for (let t = 0; t < armyCount(); t++) this.troop(factionOf(t));
     this.wrecks = new Wrecks(this.wreckShapes, terrain, fog, effects, TEAM_RGB, (x, z, seen) => {
       // It hits the ground: a second blast, a scorched patch, a thud.
       this.scars.add(x, z, 1.6, true);

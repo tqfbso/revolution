@@ -164,12 +164,25 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
   }
 };
 
+/** The world's hash, worked out at most once a tick (it is asked for twice every 2 s in a shared game). */
+let hashOf: World | null = null;
+let hashTick = -1;
+let hashValue = 0;
+function hashNow(w: World): number {
+  if (hashOf !== w || hashTick !== w.tick) {
+    hashOf = w;
+    hashTick = w.tick;
+    hashValue = hashWorld(w);
+  }
+  return hashValue;
+}
+
 /** One tick: the players' orders, then the computer's, then the world moves. */
 function tick(g: Game, orders: Command[], quiet = false): number {
   const t0 = performance.now();
   g.tick(orders);
   const w = g.world;
-  if (!quiet && mode !== 'solo' && w.tick % HASH_EVERY === 0) hashes.push(w.tick, hashWorld(w));
+  if (!quiet && mode !== 'solo' && w.tick % HASH_EVERY === 0) hashes.push(w.tick, hashNow(w));
   return performance.now() - t0;
 }
 
@@ -471,7 +484,7 @@ function postSnapshot(w: World, simMs: number): void {
     felledSent = w.felledCount;
     snapshot.felled = w.felled.slice(0, w.felledCount);
   }
-  if (w.tick % TICK_RATE === 0) snapshot.hash = hashWorld(w);
+  if (w.tick % TICK_RATE === 0) snapshot.hash = hashNow(w);
   if (mode !== 'solo') {
     snapshot.net = { hashes, behind: mode === 'guest' ? frames.length - head : 0 };
     if (mode === 'host') {
@@ -480,17 +493,18 @@ function postSnapshot(w: World, simMs: number): void {
     }
     hashes = [];
   }
-  self.postMessage(snapshot, {
-    transfer: [
-      positions.buffer,
-      info.buffer,
-      kinds.buffer,
-      heading.buffer,
-      load.buffer,
-      hp.buffer,
-      aim.buffer,
-      events.buffer,
-      task.buffer,
-    ],
-  });
+  // Every typed array in the snapshot was made for it just now: hand them all over
+  // instead of copying them. A field must never be one of the world's own arrays (always
+  // `.slice()` it), or handing it over would empty the world's copy.
+  const transfer: ArrayBuffer[] = [];
+  for (const v of Object.values(snapshot)) {
+    if (
+      ArrayBuffer.isView(v) &&
+      v.buffer instanceof ArrayBuffer &&
+      v.byteLength === v.buffer.byteLength
+    ) {
+      if (!transfer.includes(v.buffer)) transfer.push(v.buffer);
+    }
+  }
+  self.postMessage(snapshot, { transfer });
 }

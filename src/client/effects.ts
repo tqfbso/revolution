@@ -228,7 +228,18 @@ export class Effects {
     bright: number,
   ): void {
     if (this.trN >= MAX_TRACERS) return;
-    this.tr.set([x0, y0, z0, x1, y1, z1, 0, life, width, bright], this.trN++ * 10);
+    const t = this.tr;
+    const o = this.trN++ * 10;
+    t[o] = x0;
+    t[o + 1] = y0;
+    t[o + 2] = z0;
+    t[o + 3] = x1;
+    t[o + 4] = y1;
+    t[o + 5] = z1;
+    t[o + 6] = 0;
+    t[o + 7] = life;
+    t[o + 8] = width;
+    t[o + 9] = bright;
   }
 
   /** Tank main gun: flash and smoke at the muzzle, a fast shell trace, a burst at the target. */

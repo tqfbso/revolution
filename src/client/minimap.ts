@@ -20,6 +20,8 @@ import type { StructureView } from './structures';
 import type { UnitView } from './units';
 import type { WorksView } from './works';
 
+const WHITE = [255, 255, 255] as const;
+
 const N = MAP_CELLS;
 const TERRAIN_RGB: Record<number, [number, number, number]> = {
   [T_FOREST]: [44, 62, 38],
@@ -243,7 +245,9 @@ export class Minimap {
   update(now: number): void {
     this.clock = now;
     // While a ping runs the map is redrawn more often, so the ring moves smoothly.
-    if (now - this.lastDraw < (this.pings.length > 0 ? 40 : 100)) return;
+    // (The ring runs 3.6 s; the dot that lingers after it needs no haste.)
+    const ringing = this.pings.some((p) => now - p.at < 3600);
+    if (now - this.lastDraw < (ringing ? 40 : 100)) return;
     this.lastDraw = now;
     if (this.baseVersion !== this.structures.version + this.works.version) this.paintBase();
     const px = this.image.data;
@@ -285,15 +289,16 @@ export class Minimap {
       // A shared army: a teammate's units in his colour, ours and nobody's in the army's.
       const mate = u.mateOf(i);
       const rgb = u.selected[i]
-        ? [255, 255, 255]
+        ? WHITE
         : mate >= 0 && u.ownerMarks
           ? (u.seatRgb[mate] ?? TEAM_RGB[team])
           : (TEAM_RGB[team] ?? TEAM_RGB[0]);
       // Two by two pixels, so a single unit is still findable.
-      for (const o of [c, c + 1, c + N, c + N + 1]) {
-        px[4 * o] = rgb[0];
-        px[4 * o + 1] = rgb[1];
-        px[4 * o + 2] = rgb[2];
+      for (let k = 0; k < 4; k++) {
+        const o = 4 * (c + (k & 1) + (k >> 1) * N);
+        px[o] = rgb[0];
+        px[o + 1] = rgb[1];
+        px[o + 2] = rgb[2];
       }
     }
     this.ctx.putImageData(this.image, 0, 0);

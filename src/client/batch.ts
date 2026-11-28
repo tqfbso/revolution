@@ -156,16 +156,17 @@ export class Batch {
   }
 
   /** Upload only the live part of the buffers. */
-  flush(): void {
+  /** Send what was written to the GPU: all of it, or only the instances from `from` on. */
+  flush(from = 0): void {
     this.mesh.count = this.n;
-    if (this.n === 0) return;
-    upload(this.mesh.instanceMatrix, this.n * 16);
-    upload(this.tint, this.n * 4);
+    if (this.n <= from) return;
+    upload(this.mesh.instanceMatrix, from * 16, this.n * 16);
+    upload(this.tint, from * 4, this.n * 4);
   }
 }
 
-function upload(attribute: THREE.InstancedBufferAttribute, length: number): void {
+function upload(attribute: THREE.InstancedBufferAttribute, start: number, end: number): void {
   attribute.clearUpdateRanges();
-  attribute.addUpdateRange(0, length);
+  attribute.addUpdateRange(start, end - start);
   attribute.needsUpdate = true;
 }

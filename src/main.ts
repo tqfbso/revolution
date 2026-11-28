@@ -1062,7 +1062,7 @@ async function start(): Promise<void> {
       sun.shadow.needsUpdate = true;
     }
     const c4 = performance.now();
-    if (pipeline && held.post) pipeline.render();
+    if (pipeline && held.post) pipeline.render(rts.distance);
     else renderer.render(scene, rts.camera);
     const c5 = performance.now();
     workMs = c5 - now;
