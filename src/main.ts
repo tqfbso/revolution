@@ -341,7 +341,12 @@ async function start(): Promise<void> {
       showPause();
     }
   };
+  let advanced: (() => void) | null = null;
   worker.onmessage = (e: MessageEvent<Snapshot>) => {
+    if ('advanced' in e.data) {
+      advanced?.();
+      return;
+    }
     seenTick = e.data.tick;
     structures.applySnapshot(e.data, performance.now() / 1000);
     works.applySnapshot(e.data);
@@ -999,7 +1004,12 @@ async function start(): Promise<void> {
       beep: () => sound.alert(1),
     });
   }
-  renderer.setAnimationLoop(() => {
+  // Film capture (`?capture=1`, tools/trailer): the clock is the caller's, one frame a call,
+  // and the camera can be put anywhere (`cine`), not only where the game's rig allows.
+  const capture = params.get('capture') === '1';
+  type Cine = { pos: number[]; target: number[]; fov: number; lod: number; roll: number };
+  const film: { cine: Cine | null } = { cine: null };
+  const frame = (draw = true): void => {
     const now = performance.now();
     const dtMs = now - last;
     last = now;
@@ -1009,7 +1019,20 @@ async function start(): Promise<void> {
     else if (governor.frame(dtMs, workMs)) apply(governor.levers);
     frameNo++;
     const dt = Math.min(dtMs / 1000, 0.1);
+    const shot = film.cine;
+    if (shot) rts.look(shot.target[0], shot.target[2], shot.lod);
     rts.update(dt);
+    if (shot) {
+      const cam = rts.camera;
+      if (cam.fov !== shot.fov) {
+        cam.fov = shot.fov;
+        cam.updateProjectionMatrix();
+      }
+      cam.position.set(shot.pos[0], shot.pos[1], shot.pos[2]);
+      cam.up.set(Math.sin(shot.roll), Math.cos(shot.roll), 0);
+      cam.lookAt(shot.target[0], shot.target[1], shot.target[2]);
+      cam.updateMatrixWorld();
+    }
     units.zoom = rts.distance;
     clutter.update(rts.distance);
     const cm = rts.camera.matrixWorld.elements;
@@ -1091,7 +1114,9 @@ async function start(): Promise<void> {
       sun.shadow.needsUpdate = true;
     }
     const c4 = performance.now();
-    if (pipeline && held.post) pipeline.render();
+    if (!draw) {
+      // Film capture running ahead to the moment a shot starts: everything moves, nothing is drawn.
+    } else if (pipeline && held.post) pipeline.render();
     else renderer.render(scene, rts.camera);
     const c5 = performance.now();
     workMs = c5 - now;
@@ -1110,7 +1135,20 @@ async function start(): Promise<void> {
     hud.stats.culled = units.stats.culled;
     hud.stats.particles = effects.count;
     hud.frame(dtMs);
-  });
+  };
+  let step: ((ms: number, draw?: boolean) => Promise<void>) | undefined;
+  if (capture) {
+    let clock = performance.now();
+    performance.now = () => clock;
+    step = async (ms: number, draw = true) => {
+      clock += ms;
+      await new Promise<void>((done) => {
+        advanced = done;
+        post({ type: 'advance', ms });
+      });
+      frame(draw);
+    };
+  } else renderer.setAnimationLoop(() => frame());
 
   // Read by automated performance checks.
   (window as unknown as { __revolution: unknown }).__revolution = {
@@ -1134,6 +1172,11 @@ async function start(): Promise<void> {
     // it is not handed to anyone who opens the console of the live game.
     send: params.get('debug') === '1' || import.meta.env.DEV ? send : undefined,
     look: (x: number, z: number, dist: number, yaw?: number) => rts.look(x, z, dist, yaw),
+    step,
+    film,
+    canvas,
+    heightAt: (x: number, z: number) => terrain.heightAt(x, z),
+    effects,
     camera: rts.camera,
     cameras,
     coop,

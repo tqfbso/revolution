@@ -90,7 +90,9 @@ export type ToWorker =
   | { type: 'alone' }
   /** Game speed (0.5 to 16) and pause: both only change when ticks run, never what a tick does. */
   | { type: 'speed'; speed: number }
-  | { type: 'pause'; paused: boolean };
+  | { type: 'pause'; paused: boolean }
+  /** Film capture (`?capture=1`): the clock is the caller's. Run this many milliseconds, then answer. */
+  | { type: 'advance'; ms: number };
 
 /** In `structStage`: the building is fortified (sandbagged and loopholed). */
 export const STRUCT_FORTIFIED = 64;

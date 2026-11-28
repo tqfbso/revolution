@@ -109,6 +109,8 @@ let speed = 1;
 /** Paused: no ticks run and orders wait in `pending`; they all start on the first tick after. */
 let paused = false;
 let timer: ReturnType<typeof setInterval> | undefined;
+/** Film capture: the sim only runs when told to (`advance`). */
+let manual = false;
 /** The state of the field works (World.worksRev) the client was last told about. */
 let worksSent = -1;
 /** How many felled cells (World.felledCount) the client was last told about. */
@@ -158,6 +160,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     }
   } else if (msg.type === 'speed') {
     speed = Math.min(Math.max(msg.speed, 0.5), 16);
+  } else if (msg.type === 'advance') {
+    // Film capture: no clock of our own from here on; each frame says how far to run.
+    manual = true;
+    if (game) {
+      accumulator += msg.ms * speed;
+      drain(game.world);
+    }
+    (self as unknown as Worker).postMessage({ advanced: true });
   } else if (msg.type === 'pause') {
     paused = msg.paused;
     lastTime = performance.now();
@@ -208,7 +218,7 @@ function follow(g: Game, now: number): void {
 }
 
 function pump(): void {
-  if (!game) return;
+  if (!game || manual) return;
   const world = game.world;
   const now = performance.now();
   if (mode === 'guest') {
@@ -221,8 +231,12 @@ function pump(): void {
   }
   accumulator += (now - lastTime) * speed;
   lastTime = now;
-  if (accumulator < TICK_MS) return;
+  drain(world);
+}
 
+/** Run the ticks the clock owes, and show the result. */
+function drain(world: World): void {
+  if (!game || accumulator < TICK_MS) return;
   let simMs = 0;
   let ticks = 0;
   while (accumulator >= TICK_MS && ticks < MAX_CATCH_UP_TICKS * speed) {
