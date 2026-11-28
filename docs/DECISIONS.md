@@ -3906,5 +3906,4 @@ gun and the rebels' rocket truck; air defence is tracked except Russia's Pantsir
 rebels' gun truck. A captured tank stays tracked. A convoy's pace is raised on the road too.
 Hungry and pinned vehicles get no bonus. Route finding does not yet prefer roads (cell costs
 are 1 or 2, too coarse for a 15% preference); on the city maps vehicles drive the streets
-anyway, and ridge, river and four corners have no `map.road` cells, so nothing changes
-there except on four corners' roads. Golden hashes moved (city and four corners).
+anyway. Golden hashes moved (city and four corners).
