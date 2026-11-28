@@ -3919,3 +3919,21 @@ team panel and the end screen can say who put it where.
   (supplies, fuel, credits, units, buildings) under the per-player score.
 - Checked with two headless players over `?net=local`: both screens showed the same books
   through 40+ hash checks, no desync. The real broker cannot be reached from the cloud.
+
+## Audit UX 1. Rings on the ground, coloured order marks, the fourth army's colour, a layout number (2026-11-28)
+
+From the code audit Fabio passed on (section 3B and 4.3):
+
+- Range rings: selecting mortars or guns draws an amber ring at their reach and a broken red
+  ring inside it where they cannot fire (too close); air defence and missile teams their
+  reach; scouts and drones a pale blue ring of how far they see; jammers a broken blue ring of
+  what they jam. Units of one kind within 10 m share a ring; 36 rings at most. Thin flat bands
+  on the ground, no glow (src/client/rings.ts).
+- Ambush circles stay on the ground, in the card's orange, for as long as anyone waits on
+  them; only your own army's (all with ?control=all). New snapshot field `ambushes`.
+- The ring an order leaves is coloured by what it does: green move, amber attack-move, red
+  attack or shell, blue into a house, a trench or a carrier.
+- The fourth army (green) has its colour on base buildings, garrison pips and flags; it was
+  grey.
+- New battle has a Layout number with Randomise: a fresh one each time the screen opens, or
+  type one to fight on the same ground again. It was always 1. `?seed=` still wins.

@@ -42,6 +42,15 @@ const DOUBLE_MS = 350;
  * with squads and carriers selected: mount up. U: dismount. Ctrl/Alt + 1..9: save the selection as a
  * control group; 1..9: recall it; twice: jump the camera to it.
  */
+/** What an order on the ground does, told by the colour of the ring it leaves. */
+type MarkTone = 'move' | 'attack' | 'fire' | 'enter';
+const MARK_COLOUR: Record<MarkTone, number> = {
+  move: 0x7dff8a, // go there
+  attack: 0xffd27a, // go there, fighting on the way
+  fire: 0xff6a55, // attack that, shell there
+  enter: 0x7fd8ff, // into a house, a trench or a carrier
+};
+
 export class Input {
   readonly marker: THREE.Mesh;
   private dragStart: { x: number; y: number } | null = null;
@@ -256,7 +265,7 @@ export class Input {
           y: fx(ground.z),
           smoke: true,
         });
-      this.mark(ground.x, ground.y + 0.15, ground.z);
+      this.mark(ground.x, ground.y + 0.15, ground.z, 'fire');
     }
   }
 
@@ -483,7 +492,7 @@ export class Input {
     if (structure >= 0 && (shell || this.enemyBase(structure))) {
       this.send({ type: CMD_ATTACK_STRUCTURE, units: ids, structure });
       const c = this.structures.centreOf(structure);
-      this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z);
+      this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z, 'fire');
       if (!ids.some((id) => KINDS[this.units.kindOf(id)].siege > 0)) {
         this.say(
           'Nothing selected can damage buildings: send infantry, engineers, tanks or guns',
@@ -499,7 +508,7 @@ export class Input {
       if (foot.length > 0) {
         this.send({ type: CMD_GARRISON, units: foot, structure });
         const c = this.structures.centreOf(structure);
-        this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z);
+        this.mark(c.x, this.structures.topOf(structure) + 0.2, c.z, 'enter');
         const rest = ids.filter((id) => !KINDS[this.units.kindOf(id)].garrison);
         if (rest.length > 0 && ground) {
           this.send({
@@ -517,7 +526,7 @@ export class Input {
       const guns = ids.filter((id) => KINDS[this.units.kindOf(id)].indirect);
       if (guns.length > 0) {
         this.send({ type: CMD_BOMBARD, units: guns, x: fx(ground.x), y: fx(ground.z) });
-        this.mark(ground.x, ground.y + 0.15, ground.z);
+        this.mark(ground.x, ground.y + 0.15, ground.z, 'fire');
         return;
       }
     }
@@ -539,7 +548,7 @@ export class Input {
       }
       const rest = ids.filter((id) => !armed.includes(id) && !guns.includes(id));
       if (rest.length > 0) this.send({ type: CMD_MOVE, units: rest, x: fx(ex), y: fx(ez) });
-      this.mark(ex, p[3 * enemy + 1] + 0.2, ez);
+      this.mark(ex, p[3 * enemy + 1] + 0.2, ez, 'fire');
       return;
     }
     // A field work under the pointer. The enemy's: whoever can, brings it down (guns shell
@@ -557,13 +566,13 @@ export class Input {
         if (rest.length > 0) {
           this.send({ type: attack ? CMD_ATTACK_MOVE : CMD_MOVE, units: rest, x: gx, y: gy });
         }
-        this.mark(ground.x, ground.y + 0.15, ground.z);
+        this.mark(ground.x, ground.y + 0.15, ground.z, 'enter');
         return;
       }
       const able = ids.filter((id) => canBreach(KINDS[u.kindOf(id)], work.kind));
       if (work.team !== u.playerTeam && able.length > 0) {
         this.send({ type: CMD_BREACH, units: able, x: gx, y: gy });
-        this.mark(ground.x, ground.y + 0.6, ground.z);
+        this.mark(ground.x, ground.y + 0.6, ground.z, 'fire');
         return;
       }
     }
@@ -573,7 +582,7 @@ export class Input {
     if (carrier >= 0 && squads.length > 0) {
       this.send({ type: CMD_LOAD, units: squads, carriers: [carrier] });
       const p = this.units.renderPos;
-      this.mark(p[3 * carrier], p[3 * carrier + 1] + 0.2, p[3 * carrier + 2]);
+      this.mark(p[3 * carrier], p[3 * carrier + 1] + 0.2, p[3 * carrier + 2], 'enter');
       return;
     }
     if (!ground) return;
@@ -622,7 +631,8 @@ export class Input {
     return best;
   }
 
-  private mark(x: number, y: number, z: number): void {
+  private mark(x: number, y: number, z: number, tone: MarkTone = 'move'): void {
+    (this.marker.material as THREE.MeshBasicNodeMaterial).color.setHex(MARK_COLOUR[tone]);
     this.marker.position.set(x, y, z);
     this.marker.visible = true;
     this.markerAge = 0;
@@ -639,7 +649,7 @@ export class Input {
       y: fx(z),
       ...(queue ? { queue: true } : {}),
     });
-    this.mark(x, this.terrain.heightAt(x, z) + 0.15, z);
+    this.mark(x, this.terrain.heightAt(x, z) + 0.15, z, attack ? 'attack' : 'move');
   }
 }
 
